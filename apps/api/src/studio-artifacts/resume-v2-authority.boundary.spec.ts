@@ -99,6 +99,8 @@ describe('Persisted resume generation authority boundary (regression guardrail)'
       jobRepository as any,
       assessmentRepository as any,
       backfillService as any,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
     );
 
     const resumeArtifactsService = {

@@ -384,8 +384,8 @@ export class StudioArtifactsService {
     @InjectRepository(FitAssessment)
     private readonly fitAssessmentRepository: Repository<FitAssessment>,
     private readonly baselineResumeV2BackfillService: BaselineResumeV2BackfillService,
-    private readonly resumeService?: ResumeService,
-    private readonly coverLettersService?: CoverLettersService,
+    private readonly resumeService: ResumeService,
+    private readonly coverLettersService: CoverLettersService,
   ) {}
 
   getContractVersion() {

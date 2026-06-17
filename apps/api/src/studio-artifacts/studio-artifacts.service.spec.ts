@@ -117,6 +117,8 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
       jobRepository,
       fitAssessmentRepository,
       baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
     );
     jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('derived-hash');
     jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('derived-hash');
@@ -199,6 +201,8 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
       jobRepository,
       fitAssessmentRepository,
       baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
     );
     jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('derived-hash');
     jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('derived-hash');
@@ -302,6 +306,8 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
       jobRepository,
       fitAssessmentRepository,
       baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
     );
     jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('resume-hash');
     jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('cover-hash');
@@ -391,6 +397,8 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
       jobRepository,
       fitAssessmentRepository,
       baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
     );
     jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('resume-hash');
     jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('cover-hash');
@@ -464,6 +472,8 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
       jobRepository,
       fitAssessmentRepository,
       baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
     );
     jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('resume-hash');
     jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('cover-hash');
@@ -620,6 +630,8 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
       jobRepository,
       fitAssessmentRepository,
       baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
     );
 
     const state = await service.readState({
@@ -713,6 +725,8 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
       jobRepository,
       fitAssessmentRepository,
       baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
     );
     jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('hash-2');
     jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('hash-2');
@@ -814,6 +828,8 @@ describe('StudioArtifactsService (unit): readState surfaces renderable resume pr
       jobRepository,
       fitAssessmentRepository,
       baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
     );
     // Make the artifact "current" for this test by forcing the derived inputsHash to match the stored one.
     jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('hash-1');
@@ -911,6 +927,8 @@ describe('StudioArtifactsService (unit): readState never erases renderable previ
       jobRepository,
       fitAssessmentRepository,
       baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
     );
     // Derived hashes intentionally do not match the stored ones.
     jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('derived-hash');
@@ -961,7 +979,16 @@ describe('StudioArtifactsService (unit): studio artifact scope upsert is idempot
       findOne,
     } as any;
 
-    const service = new StudioArtifactsService(repo);
+    const service = new StudioArtifactsService( 
+      repo,
+      { findOne: jest.fn() } as any,
+      { findOne: jest.fn() } as any,
+      { findOne: jest.fn() } as any,
+      { findOne: jest.fn() } as any,
+      { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
+    );
 
     const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -1015,6 +1042,8 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       { findOne: jest.fn() } as any,
       { findOne: jest.fn() } as any,
       { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
     );
   }
 
@@ -1468,6 +1497,8 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       jobRepository,
       fitAssessmentRepository,
       baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
     );
     jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('hash-1');
     jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('hash-1');
@@ -1556,6 +1587,8 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       jobRepository,
       fitAssessmentRepository,
       baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
     );
     jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('hash-1');
     jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('hash-1');
@@ -1621,3 +1654,4 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
     expect(state.coverLetter?.responseBody).not.toBeNull();
   });
 });
+
