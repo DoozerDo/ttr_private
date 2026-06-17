@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Baseline } from '../baseline/baseline.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
@@ -15,8 +15,8 @@ import { CoverLettersModule } from '../cover-letters/cover-letters.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([StudioArtifact, Baseline, BaselineVersion, BaselineParsed, FitAssessment, Job]),
-    ResumeModule,
-    CoverLettersModule,
+    forwardRef(() => ResumeModule),
+    forwardRef(() => CoverLettersModule),
   ],
   controllers: [StudioArtifactsController],
   providers: [StudioArtifactsService, BaselineResumeV2BackfillService],

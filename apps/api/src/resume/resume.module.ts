@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineSection } from '../baseline/baseline-section.entity';
@@ -34,7 +34,7 @@ import { ResumeService } from './resume.service';
     OpportunitiesModule,
     SupportModule,
     WorkflowIdempotencyModule,
-    StudioArtifactsModule,
+    forwardRef(() => StudioArtifactsModule),
   ],
   controllers: [ResumeController],
   providers: [ResumeService, GapAnalysisService, BaselineResumeV2BackfillService],

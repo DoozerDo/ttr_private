@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ComplianceModule } from '../compliance/compliance.module';
 import { GapAnalysisService } from '../analysis/gap-analysis.service';
@@ -17,7 +17,7 @@ import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-
     ComplianceModule,
     ApplicationsModule,
     WorkflowIdempotencyModule,
-    StudioArtifactsModule,
+    forwardRef(() => StudioArtifactsModule),
   ],
   controllers: [CoverLettersController],
   providers: [CoverLettersService, GapAnalysisService, BaselineResumeV2BackfillService],
