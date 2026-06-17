@@ -93,7 +93,11 @@ import type {
   DocumentGenerationExports,
   UserSafeDisplayPayload,
 } from '../documents/normalized-document.models';
-import { validateAnalysisContext } from '../common/analysis-context-binding';
+import {
+  buildPersistedFitAssessmentReadModelQuery,
+  loadPersistedFitAssessmentReadModel,
+  validateAnalysisContext,
+} from '../common/analysis-context-binding';
 import { filterComplianceFlagsByCanonicalClaims } from '../common/readiness-claim-truth';
 import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
 import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
@@ -417,14 +421,13 @@ export class CoverLettersService {
         draft.analysisAssessment?.overallScore ??
         (draft.job?.id && draft.baseline?.id
           ? (
-              await this.fitAssessmentRepository.findOne({
-                where: {
-                  userId,
-                  jobId: draft.job.id,
-                  baselineId: draft.baseline.id,
-                },
-                order: { createdAt: 'DESC' },
-              })
+              await loadPersistedFitAssessmentReadModel(
+                this.fitAssessmentRepository,
+                '',
+                userId,
+                draft.job.id,
+                draft.baseline.id,
+              )
             )?.overallScore ?? null
           : null);
       if (
@@ -1419,21 +1422,26 @@ export class CoverLettersService {
     }
 
     if (!analysisId) {
-      const assessmentForBaselineVersion = await this.fitAssessmentRepository.findOne({
-        where: {
-          userId,
-          jobId: job.id,
-          baselineId: baseline.id,
+      const assessmentForBaselineVersion = await buildPersistedFitAssessmentReadModelQuery(
+        this.fitAssessmentRepository,
+        '',
+        userId,
+        job.id,
+        baseline.id,
+      )
+        .andWhere('assessment.baselineVersion = :baselineVersion', {
           baselineVersion: baselineVersion.versionNumber ?? null,
-        },
-        order: { createdAt: 'DESC' },
-      });
+        })
+        .getOne();
       const fallbackAssessment =
         assessmentForBaselineVersion ??
-        (await this.fitAssessmentRepository.findOne({
-          where: { userId, jobId: job.id, baselineId: baseline.id },
-          order: { createdAt: 'DESC' },
-        }));
+        (await loadPersistedFitAssessmentReadModel(
+          this.fitAssessmentRepository,
+          '',
+          userId,
+          job.id,
+          baseline.id,
+        ));
       analysisId = fallbackAssessment?.id ?? '';
     }
 
@@ -1639,10 +1647,13 @@ export class CoverLettersService {
     const complianceConstraints = this.normalizeComplianceConstraints(
       input.complianceConstraints,
     );
-    const latestAssessment = await this.fitAssessmentRepository.findOne({
-      where: { userId, jobId: job.id, baselineId: baseline.id },
-      order: { createdAt: 'DESC' },
-    });
+    const latestAssessment = await loadPersistedFitAssessmentReadModel(
+      this.fitAssessmentRepository,
+      '',
+      userId,
+      job.id,
+      baseline.id,
+    );
     const gapInsights = oneTap
       ? { strengths: [], criticalGaps: [] }
       : this.gapAnalysisService.analyze({
