@@ -6273,6 +6273,66 @@ export class ResumeService {
   ) { 
     try {
     const analysisId = request.analysisId?.trim() ?? '';
+    if (analysisId && request.baselineId?.trim() && request.jobId?.trim() && request.baselineVersionId?.trim()) {
+      const studioArtifactsState = await this.studioArtifactsService.readState({
+        userId,
+        baselineId: request.baselineId.trim(),
+        baselineVersionId: request.baselineVersionId.trim(),
+        jobId: request.jobId.trim(),
+        analysisId,
+      });
+      const resumeReady = studioArtifactsState.resume?.status === 'COMPLETED' && studioArtifactsState.resume?.artifactCurrent;
+      const coverLetterReady =
+        studioArtifactsState.coverLetter?.status === 'COMPLETED' && studioArtifactsState.coverLetter?.artifactCurrent;
+      const assessmentReady = typeof studioArtifactsState.assessmentScore === 'number';
+
+      if (resumeReady && coverLetterReady && assessmentReady) {
+        return {
+          status: 'ready' as const,
+          blocked: false,
+          compliance_flags: [],
+          reasons: [],
+          canGenerateResume: true,
+          diagnostics: {
+            readinessSource: 'canonical_persisted_studio_state',
+            assessmentScore: studioArtifactsState.assessmentScore ?? null,
+            resumeArtifactCurrent: Boolean(studioArtifactsState.resume?.artifactCurrent),
+            coverLetterArtifactCurrent: Boolean(studioArtifactsState.coverLetter?.artifactCurrent),
+          },
+        } as any;
+      }
+
+      return {
+        status: 'blocked' as const,
+        blocked: true,
+        compliance_flags: [],
+        reasons: [
+          ...(assessmentReady
+            ? []
+            : [{
+                code: 'fit_score_unavailable',
+                message: 'Fit score unavailable for the canonical persisted Studio state.',
+              }]),
+          ...(resumeReady
+            ? []
+            : [{
+                code: 'resume_artifact_missing',
+                message: 'Persisted resume artifact is missing or stale.',
+              }]),
+          ...(coverLetterReady
+            ? []
+            : [{
+                code: 'cover_letter_artifact_missing',
+                message: 'Persisted cover letter artifact is missing or stale.',
+              }]),
+        ],
+        canGenerateResume: false,
+        diagnostics: {
+          readinessSource: 'canonical_persisted_studio_state',
+          assessmentScore: studioArtifactsState.assessmentScore ?? null,
+        },
+      } as any;
+    }
     const analysisAssessment = analysisId
       ? await validateAnalysisContext({
           analysisRepository: this.fitAssessmentRepository,

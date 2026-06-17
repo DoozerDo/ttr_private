@@ -3632,6 +3632,42 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('returns ready for canonical persisted Studio artifacts when resume and cover letter already exist', async () => {
+    const { service, studioArtifactsService } = buildService();
+    (studioArtifactsService.readState as jest.Mock).mockResolvedValueOnce({
+      status: 'ready',
+      baselineId: baseline.id,
+      jobId: job.id,
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: 'job-fingerprint-1',
+      generationContractVersion: 'studio-artifacts-v1',
+      assessmentScore: 90,
+      resume: {
+        status: 'COMPLETED',
+        artifactCurrent: true,
+        usableCurrent: true,
+      },
+      coverLetter: {
+        status: 'COMPLETED',
+        artifactCurrent: true,
+        usableCurrent: true,
+      },
+    } as any);
+
+    const readiness = await service.getGenerationReadiness('user-1', {
+      ...baseRequest,
+      analysisId: assessment.id,
+    } as any);
+
+    expect(readiness).toMatchObject({
+      status: 'ready',
+      blocked: false,
+      canGenerateResume: true,
+    });
+    expect((readiness as any)?.diagnostics?.readinessSource).toBe('canonical_persisted_studio_state');
+  });
+
   it('prefers ResumeV2 generation when persisted ResumeV2 is usable even if the feature flag is off (prevents legacy structured-empty failures)', async () => {
     const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
