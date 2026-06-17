@@ -1,4 +1,4 @@
-import { Injectable, UnprocessableEntityException } from '@nestjs/common';
+import { Inject, Injectable, UnprocessableEntityException, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
 import { Repository } from 'typeorm';
@@ -385,6 +385,7 @@ export class StudioArtifactsService {
     private readonly fitAssessmentRepository: Repository<FitAssessment>,
     private readonly baselineResumeV2BackfillService: BaselineResumeV2BackfillService,
     private readonly resumeService: ResumeService,
+    @Inject(forwardRef(() => CoverLettersService))
     private readonly coverLettersService: CoverLettersService,
   ) {}
 
