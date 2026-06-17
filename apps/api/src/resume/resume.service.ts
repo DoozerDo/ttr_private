@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
   Logger,
   UnprocessableEntityException,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
@@ -818,6 +820,7 @@ export class ResumeService {
     private readonly gapAnalysisService: GapAnalysisService,
     private readonly criticalFlowTrackerService: CriticalFlowTrackerService,
     private readonly workflowIdempotencyService: WorkflowIdempotencyService,
+    @Inject(forwardRef(() => StudioArtifactsService))
     private readonly studioArtifactsService: StudioArtifactsService,
     private readonly baselineResumeV2BackfillService?: BaselineResumeV2BackfillService,
   ) {}
