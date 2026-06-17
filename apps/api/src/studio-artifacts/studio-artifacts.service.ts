@@ -29,6 +29,8 @@ import {
   validateNormalizedResumeDocument,
 } from '../resume/resume-normalization';
 import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-backfill.service';
+import { ResumeService } from '../resume/resume.service';
+import { CoverLettersService } from '../cover-letters/cover-letters.service';
 import type { CustomerWorkflowState } from '../workflow/customer-workflow.service';
 
 export type StudioArtifactKind = 'resume' | 'cover_letter';
@@ -382,6 +384,8 @@ export class StudioArtifactsService {
     @InjectRepository(FitAssessment)
     private readonly fitAssessmentRepository: Repository<FitAssessment>,
     private readonly baselineResumeV2BackfillService: BaselineResumeV2BackfillService,
+    private readonly resumeService?: ResumeService,
+    private readonly coverLettersService?: CoverLettersService,
   ) {}
 
   getContractVersion() {
@@ -598,6 +602,7 @@ export class StudioArtifactsService {
     jobId: string;
     baselineVersionId: string;
     analysisId?: string | null;
+    recoveryAttempted?: boolean;
   }): Promise<StudioArtifactsState> {
     const errors: NonNullable<StudioArtifactsState['errors']> = [];
     const shouldLogIngest = process.env.RESUME_V2_INGEST_DEBUG === 'true';
@@ -964,6 +969,13 @@ export class StudioArtifactsService {
 
     const resumeRecordRaw = this.buildArtifactRecord(record, 'resume', resumeInputsHash);
     const coverRecordRaw = this.buildArtifactRecord(record, 'cover_letter', coverLetterInputsHash);
+    const resumeRecoveryBlocked =
+      Boolean(record) &&
+      (record?.resumeStatus === StudioArtifactLifecycleStatus.FAILED ||
+        record?.resumeStatus === StudioArtifactLifecycleStatus.MISSING) &&
+      (!resumeRecordRaw || !resumeRecordRaw.usableCurrent || !resumeRecordRaw.responseBody);
+    const coverRecoveryBlocked =
+      !coverRecordRaw || !coverRecordRaw.usableCurrent || !coverRecordRaw.responseBody;
 
     const isStructuredTemplateResult = (responseBody: Record<string, unknown> | null): boolean => {
       if (!responseBody) return false;
@@ -973,6 +985,31 @@ export class StudioArtifactsService {
         safeText(internal?.templateVersion) === 'structured-baseline-v1'
       );
     };
+
+    const exactLegacyResumeFailure =
+      record?.resumeStatus === StudioArtifactLifecycleStatus.FAILED &&
+      String(record?.resumeFailureMessage ?? '') === 'column Baseline.verifiedBaseline does not exist';
+    const shouldRecoverEligibleArtifacts =
+      !input.recoveryAttempted &&
+      typeof score === 'number' &&
+      score >= 80 &&
+      exactLegacyResumeFailure &&
+      (resumeRecoveryBlocked || coverRecoveryBlocked);
+    if (shouldRecoverEligibleArtifacts) {
+      const generationRequest = {
+        baselineId: input.baselineId,
+        baselineVersionId: input.baselineVersionId,
+        jobId: input.jobId,
+        analysisId: input.analysisId ?? null,
+        oneTap: true,
+        forceRegenerate: true,
+      } as any;
+      await Promise.all([
+        this.resumeService.generateResume(input.userId, generationRequest),
+        this.coverLettersService.generateCoverLetter(input.userId, generationRequest),
+      ]);
+      return this.readState({ ...input, recoveryAttempted: true });
+    }
 
     // Never drop persisted artifacts from readState; currentness/staleness must be indicated via metadata flags.
     const shouldMarkLegacyStale =

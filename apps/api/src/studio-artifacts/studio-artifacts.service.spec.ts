@@ -1483,4 +1483,141 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
     expect((state.resume as any)?.metadata?.analysisId).toBe('analysis-1');
     expect((state.coverLetter as any)?.metadata?.analysisId).toBe('analysis-1');
   });
+
+  it('recovers ready score 83 with stale failed legacy resume by regenerating both artifacts and returning usable canonical state', async () => {
+    const stored: any = {
+      id: 'artifact-1',
+      createdAt: new Date('2026-06-03T00:00:00.000Z'),
+      updatedAt: new Date('2026-06-03T00:01:00.000Z'),
+      resumeStatus: StudioArtifactLifecycleStatus.FAILED,
+      resumeInputsHash: 'hash-1',
+      resumeResponseBody: null,
+      resumeContent: null,
+      resumeFailureCode: 'legacy_failed',
+      resumeFailureMessage: 'column Baseline.verifiedBaseline does not exist',
+      resumeGenerationStartedAt: null,
+      resumeGeneratedAt: null,
+      resumeFailedAt: new Date('2026-06-03T00:00:30.000Z'),
+      resumeMetadata: { analysisId: 'analysis-1' },
+      coverLetterStatus: StudioArtifactLifecycleStatus.MISSING,
+      coverLetterInputsHash: 'hash-1',
+      coverLetterResponseBody: null,
+      coverLetterContent: null,
+      coverLetterFailureCode: null,
+      coverLetterFailureMessage: null,
+      coverLetterGenerationStartedAt: null,
+      coverLetterGeneratedAt: null,
+      coverLetterFailedAt: null,
+      coverLetterMetadata: { analysisId: 'analysis-1' },
+    };
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue(stored),
+      upsert: jest.fn().mockImplementation(async (_values: any) => ({ identifiers: [{ id: stored.id }] })),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        insert: jest.fn().mockReturnThis(),
+        values: jest.fn().mockReturnThis(),
+        orUpdate: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({}),
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(stored),
+      }),
+    } as any;
+    const baselineRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
+    } as any;
+    const baselineVersionRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }) } as any;
+    const jobRepository = { findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }) } as any;
+    const fitAssessmentRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ overallScore: 83, inputsHash: 'inputs-1' }),
+      }),
+    } as any;
+    const baselineResumeV2BackfillService = { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('hash-1');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('hash-1');
+
+    const resumeService = {
+      generateResume: jest.fn().mockImplementation(async () => {
+        stored.resumeStatus = StudioArtifactLifecycleStatus.COMPLETED;
+        stored.resumeInputsHash = 'hash-1';
+        stored.resumeResponseBody = {
+          status: 'success',
+          preview: {
+            resume: {
+              heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+              summary: 'Recovered resume summary.',
+              experience: [],
+              education: [],
+              competencies: [],
+            },
+          },
+        };
+        stored.resumeContent = 'resume-content';
+        stored.resumeGeneratedAt = new Date('2026-06-03T00:02:00.000Z');
+        stored.resumeFailedAt = null;
+        stored.resumeFailureCode = null;
+        stored.resumeFailureMessage = null;
+        return { status: 'success' };
+      }),
+    } as any;
+    const coverLettersService = {
+      generateCoverLetter: jest.fn().mockImplementation(async () => {
+        stored.coverLetterStatus = StudioArtifactLifecycleStatus.COMPLETED;
+        stored.coverLetterInputsHash = 'hash-1';
+        stored.coverLetterResponseBody = {
+          status: 'success',
+          preview: { coverLetter: { paragraphs: ['Dear Hiring Team,', 'Recovered cover letter.'] } },
+        };
+        stored.coverLetterContent = 'cover-content';
+        stored.coverLetterGeneratedAt = new Date('2026-06-03T00:02:00.000Z');
+        stored.coverLetterFailedAt = null;
+        stored.coverLetterFailureCode = null;
+        stored.coverLetterFailureMessage = null;
+        return { status: 'success' };
+      }),
+    } as any;
+    (service as any).resumeService = resumeService;
+    (service as any).coverLettersService = coverLettersService;
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    expect(resumeService.generateResume).toHaveBeenCalled();
+    expect(coverLettersService.generateCoverLetter).toHaveBeenCalled();
+    expect(state.status).not.toBe('MISSING');
+    expect(state.resume?.usableCurrent).toBe(true);
+    expect(state.resume?.responseBody).not.toBeNull();
+    expect(state.coverLetter).not.toBeNull();
+    expect(state.coverLetter?.usableCurrent).toBe(true);
+    expect(state.coverLetter?.responseBody).not.toBeNull();
+  });
 });

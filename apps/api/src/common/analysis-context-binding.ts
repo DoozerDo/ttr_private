@@ -107,13 +107,23 @@ export async function loadPersistedFitAssessmentReadModel(
   jobId?: string,
   baselineId?: string,
 ): Promise<PersistedFitAssessmentReadModel | null> {
-  const assessment = await buildPersistedFitAssessmentReadModelQuery(
-    repository,
-    assessmentId,
-    userId,
-    jobId,
-    baselineId,
-  ).getOne();
+  const hasQueryBuilder = typeof (repository as any)?.createQueryBuilder === 'function';
+  const assessment = hasQueryBuilder
+    ? await buildPersistedFitAssessmentReadModelQuery(
+        repository,
+        assessmentId,
+        userId,
+        jobId,
+        baselineId,
+      ).getOne()
+    : await repository.findOne?.({
+        where: {
+          ...(assessmentId?.trim() ? { id: assessmentId.trim() } : {}),
+          userId,
+          ...(jobId ? { jobId } : {}),
+          ...(baselineId ? { baselineId } : {}),
+        } as any,
+      });
 
   return assessment ? { ...assessment, jobAnalysis: null } : null;
 }
