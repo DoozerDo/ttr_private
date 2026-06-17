@@ -238,6 +238,109 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     expect(getOne).not.toHaveBeenCalled();
   });
 
+  it('does not execute the forbidden Baseline entity hydration SQL shape during readState', async () => {
+    const sqlFragments: string[] = [];
+    const queryBuilder: any = {};
+    const baselineRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn((value) => {
+          sqlFragments.push(JSON.stringify(value));
+          return queryBuilder;
+        }),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          {
+            baseline_id: 'base-1',
+            baseline_userId: 'u-1',
+            baseline_version: 0,
+            baseline_versionNumber: 1,
+            baseline_originalFilename: 'resume.pdf',
+            baseline_mimeType: 'application/pdf',
+            baseline_storagePath: '/tmp/resume.pdf',
+            baseline_hash: null,
+            baseline_status: 'ACTIVE',
+            baseline_isActive: true,
+            baseline_archivedAt: null,
+            baseline_originalBaselineScore: null,
+            baseline_latestBaselineScore: null,
+            baseline_latestAssessmentId: null,
+            baseline_firstAnalyzedAt: null,
+            baseline_lastAnalyzedAt: null,
+            baseline_isSynthetic: false,
+            baseline_syntheticScenarioKey: null,
+            baseline_syntheticRunId: null,
+            baseline_syntheticCreatedAt: null,
+            baseline_preserveFromCleanup: false,
+          },
+        ]),
+      }),
+    } as any;
+    queryBuilder.leftJoin = jest.fn().mockReturnThis();
+    queryBuilder.select = jest.fn((value) => {
+      sqlFragments.push(JSON.stringify(value));
+      return queryBuilder;
+    });
+    queryBuilder.where = jest.fn().mockReturnThis();
+    queryBuilder.andWhere = jest.fn().mockReturnThis();
+    queryBuilder.orderBy = jest.fn().mockReturnThis();
+    queryBuilder.addOrderBy = jest.fn().mockReturnThis();
+    queryBuilder.getRawMany = jest.fn().mockResolvedValue([
+      {
+        baseline_id: 'base-1',
+        baseline_userId: 'u-1',
+        baseline_version: 0,
+        baseline_versionNumber: 1,
+        baseline_originalFilename: 'resume.pdf',
+        baseline_mimeType: 'application/pdf',
+        baseline_storagePath: '/tmp/resume.pdf',
+        baseline_hash: null,
+        baseline_status: 'ACTIVE',
+        baseline_isActive: true,
+        baseline_archivedAt: null,
+        baseline_originalBaselineScore: null,
+        baseline_latestBaselineScore: null,
+        baseline_latestAssessmentId: null,
+        baseline_firstAnalyzedAt: null,
+        baseline_lastAnalyzedAt: null,
+        baseline_isSynthetic: false,
+        baseline_syntheticScenarioKey: null,
+        baseline_syntheticRunId: null,
+        baseline_syntheticCreatedAt: null,
+        baseline_preserveFromCleanup: false,
+      },
+    ]);
+    const service = new StudioArtifactsService(
+      { findOne: jest.fn().mockResolvedValue(null) } as any,
+      baselineRepository,
+      { findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }) } as any,
+      { findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }) } as any,
+      { findOne: jest.fn().mockResolvedValue({ overallScore: 90, inputsHash: 'inputs-1' }) } as any,
+      { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('derived-hash');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('derived-hash');
+
+    await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    const joinedSql = sqlFragments.join(' ');
+    expect(joinedSql).not.toContain('Baseline_verifiedBaseline');
+    expect(joinedSql).not.toContain('"Baseline"."verifiedBaseline"');
+    expect(joinedSql).not.toContain('Baseline__Baseline_sections');
+    expect(joinedSql).not.toContain('Baseline__Baseline_parsedRecords');
+  });
+
   it('types the readState workflowState slot with the canonical CustomerWorkflowState shape', async () => {
     const studioArtifactRepository = {
       findOne: jest.fn().mockResolvedValue({
