@@ -853,12 +853,6 @@ function buildFailureFromBackendRecord(
   };
 }
 
-function buildAssessmentAnalysisUrl(analysisId: string) {
-  const normalizedAnalysisId = trimId(analysisId);
-  if (!normalizedAnalysisId) return "";
-  return `/api/analysis/fit-assessments/${encodeURIComponent(normalizedAnalysisId)}`;
-}
-
 function trimString(value: unknown): string {
   const raw = typeof value === "string" ? value : value == null ? "" : String(value);
   if (!raw.trim()) return "";
@@ -6942,157 +6936,12 @@ export default function StudioPage() {
       setAssessmentUnsupportedRequirements(null);
       return;
     }
-    let canceled = false;
-    setAnalysisLoading(true);
+    // Studio reload no longer hydrates fit assessments directly.
+    // Fit score, review state, and persisted artifact state are derived from /api/studio/artifacts.
+    setAnalysis(null);
     setAnalysisError(null);
+    setAnalysisLoading(false);
     setAssessmentUnsupportedRequirements(null);
-    console.info("[studio] hydration_started", {
-      area: "studio",
-      operation: "hydrate_analysis",
-      status: "info",
-      code: "hydration_started",
-      analysisId: analysisIdToHydrate,
-    });
-    const loadAnalysis = async () => {
-      try {
-        const analysisUrl = buildAssessmentAnalysisUrl(analysisIdToHydrate);
-        const response = await fetch(analysisUrl, { cache: "no-store" });
-        const payload = await readResponsePayload(response);
-        if (canceled) return;
-        if (!response.ok) {
-          const message = sanitizeAnalysisError(payload);
-          setAnalysis(null);
-          setAnalysisError(message);
-          console.warn("[studio] hydration_failed", {
-            area: "studio",
-            operation: "hydrate_analysis",
-            status: "warn",
-            code: "hydration_failed",
-            analysisId: analysisIdToHydrate,
-            responseStatus: response.status,
-          });
-          return;
-        }
-        if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-          setAnalysis(null);
-          setAnalysisError(ANALYSIS_LOAD_ERROR_MESSAGE);
-          console.warn("[studio] hydration_failed", {
-            area: "studio",
-            operation: "hydrate_analysis",
-            status: "warn",
-            code: "hydration_failed",
-            analysisId: analysisIdToHydrate,
-            responseStatus: "invalid_payload",
-          });
-          return;
-        }
-        const nextAnalysis = payload as LatestAnalysis;
-        const nextAnalysisId = trimId((payload as { assessmentId?: unknown }).assessmentId);
-        const nextBaselineId = trimId((payload as { baselineId?: unknown }).baselineId);
-        if (!nextAnalysisId || !nextBaselineId) {
-          setAnalysis(null);
-          setAnalysisError(ANALYSIS_LOAD_ERROR_MESSAGE);
-          console.warn("[studio] hydration_failed", {
-            area: "studio",
-            operation: "hydrate_analysis",
-            status: "warn",
-            code: "hydration_failed",
-            analysisId: analysisIdToHydrate,
-            responseStatus: "missing_required_context",
-          });
-          return;
-        }
-        // Store the score separately so product readiness can recompute promptly after hydration,
-        // even if other state updates temporarily reset analysis.
-        const coerceScore = (value: unknown): number | null => {
-          if (typeof value === "number" && Number.isFinite(value)) return value;
-          if (typeof value === "string") {
-            const trimmed = value.trim();
-            if (!trimmed) return null;
-            const parsed = Number(trimmed);
-            return Number.isFinite(parsed) ? parsed : null;
-          }
-          return null;
-        };
-        const v2Score = (nextAnalysis as { scoring_v2?: { score?: unknown } | null } | null)?.scoring_v2?.score;
-        const directScore = (nextAnalysis as { score?: unknown } | null)?.score;
-        const overallScore = (nextAnalysis as { overallScore?: unknown } | null)?.overallScore;
-        setHydratedAnalysisScore(coerceScore(v2Score) ?? coerceScore(directScore) ?? coerceScore(overallScore) ?? null);
-        setAnalysis(nextAnalysis);
-        {
-          const rawUnsupported = [
-            ...(((nextAnalysis as any)?.verification_coverage?.unverifiedRequirements ?? []) as unknown[]),
-            ...(((nextAnalysis as any)?.gapAnalysis?.unverifiedRequirements ?? []) as unknown[]),
-          ];
-          const normalizedUnsupported = rawUnsupported
-            .map((requirement) =>
-              normalizeUserFacingRequirementLabel(
-                typeof requirement === "string" ? requirement : requirement == null ? null : String(requirement),
-                {
-                  sourceContext: null,
-                  issueCode: "unsupported_technology_claim",
-                },
-              ),
-            )
-            .filter((label): label is string => typeof label === "string" && label.length > 0);
-          setAssessmentUnsupportedRequirements(Array.from(new Set(normalizedUnsupported)));
-        }
-        setAnalysisError(null);
-        console.info("[studio] hydration_succeeded", {
-          area: "studio",
-          operation: "hydrate_analysis",
-          status: "info",
-          code: "hydration_succeeded",
-          analysisId: analysisIdToHydrate,
-          jobId: nextAnalysis?.jobId ?? null,
-          baselineId: nextAnalysis?.baselineId ?? null,
-          baselineVersionId: nextAnalysis?.baselineVersionId ?? null,
-        });
-        const analysisJobId = trimId((payload as { jobId?: unknown }).jobId);
-        const analysisBaselineId = trimId((payload as { baselineId?: unknown }).baselineId);
-        const analysisBaselineVersionId = trimId(
-          (payload as { baselineVersionId?: unknown }).baselineVersionId,
-        );
-        if (analysisJobId) {
-          setSelectedJobId(analysisJobId);
-        }
-        if (analysisBaselineId) {
-          setSelectedBaselineId(analysisBaselineId);
-        }
-        if (analysisBaselineVersionId) {
-          // Do not clobber an explicitly routed baselineVersionId (for example, immediately after successful reparse).
-          if (requestedBaselineVersionId && requestedBaselineVersionId.trim().length > 0) {
-            setSelectedBaselineVersionId(requestedBaselineVersionId);
-          } else {
-          setSelectedBaselineVersionId(analysisBaselineVersionId);
-          }
-        }
-      } catch (error) {
-        if (canceled) return;
-        setAnalysis(null);
-        setAnalysisError(
-          error instanceof Error && !isHtmlLikePayload(error.message)
-            ? error.message
-            : ANALYSIS_LOAD_ERROR_MESSAGE,
-        );
-        console.error("[studio] hydration_failed", {
-          area: "studio",
-          operation: "hydrate_analysis",
-          status: "error",
-          code: "hydration_failed",
-          analysisId: analysisIdToHydrate,
-          responseStatus: "exception",
-        });
-      } finally {
-        if (!canceled) {
-          setAnalysisLoading(false);
-        }
-      }
-    };
-    void loadAnalysis();
-    return () => {
-      canceled = true;
-    };
   }, [effectiveRequestedAnalysisId]);
 
   useEffect(() => {

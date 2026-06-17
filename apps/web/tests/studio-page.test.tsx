@@ -1064,14 +1064,13 @@ describe("Studio page UX", () => {
         return Promise.resolve(
           createResponse({
             status: "COMPLETED",
-              baselineId: "base-1",
-              jobId: "job-1",
-              baselineVersionId: "base-version-1",
-              baselineVersionHash: "hash-1",
-              assessmentScore: 84,
-              jobFingerprint: "job-fingerprint-1",
-              generationContractVersion: "studio-artifacts-v1",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
             assessmentScore: 84,
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
             resume: {
               status: "COMPLETED",
               inputsHash: "resume-hash",
@@ -1153,7 +1152,7 @@ describe("Studio page UX", () => {
       }
 
       if (rawUrl.includes("/api/analysis/fit-assessments/analysis-1")) {
-        return Promise.resolve(createResponse(createFitAssessment(84)));
+        throw new Error("Studio page must not call /api/analysis/fit-assessments");
       }
 
       if (rawUrl.includes("/api/baselines/base-1/versions")) {
@@ -1178,7 +1177,7 @@ describe("Studio page UX", () => {
     await waitFor(() => {
       const urls = fetchMock.mock.calls.map(([input]) => rawFetchUrl(input));
       expect(urls.some((url) => url.includes("/api/studio/artifacts"))).toBe(true);
-      expect(urls.some((url) => url.includes("/api/analysis/fit-assessments/analysis-1"))).toBe(true);
+      expect(urls.some((url) => url.includes("/api/analysis/fit-assessments/analysis-1"))).toBe(false);
     });
 
     // Persisted artifact is renderable (resume preview panel mounts).
