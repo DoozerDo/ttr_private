@@ -393,8 +393,8 @@ export class StudioArtifactsService {
     return ARTIFACT_CONTRACT_VERSION;
   }
 
-  private async loadCanonicalBaselineReadModel(userId: string, baselineId: string) {
-    const baselineRows = await this.baselineRepository
+  private buildCanonicalBaselineReadModelRowsQuery(userId: string, baselineId: string) {
+    return this.baselineRepository
       .createQueryBuilder('baseline')
       .leftJoin('baseline.sections', 'sections')
       .leftJoin('baseline.parsedRecords', 'parsedRecords')
@@ -443,8 +443,11 @@ export class StudioArtifactsService {
       .where('baseline.id = :baselineId', { baselineId })
       .andWhere('baseline.userId = :userId', { userId })
       .orderBy('sections.order', 'ASC')
-      .addOrderBy('parsedRecords.createdAt', 'DESC')
-      .getRawMany();
+      .addOrderBy('parsedRecords.createdAt', 'DESC');
+  }
+
+  private async loadCanonicalBaselineReadModel(userId: string, baselineId: string) {
+    const baselineRows = await this.buildCanonicalBaselineReadModelRowsQuery(userId, baselineId).getRawMany();
 
     if (!baselineRows.length) return null;
 
