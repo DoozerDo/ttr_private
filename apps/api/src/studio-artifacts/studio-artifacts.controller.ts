@@ -98,7 +98,16 @@ export class StudioArtifactsController {
 
       return state;
     } catch (error) {
-      const exception = error as { name?: unknown; message?: unknown; stack?: unknown };
+      const exception = error as {
+        name?: unknown;
+        message?: unknown;
+        stack?: unknown;
+        query?: unknown;
+        parameters?: unknown;
+        driverError?: unknown;
+        table?: unknown;
+        column?: unknown;
+      };
       throw new HttpException(
         {
           error: {
@@ -108,6 +117,11 @@ export class StudioArtifactsController {
               typeof exception.message === 'string' ? exception.message : String(error),
             failingFunction: 'StudioArtifactsService.readState',
             stackFirstFrame: getStackFirstFrame(exception.stack),
+            ...(typeof exception.query !== 'undefined' ? { query: exception.query } : {}),
+            ...(typeof exception.parameters !== 'undefined' ? { parameters: exception.parameters } : {}),
+            ...(typeof exception.driverError !== 'undefined' ? { driverError: exception.driverError } : {}),
+            ...(typeof exception.table !== 'undefined' ? { table: exception.table } : {}),
+            ...(typeof exception.column !== 'undefined' ? { column: exception.column } : {}),
           },
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
