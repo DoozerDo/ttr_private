@@ -87,7 +87,15 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     } as any;
 
     const baselineRepository = {
-      findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
     } as any;
     const baselineVersionRepository = {
       findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
@@ -161,7 +169,15 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     } as any;
 
     const baselineRepository = {
-      findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
     } as any;
     const baselineVersionRepository = {
       findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
@@ -254,10 +270,29 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
         coverLetterMetadata: {},
       } as any),
     } as any;
-    const baselineRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }) } as any;
+    const baselineRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
+    } as any;
     const baselineVersionRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }) } as any;
     const jobRepository = { findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }) } as any;
-    const fitAssessmentRepository = { findOne: jest.fn().mockResolvedValue({ overallScore: 90 }) } as any;
+    const fitAssessmentRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ overallScore: 90, inputsHash: 'inputs-1' }),
+      }),
+    } as any;
     const baselineResumeV2BackfillService = { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any;
 
     const service = new StudioArtifactsService(
@@ -324,10 +359,29 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
         coverLetterMetadata: { analysisId: 'analysis-1' },
       } as any),
     } as any;
-    const baselineRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }) } as any;
+    const baselineRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
+    } as any;
     const baselineVersionRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }) } as any;
     const jobRepository = { findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }) } as any;
-    const fitAssessmentRepository = { findOne: jest.fn().mockResolvedValue({ overallScore: 90 }) } as any;
+    const fitAssessmentRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ overallScore: 90, inputsHash: 'inputs-1' }),
+      }),
+    } as any;
     const baselineResumeV2BackfillService = { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any;
 
     const service = new StudioArtifactsService(
@@ -387,7 +441,17 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
         coverLetterMetadata: { analysisId: 'analysis-1' },
       } as any),
     } as any;
-    const baselineRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }) } as any;
+    const baselineRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
+    } as any;
     const baselineVersionRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }) } as any;
     const jobRepository = { findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }) } as any;
     const fitAssessmentRepository = { findOne: jest.fn().mockResolvedValue({ overallScore: 90, analysisId: 'transient-analysis' }) } as any;
@@ -526,7 +590,15 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
     } as any;
 
     const baselineRepository = {
-      findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
     } as any;
     const baselineVersionRepository = {
       findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
@@ -611,7 +683,15 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
     } as any;
 
     const baselineRepository = {
-      findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
     } as any;
     const baselineVersionRepository = {
       findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
@@ -704,7 +784,15 @@ describe('StudioArtifactsService (unit): readState surfaces renderable resume pr
     } as any;
 
     const baselineRepository = {
-      findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
     } as any;
     const baselineVersionRepository = {
       findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
@@ -793,7 +881,15 @@ describe('StudioArtifactsService (unit): readState never erases renderable previ
     } as any;
 
     const baselineRepository = {
-      findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
     } as any;
     const baselineVersionRepository = {
       findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
@@ -1131,7 +1227,16 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
     const baselineRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }) } as any;
     const baselineVersionRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }) } as any;
     const jobRepository = { findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }) } as any;
-    const fitAssessmentRepository = { findOne: jest.fn().mockResolvedValue({ overallScore: 90 }) } as any;
+    const fitAssessmentRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ overallScore: 90, inputsHash: 'inputs-1' }),
+      }),
+    } as any;
     const baselineResumeV2BackfillService = { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any;
 
     const service = new StudioArtifactsService(

@@ -4,6 +4,8 @@ import { createHash } from 'crypto';
 import { Repository } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Baseline } from '../baseline/baseline.entity';
+import { BaselineParsed } from '../baseline/baseline-parsed.entity';
+import { BaselineSection } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { loadPersistedFitAssessmentReadModel } from '../common/analysis-context-binding';
@@ -116,6 +118,48 @@ export type StudioArtifactsState = {
 type ArtifactPatch = QueryDeepPartialEntity<StudioArtifact>;
 type ArtifactWriteMetadata = Record<string, unknown> & {
   analysisId?: string | null;
+};
+
+type CanonicalBaselineReadModel = Pick<
+  Baseline,
+  | 'id'
+  | 'userId'
+  | 'version'
+  | 'versionNumber'
+  | 'originalFilename'
+  | 'mimeType'
+  | 'storagePath'
+  | 'hash'
+  | 'status'
+  | 'isActive'
+  | 'archivedAt'
+  | 'originalBaselineScore'
+  | 'latestBaselineScore'
+  | 'latestAssessmentId'
+  | 'firstAnalyzedAt'
+  | 'lastAnalyzedAt'
+  | 'isSynthetic'
+  | 'syntheticScenarioKey'
+  | 'syntheticRunId'
+  | 'syntheticCreatedAt'
+  | 'preserveFromCleanup'
+> & {
+  sections: Array<Pick<BaselineSection, 'id' | 'baselineId' | 'sectionType' | 'title' | 'content' | 'includePolicy' | 'order' | 'createdAt' | 'updatedAt'>>;
+  parsedRecords: Array<
+    Pick<
+      BaselineParsed,
+      | 'id'
+      | 'baselineId'
+      | 'sourceFileId'
+      | 'schemaVersion'
+      | 'sourceFormat'
+      | 'ingestedAt'
+      | 'parsedJson'
+      | 'resumeV2Json'
+      | 'flagsJson'
+      | 'createdAt'
+    >
+  >;
 };
 
 const ARTIFACT_CONTRACT_VERSION = 'studio-artifacts-v1';
@@ -328,6 +372,62 @@ export class StudioArtifactsService {
     return ARTIFACT_CONTRACT_VERSION;
   }
 
+  private async loadCanonicalBaselineReadModel(userId: string, baselineId: string) {
+    const baseline = await this.baselineRepository
+      .createQueryBuilder('baseline')
+      .leftJoin('baseline.sections', 'sections')
+      .leftJoin('baseline.parsedRecords', 'parsedRecords')
+      .select([
+        'baseline.id',
+        'baseline.userId',
+        'baseline.version',
+        'baseline.versionNumber',
+        'baseline.originalFilename',
+        'baseline.mimeType',
+        'baseline.storagePath',
+        'baseline.hash',
+        'baseline.status',
+        'baseline.isActive',
+        'baseline.archivedAt',
+        'baseline.originalBaselineScore',
+        'baseline.latestBaselineScore',
+        'baseline.latestAssessmentId',
+        'baseline.firstAnalyzedAt',
+        'baseline.lastAnalyzedAt',
+        'baseline.isSynthetic',
+        'baseline.syntheticScenarioKey',
+        'baseline.syntheticRunId',
+        'baseline.syntheticCreatedAt',
+        'baseline.preserveFromCleanup',
+        'sections.id',
+        'sections.baselineId',
+        'sections.sectionType',
+        'sections.title',
+        'sections.content',
+        'sections.includePolicy',
+        'sections.order',
+        'sections.createdAt',
+        'sections.updatedAt',
+        'parsedRecords.id',
+        'parsedRecords.baselineId',
+        'parsedRecords.sourceFileId',
+        'parsedRecords.schemaVersion',
+        'parsedRecords.sourceFormat',
+        'parsedRecords.ingestedAt',
+        'parsedRecords.parsedJson',
+        'parsedRecords.resumeV2Json',
+        'parsedRecords.flagsJson',
+        'parsedRecords.createdAt',
+      ])
+      .where('baseline.id = :baselineId', { baselineId })
+      .andWhere('baseline.userId = :userId', { userId })
+      .orderBy('sections.order', 'ASC')
+      .addOrderBy('parsedRecords.createdAt', 'DESC')
+      .getOne();
+
+    return baseline as CanonicalBaselineReadModel | null;
+  }
+
   async readState(input: {
     userId: string;
     baselineId: string;
@@ -355,11 +455,7 @@ export class StudioArtifactsService {
         input.jobId,
         input.baselineId,
       ),
-      this.baselineRepository.findOne({
-        where: { id: input.baselineId, userId: input.userId },
-        relations: { sections: true, parsedRecords: true },
-        order: { parsedRecords: { createdAt: 'DESC' } },
-      }),
+      this.loadCanonicalBaselineReadModel(input.userId, input.baselineId),
     ]);
 
     const baselineVersionHash = baselineVersion?.hash ?? baselineVersion?.id ?? null;
