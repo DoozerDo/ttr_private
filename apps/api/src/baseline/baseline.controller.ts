@@ -13,6 +13,7 @@ import {
   UseGuards,
   UseInterceptors,
   Body,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -37,6 +38,15 @@ type UploadBaselineResponse = {
 const stripBaselineVersioning = <T extends Record<string, unknown>>(baseline: T) => {
   const { version: _version, versions: _versions, ...rest } = baseline;
   return rest;
+};
+
+const getFirstStackFrame = (stack?: string): string | null => {
+  if (!stack) return null;
+  const frames = stack
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return frames[1] ?? frames[0] ?? null;
 };
 
 type StrengtheningBody = {
@@ -151,45 +161,63 @@ export class BaselineController {
     @UploadedFile() file: Express.Multer.File | undefined,
     @Req() request: Request & { user?: { id?: string } },
   ): Promise<UploadBaselineResponse> {
-    if (!file) {
-      throw new BadRequestException('No file uploaded');
+    try {
+      if (!file) {
+        throw new BadRequestException('No file uploaded');
+      }
+
+      const userId = request.user?.id;
+
+      if (!userId) {
+        throw new BadRequestException('Invalid user context');
+      }
+
+      const parseResult = await this.baselineService.buildSectionsFromFile(file);
+
+      const result = await this.baselineService.createBaseline(
+        userId,
+        {
+          originalname: file.originalname,
+          mimetype: file.mimetype,
+          path: file.path,
+        },
+        parseResult,
+      );
+
+      const canonical = result.ingestion?.canonical;
+      const systemFlags = canonical?.system_generated_read_only;
+
+      return {
+        baseline: stripBaselineVersioning(
+          result.baseline as unknown as Record<string, unknown>,
+        ),
+        baselineId: result.baseline.id,
+        schemaVersion: canonical?.schema_version ?? 'baseline_schema_v1',
+        userVerified: canonical?.user_verified ?? false,
+        rolesCount: canonical?.experience?.length ?? 0,
+        toolsCount: canonical?.tooling_and_platforms?.tools?.length ?? 0,
+        flagsSummary: {
+          missingFields: systemFlags?.missing_fields?.length ?? 0,
+          lowConfidence: systemFlags?.low_confidence_extractions?.length ?? 0,
+        },
+      };
+    } catch (error) {
+      const exceptionName = error instanceof Error ? error.name : 'Error';
+      const exceptionMessage =
+        error instanceof Error ? error.message : String(error ?? 'Unknown error');
+      const stack = error instanceof Error ? error.stack : undefined;
+      const failingFunction =
+        stack?.match(/at\s+([^(<\s]+)\s*\(/)?.[1] ??
+        stack?.match(/at\s+([^\s]+)$/)?.[1] ??
+        'uploadBaseline';
+
+      throw new InternalServerErrorException({
+        exceptionName,
+        exceptionMessage,
+        failingFunction,
+        firstStackFrame: getFirstStackFrame(stack),
+      });
     }
-
-    const userId = request.user?.id;
-
-    if (!userId) {
-      throw new BadRequestException('Invalid user context');
-    }
-
-    const parseResult = await this.baselineService.buildSectionsFromFile(file);
-
-    const result = await this.baselineService.createBaseline(
-      userId,
-      {
-        originalname: file.originalname,
-        mimetype: file.mimetype,
-        path: file.path,
-      },
-      parseResult,
-    );
-
-    const canonical = result.ingestion?.canonical;
-    const systemFlags = canonical?.system_generated_read_only;
-
-    return {
-      baseline: stripBaselineVersioning(
-        result.baseline as unknown as Record<string, unknown>,
-      ),
-      baselineId: result.baseline.id,
-      schemaVersion: canonical?.schema_version ?? 'baseline_schema_v1',
-      userVerified: canonical?.user_verified ?? false,
-      rolesCount: canonical?.experience?.length ?? 0,
-      toolsCount: canonical?.tooling_and_platforms?.tools?.length ?? 0,
-      flagsSummary: {
-        missingFields: systemFlags?.missing_fields?.length ?? 0,
-        lowConfidence: systemFlags?.low_confidence_extractions?.length ?? 0,
-      },
-    };
   }
 
   @Post(':id/reparse')
