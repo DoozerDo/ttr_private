@@ -602,10 +602,29 @@ const ingestionResult = {
     expect(manager.create).toHaveBeenCalled();
     const created = manager.create.mock.calls[0][1];
     expect(created.resumeV2Json).toBeTruthy();
+    expect(created.resumeV2Json?.heading).toEqual(
+      expect.objectContaining({
+        name: 'Test Person',
+        contactLine: 'Test City',
+      }),
+    );
     expect(Array.isArray(created.parsedJson?.experience)).toBe(true);
     expect(created.parsedJson.experience.length).toBeGreaterThan(0);
     expect(Array.isArray(created.resumeV2Json?.experience)).toBe(true);
     expect(created.resumeV2Json.experience.length).toBeGreaterThan(0);
+    expect(created.resumeV2Json?.readiness).toEqual(
+      expect.objectContaining({
+        status: 'usable',
+        usable: true,
+      }),
+    );
+    expect(created.resumeV2Json?.diagnostics).toEqual(
+      expect.objectContaining({
+        missingRequiredFields: [],
+        validationReasons: [],
+      }),
+    );
+    expect(created.resumeV2Json?.experience?.[0]?.evidence?.length).toBeGreaterThan(0);
     const validation = validateNormalizedResumeDocument(created.resumeV2Json);
     expect(validation.valid).toBe(true);
   });

@@ -69,6 +69,118 @@ export type ResumeV2Usability = {
   reasons: string[];
 };
 
+export type BaselineFileReadinessStatus = 'usable' | 'needs_review';
+
+export type BaselineFileDiagnostics = {
+  missingRequiredFields: string[];
+  validationReasons: string[];
+  validationFailures: Array<{
+    path: string;
+    field: string;
+    message: string;
+  }>;
+};
+
+export type BaselineFileRecord = {
+  heading: {
+    name: string;
+    contactLine: string;
+    links?: string[];
+  };
+  summary?: string;
+  competencies?: string[];
+  skills?: string[];
+  experience: Array<
+    NormalizedResumeDocument['experience'][number] & {
+      evidence?: Array<{
+        id: string;
+        text: string;
+        source?: 'parsed_baseline' | 'structured_sections' | 'derived_from_bullets';
+      }>;
+    }
+  >;
+  education?: Array<
+    NonNullable<NormalizedResumeDocument['education']>[number] & {
+      evidence?: Array<{
+        id: string;
+        text: string;
+        source?: 'parsed_baseline' | 'structured_sections';
+      }>;
+    }
+  >;
+  certifications?: string[];
+  diagnostics: BaselineFileDiagnostics;
+  readiness: {
+    status: BaselineFileReadinessStatus;
+    usable: boolean;
+  };
+};
+
+function collectBaselineDiagnostics(document: NormalizedResumeDocument): BaselineFileDiagnostics {
+  const validation = validateNormalizedResumeDocument(document);
+  const failures = buildNormalizedResumeValidationFailures(document);
+  const missingRequiredFields = Array.from(
+    new Set(
+      failures
+        .filter((failure) => ['heading.name', 'heading.contactLine'].includes(failure.path) || failure.path.startsWith('experience['))
+        .map((failure) => failure.path),
+    ),
+  );
+
+  return {
+    missingRequiredFields,
+    validationReasons: validation.reasons,
+    validationFailures: failures.map((failure) => ({
+      path: failure.path,
+      field: failure.field,
+      message: failure.message,
+    })),
+  };
+}
+
+function buildBaselineFileStatus(diagnostics: BaselineFileDiagnostics): BaselineFileReadinessStatus {
+  return diagnostics.missingRequiredFields.length === 0 && diagnostics.validationReasons.length === 0
+    ? 'usable'
+    : 'needs_review';
+}
+
+function buildEvidenceReferences(input: {
+  parsedEvidence?: Array<Record<string, unknown>> | null;
+  bullets?: string[];
+  source: 'parsed_baseline' | 'structured_sections';
+}) {
+  const parsedEvidence = Array.isArray(input.parsedEvidence)
+    ? input.parsedEvidence
+        .map((evidence, index) => {
+          const text = trimToText(evidence?.text);
+          if (!text) return null;
+          return {
+            id: trimToText(evidence?.id) || `evidence-${index}`,
+            text,
+            source: input.source,
+          };
+        })
+        .filter(
+          (
+            value,
+          ): value is { id: string; text: string; source: 'parsed_baseline' | 'structured_sections' } =>
+            Boolean(value),
+        )
+    : [];
+
+  if (parsedEvidence.length) return parsedEvidence;
+
+  return (input.bullets ?? [])
+    .map((bullet, index) => {
+      const text = trimToText(bullet);
+      if (!text) return null;
+      return { id: `derived-bullet-${index}`, text, source: 'derived_from_bullets' as const };
+    })
+    .filter(
+      (value): value is { id: string; text: string; source: 'derived_from_bullets' } => Boolean(value),
+    );
+}
+
 export function evaluateResumeV2Usability(resumeV2Json: unknown): ResumeV2Usability {
   if (!resumeV2Json || typeof resumeV2Json !== 'object') {
     return { usable: false, usableExperienceCount: 0, reasons: ['missing_resume_v2'] };
@@ -115,7 +227,7 @@ export function assertUsableResumeV2(resumeV2Json: unknown) {
 export function buildValidatedResumeV2FromParsedBaseline(
   parsedBaseline: Record<string, unknown>,
   baselineSections?: Array<Record<string, unknown>> | null,
-): NormalizedResumeDocument {
+): BaselineFileRecord {
   const shouldLog = process.env.RESUME_V2_INGEST_DEBUG === 'true';
   const baselineId = String(parsedBaseline['baseline_id'] ?? '');
   let lastParsedExperienceCount: number | null = null;
@@ -564,7 +676,52 @@ export function buildValidatedResumeV2FromParsedBaseline(
     });
   }
 
-  return normalized;
+  const canonicalExperience = Array.isArray((parsedBaseline as any)?.experience)
+    ? ((parsedBaseline as any).experience as Array<Record<string, unknown>>)
+    : [];
+  const canonicalEducation = Array.isArray((parsedBaseline as any)?.education)
+    ? ((parsedBaseline as any).education as Array<Record<string, unknown>>)
+    : [];
+  const diagnostics = collectBaselineDiagnostics(normalized);
+  const baselineFile = {
+    heading: {
+      name: normalized.heading.name,
+      contactLine: normalized.heading.contactLine,
+      ...(normalized.heading.links?.length ? { links: normalized.heading.links } : {}),
+    },
+    ...(normalized.summary ? { summary: normalized.summary } : {}),
+    ...(normalized.competencies?.length ? { competencies: normalized.competencies } : {}),
+    ...(normalized.coreCompetencies?.length ? { skills: normalized.coreCompetencies } : {}),
+    experience: normalized.experience.map((entry, index) => ({
+      ...entry,
+      evidence: buildEvidenceReferences({
+        parsedEvidence: canonicalExperience[index]?.evidence as Array<Record<string, unknown>> | null,
+        bullets: entry.bullets,
+        source: 'parsed_baseline',
+      }),
+    })),
+    ...(Array.isArray(normalized.education)
+      ? {
+          education: normalized.education.map((entry, index) => ({
+            ...entry,
+            evidence: buildEvidenceReferences({
+              parsedEvidence: canonicalEducation[index]?.evidence as Array<Record<string, unknown>> | null,
+              source: 'parsed_baseline',
+            }),
+          })),
+        }
+      : {}),
+    certifications: Array.isArray((parsedBaseline as any)?.certifications)
+      ? ((parsedBaseline as any).certifications as unknown[]).map((value) => trimToText(value)).filter(Boolean)
+      : [],
+    diagnostics,
+    readiness: {
+      status: buildBaselineFileStatus(diagnostics),
+      usable: diagnostics.missingRequiredFields.length === 0 && diagnostics.validationReasons.length === 0,
+    },
+  } as BaselineFileRecord;
+
+  return baselineFile;
 }
 
 
