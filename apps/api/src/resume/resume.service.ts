@@ -4861,7 +4861,7 @@ export class ResumeService {
 	      return Object.keys(result).length ? result : null;
 	    })();
 	    lastResumeGenerationCheckpoint = 'normalized_document_built';
-	        const response: ResumeGenerationResponse = {
+	        const response: ResumeGenerationResponse & { internalTrace?: { usedEvidenceIds: string[] } } = {
 	          ok: true,
 	          status: 'success',
 	          generationStatus: 'success',
@@ -4886,6 +4886,9 @@ export class ResumeService {
       preview: {
         resume: sanitizedPreviewDocument,
       },
+      internalTrace: {
+        usedEvidenceIds: resumeTraceAudit.debugTrace.selectedEvidence ?? [],
+      } as any,
       trackerEntryId: trackerEntry?.id ?? null,
       trackerStatus: trackerEntry?.status ?? null,
       opportunityId: opportunity?.id ?? null,
@@ -5915,7 +5918,7 @@ export class ResumeService {
           gapGuidance: null,
           display: this.buildSuccessDisplayPayload(),
 	          safeDisplay: this.buildSuccessDisplayPayload(),
-		          internal: {
+		            internal: {
 		            minimalFallback: true,
 		            resumeGenerationMode: 'top_level_fail_safe_minimal',
 		            resumeFailSafeMinimalUsed: true,
