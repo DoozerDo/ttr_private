@@ -18,6 +18,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Express } from 'express';
+import { QueryFailedError } from 'typeorm';
 import { BaselineService } from './baseline.service';
 import { BaselineVersionService } from './baseline-version.service';
 import { CloneFitReviewBaselineDto } from './dto/fit-review-clone.dto';
@@ -210,12 +211,30 @@ export class BaselineController {
         stack?.match(/at\s+([^(<\s]+)\s*\(/)?.[1] ??
         stack?.match(/at\s+([^\s]+)$/)?.[1] ??
         'uploadBaseline';
+      const queryFailedError = error instanceof QueryFailedError ? error : null;
+      const driverError = queryFailedError?.driverError as
+        | { detail?: unknown; message?: unknown }
+        | undefined;
 
       throw new InternalServerErrorException({
         exceptionName,
         exceptionMessage,
         failingFunction,
         firstStackFrame: getFirstStackFrame(stack),
+        query: queryFailedError?.query ?? null,
+        parameters: queryFailedError?.parameters ?? null,
+        driverError: driverError
+          ? {
+              detail:
+                typeof driverError.detail === 'string'
+                  ? driverError.detail
+                  : driverError.detail ?? null,
+              message:
+                typeof driverError.message === 'string'
+                  ? driverError.message
+                  : driverError.message ?? null,
+            }
+          : null,
       });
     }
   }
