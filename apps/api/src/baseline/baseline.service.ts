@@ -988,18 +988,13 @@ export class BaselineService {
                   ...existingByHash,
                   status: BaselineStatus.ACTIVE,
                   archivedAt: null,
-                  verifiedBaseline: this.buildVerifiedBaseline({
-                    sourceText: parseResult?.ingestion?.rawText ?? '',
-                    ingestion: parseResult?.ingestion,
-                    sections: existingByHash.sections ?? [],
-                  }),
                 } as Baseline),
               baselineId: existingByHash.id,
               ingestion: parseResult?.ingestion,
               verifiedBaseline: this.buildVerifiedBaseline({
                 sourceText: parseResult?.ingestion?.rawText ?? '',
                 ingestion: parseResult?.ingestion,
-                sections: revived?.sections ?? existingByHash.sections ?? [],
+                sections: revived?.sections ?? [],
               }),
             } as BaselineCreationResult;
           });
@@ -1037,7 +1032,7 @@ export class BaselineService {
             verifiedBaseline: this.buildVerifiedBaseline({
               sourceText: parseResult?.ingestion?.rawText ?? '',
               ingestion: parseResult?.ingestion,
-              sections: existing.sections ?? [],
+              sections: [],
             }),
           } as BaselineCreationResult;
         }
@@ -1216,11 +1211,16 @@ export class BaselineService {
   private async findBaselineByUserAndHash(
     userId: string,
     hash: string,
-  ): Promise<Baseline | null> {
-    return this.baselineRepository.findOne({
-      where: { userId, hash },
-      order: { createdAt: 'DESC' },
-    });
+  ): Promise<BaselineLibraryRow | null> {
+    const baseline = await this.applyBaselineLibrarySafeSelect(
+      this.baselineRepository.createQueryBuilder('baseline'),
+    )
+      .where('baseline.userId = :userId', { userId })
+      .andWhere('baseline.hash = :hash', { hash })
+      .orderBy('baseline.createdAt', 'DESC')
+      .getRawOne<BaselineLibraryRowRaw>();
+
+    return baseline ? this.mapRawBaselineLibraryRow(baseline) : null;
   }
 
   private isPostgresUniqueViolation(error: unknown, constraintName: string): boolean {
@@ -1285,7 +1285,6 @@ export class BaselineService {
       archivedAt: null,
       isActive: shouldBecomeActive,
       sections: sectionPayloads,
-      verifiedBaseline,
     });
 
     const savedBaseline = await manager.save(baseline);
