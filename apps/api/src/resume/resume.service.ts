@@ -4887,7 +4887,7 @@ export class ResumeService {
         resume: sanitizedPreviewDocument,
       },
       internalTrace: {
-        usedEvidenceIds: resumeTraceAudit.debugTrace.selectedEvidence ?? [],
+        usedEvidenceIds: Object.values(resumeTraceAudit.traceMap).flat().filter(Boolean),
       } as any,
       trackerEntryId: trackerEntry?.id ?? null,
       trackerStatus: trackerEntry?.status ?? null,
@@ -5495,6 +5495,10 @@ export class ResumeService {
             artifactId,
           },
         },
+      };
+      (response as any).internalTrace = {
+        ...(response as any).internalTrace ?? {},
+        usedEvidenceIds: Object.values(resumeTraceAudit.traceMap).flat().filter(Boolean),
       };
     }
     try {
@@ -6169,7 +6173,7 @@ export class ResumeService {
                 qualityGateStatus: qualityGate.status,
                 resumeArtifactInvalidDiagnostics,
               },
-	            });
+            });
 	          }
 	        } catch (persistErr) {
 	          // Fail-safe must still honor the Studio contract: if persistence fails, the request is not successful.
