@@ -324,7 +324,7 @@ type FitScoreResponse = {
   dimensionScores?: FitAssessment['dimensionScores'];
   complianceFlags?: FitAssessment['complianceFlags'];
   jobAnalysis?: JobAnalysis | null;
-  fitScore?: FitAssessment['fitScore'];
+  fitScore?: FitScore | null;
   compliance_debug?: ComplianceDebugTrace;
   summary?: string;
   fit_score_debug?: FitScoreDebugBundle;
@@ -3531,7 +3531,6 @@ export class AnalysisService {
         confidenceScore: confidenceResult.confidenceScore,
         confidenceReasons: confidenceResult.confidenceReasons,
         scoringReliability,
-        fitScore,
         ...(scoringReliabilityReason ? { scoringReliabilityReason } : {}),
       });
       if (syntheticMetadata?.isSynthetic) {
@@ -3735,7 +3734,7 @@ export class AnalysisService {
         likelyUnderestimatedFit: scoringV2.likelyUnderestimatedFit,
         scorePresentationMode: scoringV2.scorePresentationMode,
         jobAnalysis: null,
-        fitScore: savedAssessment.fitScore ?? null,
+        fitScore,
         baseline_version_hash:
           compliance.audit.baselineVersionHash ?? baselineVersionHash,
         latestAssessmentSummary: {
@@ -4270,7 +4269,7 @@ export class AnalysisService {
       confidenceReasons: assessment.confidenceReasons ?? [],
       createdAt: assessment.createdAt,
       jobAnalysis: null,
-      fitScore: null,
+      fitScore: assessment.overallScore ?? null,
       scoring_v2: refreshedScoringV2,
       supportingSignals,
       baselineEvidence,
@@ -4532,7 +4531,7 @@ export class AnalysisService {
       confidenceReasons: assessment.confidenceReasons ?? [],
       createdAt: assessment.createdAt,
       jobAnalysis: null,
-      fitScore: null,
+      fitScore: assessment.overallScore ?? null,
       scoring_v2: assessment.scoringV2,
       supportingSignals: [],
       baselineEvidence: [],
