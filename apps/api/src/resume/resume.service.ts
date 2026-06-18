@@ -3440,7 +3440,7 @@ export class ResumeService {
     const identity = resolveBaselineIdentity(baseline);
     const resolvedIdentityForTemplate: ResumeTemplateIdentityLike = {
       name: identity?.fullName ?? 'Candidate',
-      contactLine: identity?.location ?? '',
+      contactLine: identity?.contactLine ?? identity?.location ?? '',
       links: [],
     };
 

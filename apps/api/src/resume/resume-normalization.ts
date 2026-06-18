@@ -1222,7 +1222,7 @@ export function buildNormalizedResumeDocument(
     ? `(${inferredPhoneDigits.slice(0, 3)}) ${inferredPhoneDigits.slice(3, 6)}-${inferredPhoneDigits.slice(6)}`
     : inferredPhoneSource;
 
-  const rawContactValues = [identity?.location, inferredEmail, inferredPhone]
+  const rawContactValues = [identity?.contactLine, identity?.location, inferredEmail, inferredPhone]
     .flatMap((value) => normalizeLine(String(value ?? '')).split('|').map(normalizeLine))
     .filter(Boolean)
     .filter((value) => !isPaginationArtifact(value));
