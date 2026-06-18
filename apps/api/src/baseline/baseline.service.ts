@@ -1763,9 +1763,12 @@ export class BaselineService {
   ) {
     try {
       return await this.baselineRepository.manager.transaction(async (manager) => {
-        const baseline = await manager.findOne(Baseline, {
-          where: { id: baselineId, userId },
-        });
+        const baseline = await this.applyBaselineLibrarySafeSelect(
+          manager.createQueryBuilder(Baseline, 'baseline'),
+        )
+          .where('baseline.id = :baselineId', { baselineId })
+          .andWhere('baseline.userId = :userId', { userId })
+          .getRawOne<BaselineLibraryRowRaw>();
 
         if (!baseline) {
           throw new NotFoundException('Baseline not found');
@@ -1781,10 +1784,12 @@ export class BaselineService {
           // archive and leave the user with no current baseline until a new upload is created.
         }
 
-        const baselines = await manager.find(Baseline, {
-          where: { userId },
-          order: { createdAt: 'DESC' },
-        });
+        const baselines = await this.applyBaselineLibrarySafeSelect(
+          manager.createQueryBuilder(Baseline, 'baseline'),
+        )
+          .where('baseline.userId = :userId', { userId })
+          .orderBy('baseline.createdAt', 'DESC')
+          .getRawMany<BaselineLibraryRowRaw>();
 
         const nextActiveBaselineId =
           status === BaselineStatus.ACTIVE
@@ -1821,11 +1826,14 @@ export class BaselineService {
           },
         );
 
-        const updated = await manager.findOne(Baseline, {
-          where: { id: baseline.id, userId },
-        });
+        const updated = await this.applyBaselineLibrarySafeSelect(
+          manager.createQueryBuilder(Baseline, 'baseline'),
+        )
+          .where('baseline.id = :baselineId', { baselineId: baseline.id })
+          .andWhere('baseline.userId = :userId', { userId })
+          .getRawOne<BaselineLibraryRowRaw>();
 
-        return updated ?? baseline;
+        return updated ? this.mapRawBaselineLibraryRow(updated) : this.mapRawBaselineLibraryRow(baseline);
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
