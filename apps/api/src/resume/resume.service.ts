@@ -6386,6 +6386,21 @@ export class ResumeService {
       }
 
       recordResumeEvent(false);
+      const failureResponseBody =
+        error instanceof UnprocessableEntityException ? (error.getResponse() as any) : null;
+      const failureCode =
+        failureResponseBody?.error?.code ??
+        failureResponseBody?.code ??
+        (error instanceof Error ? error.name : 'generation_failed');
+      const failureMessage =
+        failureResponseBody?.error?.message ??
+        failureResponseBody?.message ??
+        (error instanceof Error ? error.message : String(error));
+      const failureDiagnostics =
+        failureResponseBody?.error?.diagnostics ??
+        failureResponseBody?.diagnostics ??
+        failureResponseBody?.details ??
+        null;
       void this.studioArtifactsService.recordResumeFailure({
         userId,
         baselineId: studioArtifactContext.baselineId,
@@ -6395,10 +6410,11 @@ export class ResumeService {
         jobFingerprint: studioArtifactContext.jobFingerprint,
         inputsHash: studioArtifactContext.inputsHash,
         analysisId: studioArtifactContext.analysisId,
-        failureCode: error instanceof Error ? error.name : 'generation_failed',
-        failureMessage: error instanceof Error ? error.message : String(error),
+        failureCode: String(failureCode),
+        failureMessage: String(failureMessage),
         metadata: {
           analysisId: studioArtifactContext.analysisId,
+          ...(failureDiagnostics ? { resumeArtifactInvalidDiagnostics: failureDiagnostics } : {}),
         },
       });
       if (!forceTemplateRegen && dedupeKey) {
@@ -6408,8 +6424,8 @@ export class ResumeService {
           dedupeKey,
           runId: reservationRunId ?? 'unknown',
           status: 'FAILED',
-          errorCode: error instanceof Error ? error.name : 'generation_failed',
-          errorMessage: error instanceof Error ? error.message : String(error),
+          errorCode: String(failureCode),
+          errorMessage: String(failureMessage),
         });
       }
       throw error;
