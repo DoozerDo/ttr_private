@@ -715,10 +715,18 @@ export class BaselineService {
   }
 
   private async getNextBaselineVersionNumber(userId: string) {
-    const latestBaseline = await this.baselineRepository.findOne({
-      where: { userId },
-      order: { versionNumber: 'DESC', version: 'DESC', createdAt: 'DESC' },
-    });
+    const latestBaseline = await this.baselineRepository
+      .createQueryBuilder('baseline')
+      .select('baseline.versionNumber', 'versionNumber')
+      .addSelect('baseline.version', 'version')
+      .where('baseline.userId = :userId', { userId })
+      .orderBy('baseline.versionNumber', 'DESC')
+      .addOrderBy('baseline.version', 'DESC')
+      .addOrderBy('baseline.createdAt', 'DESC')
+      .getRawOne<{
+        versionNumber: number | null;
+        version: number | null;
+      }>();
 
     return (latestBaseline?.versionNumber ?? latestBaseline?.version ?? 0) + 1;
   }
