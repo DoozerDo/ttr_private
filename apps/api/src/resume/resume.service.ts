@@ -114,7 +114,10 @@ import { PositioningPlanService } from '../positioning/positioning-plan.service'
 import { buildAuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
 import type { CareerIdentitySnapshot } from '../career-identity/career-identity.models';
 import { deriveCareerIdentityFromStructuredBaseline } from '../career-identity/career-identity.derive';
-import { buildAuthoritativeResumeDraftFromResumeV2 } from './resumeTemplateAssembler';
+import {
+  assembleResumeFromStructuredBaseline,
+  buildAuthoritativeResumeDraftFromResumeV2,
+} from './resumeTemplateAssembler';
 import { validateRealResumeDocument } from '../artifacts/realDocumentValidator';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateReadiness';
@@ -530,7 +533,6 @@ import type { EvidenceItem } from '../evidence/evidence-model';
 import { resolveGenerationEvidence } from '../generation/generation-evidence-resolver';
 import { decideGenerationEligibility } from '../generation/generation-eligibility';
 import {
-  assembleResumeFromStructuredBaseline,
   isAllowedStructuredTemplateExperienceHeader,
   type ResumeTemplateIdentityLike,
 } from './resumeTemplateAssembler';
@@ -6646,61 +6648,12 @@ export class ResumeService {
     if (shouldEnforceTemplateReadiness) {
       const baseline = await this.loadCanonicalBaselineRawModel(userId, request.baselineId);
       if (baseline) {
-        // ResumeV2 authority rule: when a valid ResumeV2 model with usable experience exists,
-        // do not block Studio generation due to section-based structured template readiness failures.
-        // Template readiness is meant to guard the legacy section/structured extraction lane, not the ResumeV2 lane.
-        try {
-          const persistedResumeV2 = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
-	          try {
-	            assertUsableResumeV2(persistedResumeV2);
-	          } catch (error) {
-	            if (error instanceof UnprocessableEntityException) {
-	              const response = (error as any).getResponse?.() as any;
-	              const code = String(response?.error?.code ?? 'baseline_resume_v2_invalid');
-	              if (code === 'baseline_resume_v2_missing') {
-	                throw new Error('resume_v2_missing');
-	              }
-	              const message = String(response?.error?.message ?? 'Baseline ResumeV2 is invalid. Repair your baseline before generating.');
-	              return {
-	                status: 'blocked' as const,
-	                blocked: true,
-	                compliance_flags: [],
-                reasons: [
-                  {
-                    code,
-                    message,
-                    details: response?.error?.details ?? { usableExperienceCount: 0 },
-                  },
-                ],
-                canGenerateResume: false,
-                diagnostics: {
-                  readinessSource: 'resume_v2_authority',
-                  usableExperienceCount: 0,
-                },
-              } as any;
-            }
-            throw error;
-          }
-
-          const normalized = normalizeNormalizedResumeDocument(persistedResumeV2 as NormalizedResumeDocument);
-          const experienceCount = Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
-          return {
-            status: 'ready' as const,
-            blocked: false,
-            compliance_flags: [],
-            reasons: [],
-            canGenerateResume: true,
-            diagnostics: {
-              readinessSource: 'resume_v2_authority',
-              usableExperienceCount: experienceCount,
-            },
-          } as any;
-        } catch {
-          // ignore; fall back to structured/template readiness.
-        }
-
         const sourceSections = resolveBaselineSectionsForGeneration(baseline);
         const structuredBaseline = extractStructuredBaselineFromSections(sourceSections as any);
+        const canonicalReadinessDocument = assembleResumeFromStructuredBaseline(
+          structuredBaseline as any,
+          { name: '', contactLine: '' },
+        );
         const templateReadiness = evaluateBaselineTemplateReadiness(structuredBaseline);
 	        if (!templateReadiness.canGenerateResume) {
 	          const evidence = resolveGenerationEvidence({
@@ -6717,7 +6670,9 @@ export class ResumeService {
             evidence,
             warningCodes: ['baseline_template_not_ready'],
           });
-	          const structuredExperienceCount = (structuredBaseline.experience ?? []).length;
+	          const structuredExperienceCount = Array.isArray((canonicalReadinessDocument as any)?.experience)
+	            ? (canonicalReadinessDocument as any).experience.length
+	            : 0;
 	          if (eligibility.eligible && structuredExperienceCount > 0) {
 	            return {
 	              status: 'limited' as const,

@@ -3611,6 +3611,50 @@ describe('ResumeService contract', () => {
     baseline.sections = originalSections;
   }); 
 
+  it('keeps readiness usableExperienceCount aligned with normalized experience count for the same canonical source', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 90;
+
+    try {
+      baseline.sections = [
+        {
+          ...baseSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 0,
+          content: [
+            'Biblioso | Director, Customer Experience | 2024 - Present',
+            '- Led a cross-functional CX program spanning support and product.',
+            '- Improved escalation handling through triage, routing, and operating reviews.',
+            '',
+            'Acme Corp | Customer Operations Manager | 2021 - 2024',
+            '- Built queue health dashboards and reporting to improve response time.',
+            '- Implemented process improvements to reduce repeat escalations and strengthen RCA follow through.',
+          ].join('\n'),
+        } as any,
+      ] as any;
+
+      const readiness = await service.getGenerationReadiness('user-1', baseRequest);
+      expect(readiness.blocked).toBe(false);
+      expect(readiness.diagnostics?.usableExperienceCount ?? 0).toBeGreaterThan(0);
+
+      const result = await service.generateResume('user-1', baseRequest);
+      expect(result.ok).toBe(true);
+      expect(result.exportReady).toBe(true);
+
+      const normalizedExperienceCount = Array.isArray((result as any)?.preview?.resume?.experience)
+        ? (result as any).preview.resume.experience.length
+        : 0;
+      expect(normalizedExperienceCount).toBeGreaterThan(0);
+      expect(normalizedExperienceCount).toBe(readiness.diagnostics?.usableExperienceCount ?? 0);
+    } finally {
+      baseline.sections = originalSections;
+      assessment.overallScore = originalScore;
+    }
+  });
+
   it('does not fail readiness when persisted ResumeV2 was produced from alternate parser experience field shapes', async () => {
     const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
