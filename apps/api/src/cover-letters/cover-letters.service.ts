@@ -1540,18 +1540,7 @@ export class CoverLettersService {
     const evidenceSignals = buildBaselineEvidenceSignals({
       baselineId: baseline.id,
       baselineVersionId: baselineVersion.id,
-      baselineSections: [
-        {
-          baselineId: baseline.id,
-          sectionType: BaselineSectionType.EXPERIENCE,
-          title: 'ResumeV2',
-          includePolicy: BaselineIncludePolicy.ALWAYS,
-          order: 0,
-          content: resumeV2PlainText,
-          createdAt: new Date(0),
-          updatedAt: new Date(0),
-        },
-      ] as any,
+      baselineSections: allowedSections as any,
     });
     const structuredBaseline = evidenceSignals.structuredBaseline;
     const templateReadiness = evaluateBaselineTemplateReadiness(structuredBaseline);
@@ -1560,30 +1549,26 @@ export class CoverLettersService {
     const meaningfulInterpretedEvidenceExists = interpretedEligibility.hasMeaningfulInterpretedEvidence;
     const interpretedEvidenceReadiness = resolveEvidenceReadinessFromSummary(evidenceSignals.interpretedEvidenceSummary);
 
+    const structuredEvidenceText = [
+      structuredBaseline?.summary ?? '',
+      ...(structuredBaseline?.experience ?? []).flatMap((entry: any) => [
+        String(entry?.company ?? '').trim(),
+        String(entry?.roleTitle ?? '').trim(),
+        String(entry?.dates ?? '').trim(),
+        ...(Array.isArray(entry?.bullets) ? entry.bullets.map((bullet: unknown) => String(bullet ?? '').trim()) : []),
+      ]),
+      ...(Array.isArray(structuredBaseline?.skills) ? structuredBaseline.skills : []),
+    ]
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean)
+      .join('\n');
+    const fallbackSectionText = allowedSections
+      .map((section) => String(section?.content ?? '').trim())
+      .filter(Boolean)
+      .join('\n');
     const baselineText = resumeV2PlainText;
-    const insufficientBaselineDetails =
-      getInsufficientExtractedTextDetails(baselineText);
-    if (
-      insufficientBaselineDetails &&
-      !templateReadiness.canGenerateCoverLetter &&
-      !meaningfulInterpretedEvidenceExists
-    ) {
-      throw new UnprocessableEntityException(buildArtifactFailurePayload({
-        code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
-        category: 'unsupported_input',
-        message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
-        detail: 'The current cover letter input cannot be grounded into a supported artifact.',
-        retryable: false,
-        userAction: {
-          title: 'Add stronger baseline evidence',
-          description: 'Include clearer accomplishment bullets and fuller role details before generating again.',
-        },
-        diagnostics: {
-          unsupportedEnvelope: 'insufficient_extracted_text',
-          missingRequirements: insufficientBaselineDetails.tips,
-        },
-      }));
-    }
+    const canonicalBaselineText = baselineText || structuredEvidenceText || fallbackSectionText;
+    const canonicalTextInsufficiency = getInsufficientExtractedTextDetails(canonicalBaselineText);
 
     // Generation must be driven by ResumeV2-derived content (structured baseline), not baseline section concatenations.
     // Prefer role-aligned structured experience blocks over a single plain-text dump so evidence selection can
@@ -1600,6 +1585,24 @@ export class CoverLettersService {
       resumeV2PlainText,
       job: jobContext,
     });
+    const hasArtifactReadyEvidenceBlocks = allowedBlocks.length > 0 || templateReadiness.canGenerateCoverLetter;
+    if (canonicalTextInsufficiency && !hasArtifactReadyEvidenceBlocks && !meaningfulInterpretedEvidenceExists) {
+      throw new UnprocessableEntityException(buildArtifactFailurePayload({
+        code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+        category: 'unsupported_input',
+        message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+        detail: 'The current cover letter input cannot be grounded into a supported artifact.',
+        retryable: false,
+        userAction: {
+          title: 'Add stronger baseline evidence',
+          description: 'Include clearer accomplishment bullets and fuller role details before generating again.',
+        },
+        diagnostics: {
+          unsupportedEnvelope: 'insufficient_extracted_text',
+          missingRequirements: canonicalTextInsufficiency.tips,
+        },
+      }));
+    }
     const careerIdentitySnapshot = (() => {
       try {
         return deriveCareerIdentityFromStructuredBaseline(structuredBaseline as any);
@@ -1651,6 +1654,7 @@ export class CoverLettersService {
         map.forEach((value, key) => interpretedEvidenceIdToItem.set(key, value));
       }
     }
+    const artifactReadyByEvidenceBlocks = allowedBlocks.length > 0 || meaningfulInterpretedEvidenceExists;
     const baselineIdentity = resolveBaselineIdentity(baseline);
     let candidateName = this.cleanText(baselineIdentity?.fullName);
     if (syntheticMetadata?.isSynthetic) {
@@ -1696,11 +1700,7 @@ export class CoverLettersService {
     try {
       const requestSafeMode = oneTap || complianceConstraints?.mode === 'strict';
 
-      if (
-        enforceTemplateReadiness &&
-        !templateReadiness.canGenerateCoverLetter &&
-        !meaningfulInterpretedEvidenceExists
-      ) {
+      if (enforceTemplateReadiness && !artifactReadyByEvidenceBlocks) {
         throw new UnprocessableEntityException({
           code: 'baseline_template_not_ready',
           reasons: templateReadiness.hardBlockReasons,

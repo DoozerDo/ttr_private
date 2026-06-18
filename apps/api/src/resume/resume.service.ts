@@ -6507,6 +6507,17 @@ export class ResumeService {
   ) { 
     try {
     const analysisId = request.analysisId?.trim() ?? '';
+    const analysisAssessmentForReadiness = analysisId
+      ? await validateAnalysisContext({
+          analysisRepository: this.fitAssessmentRepository,
+          baselineVersionRepository: this.baselineVersionRepository,
+          analysisId,
+          userId,
+          jobId: request.jobId?.trim() ?? '',
+          baselineId: request.baselineId?.trim() ?? null,
+          baselineVersionId: request.baselineVersionId?.trim() ?? '',
+        })
+      : await this.findLatestAssessment(userId, request.jobId ?? '', request.baselineId ?? '');
     if (analysisId && request.baselineId?.trim() && request.jobId?.trim() && request.baselineVersionId?.trim()) {
       const studioArtifactsState = await this.studioArtifactsService.readState({
         userId,
@@ -6534,6 +6545,45 @@ export class ResumeService {
             coverLetterArtifactCurrent: Boolean(studioArtifactsState.coverLetter?.artifactCurrent),
           },
         } as any;
+      }
+
+      const baseline = await this.loadCanonicalBaselineRawModel(userId, request.baselineId.trim());
+      const assessmentScore = analysisAssessmentForReadiness?.overallScore ?? null;
+      const assessmentEligible = typeof assessmentScore === 'number' && assessmentScore >= 80;
+      if (baseline && assessmentEligible) {
+        const sourceSections = resolveBaselineSectionsForGeneration(baseline);
+        const structuredBaseline = extractStructuredBaselineFromSections(sourceSections as any);
+        const templateReadiness = evaluateBaselineTemplateReadiness(structuredBaseline);
+        const evidence = resolveGenerationEvidence({
+          baseline: baseline as any,
+          baselineVersionId: request.baselineVersionId.trim(),
+        });
+        const eligibility = decideGenerationEligibility({
+          baseline: baseline as any,
+          baselineVersion: { id: request.baselineVersionId.trim() } as any,
+          job: { id: request.jobId.trim() } as any,
+          readinessScore: assessmentScore,
+          assessment: analysisAssessmentForReadiness as any,
+          complianceBlocked: false,
+          evidence,
+          warningCodes: templateReadiness.artifactReady ? [] : ['baseline_template_not_ready'],
+        });
+
+        if (templateReadiness.artifactReady && eligibility.eligible) {
+          return {
+            status: 'ready' as const,
+            blocked: false,
+            compliance_flags: [],
+            reasons: [],
+            canGenerateResume: true,
+            diagnostics: {
+              readinessSource: 'artifact_ready_contract',
+              assessmentScore,
+              resumeArtifactCurrent: Boolean(resumeReady),
+              coverLetterArtifactCurrent: Boolean(coverLetterReady),
+            },
+          } as any;
+        }
       }
 
       return {
@@ -6567,17 +6617,7 @@ export class ResumeService {
         },
       } as any;
     }
-    const analysisAssessment = analysisId
-      ? await validateAnalysisContext({
-          analysisRepository: this.fitAssessmentRepository,
-          baselineVersionRepository: this.baselineVersionRepository,
-          analysisId,
-          userId,
-          jobId: request.jobId?.trim() ?? '',
-          baselineId: request.baselineId?.trim() ?? null,
-          baselineVersionId: request.baselineVersionId?.trim() ?? '',
-        })
-      : await this.findLatestAssessment(userId, request.jobId ?? '', request.baselineId ?? '');
+    const analysisAssessment = analysisAssessmentForReadiness;
 
     if (!analysisAssessment) {
       throw new BadRequestException({
@@ -6664,8 +6704,8 @@ export class ResumeService {
             baseline: baseline as any,
             baselineVersion: request.baselineVersionId ? ({ id: request.baselineVersionId } as any) : null,
             job: request.jobId ? ({ id: request.jobId } as any) : null,
-            readinessScore: null,
-            assessment: null,
+            readinessScore: typeof analysisAssessment?.overallScore === 'number' ? analysisAssessment.overallScore : null,
+            assessment: analysisAssessment as any,
             complianceBlocked: false,
             evidence,
             warningCodes: ['baseline_template_not_ready'],

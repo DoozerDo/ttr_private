@@ -10,6 +10,7 @@ export type BaselineTemplateReadinessReason = {
 export type BaselineTemplateReadiness = {
   canGenerateResume: boolean;
   canGenerateCoverLetter: boolean;
+  artifactReady: boolean;
   hardBlockReasons: BaselineTemplateReadinessReason[];
   warnings: BaselineTemplateReadinessReason[];
   evidence: {
@@ -121,7 +122,8 @@ export function evaluateBaselineTemplateReadiness(
 
   const usableEvidenceThresholdMet =
     validExperience.length >= 2 &&
-    (technicalSignalsPresent || totalValidBullets >= 3);
+    technicalSignalsPresent &&
+    totalValidBullets >= 3;
 
   const threshold: BaselineTemplateReadiness['evidence']['threshold'] =
     hasValidExperience && usableEvidenceThresholdMet ? 'strong' : hasValidExperience ? 'usable' : 'insufficient';
@@ -135,12 +137,29 @@ export function evaluateBaselineTemplateReadiness(
     !technicalSignalsPresent;
 
   if (hasValidExperience) {
+    const artifactReady = threshold === 'strong';
     return {
-      // Relaxed gating: allow generation whenever at least one valid experience entry exists.
-      // Only hard-block when experience is completely missing or parsing produced no usable entries.
-      canGenerateResume: true,
-      canGenerateCoverLetter: true,
-      hardBlockReasons: [],
+      canGenerateResume: artifactReady,
+      canGenerateCoverLetter: artifactReady,
+      artifactReady,
+      hardBlockReasons: artifactReady
+        ? []
+        : [
+            {
+              code: 'baseline_template_not_ready',
+              message:
+                'Baseline evidence is not yet artifact-ready for resume and cover letter generation.',
+              details: {
+                invalidCompanies,
+                missingEvidenceReasons,
+                evidenceThreshold: threshold,
+                degraded,
+                technicalSignalsPresent,
+                improvementSuggestions: improvements,
+                ...stats,
+              },
+            },
+          ],
       warnings: degraded
         ? [
             {
@@ -171,6 +190,7 @@ export function evaluateBaselineTemplateReadiness(
   return {
     canGenerateResume: false,
     canGenerateCoverLetter: false,
+    artifactReady: false,
     hardBlockReasons: [
       {
         code: 'baseline_template_not_ready',

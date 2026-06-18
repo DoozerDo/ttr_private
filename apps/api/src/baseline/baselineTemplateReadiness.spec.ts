@@ -2,14 +2,20 @@ import { describe, expect, it } from '@jest/globals';
 import { evaluateBaselineTemplateReadiness } from './baselineTemplateReadiness';
 
 describe('baselineTemplateReadiness', () => {
-  it('accepts template-safe experience headers', () => {
+  it('accepts artifact-ready template-safe experience headers', () => {
     const readiness = evaluateBaselineTemplateReadiness({
       summary: 'x',
       experience: [
         {
           company: 'AMS DataSerfs',
           roleTitle: 'Senior Data Analyst',
-          bullets: ['Did work.'],
+          bullets: ['Built reporting dashboards with SQL and Python.', 'Improved review cadence across teams.', 'Tracked outcomes with measurable metrics.'],
+          source: 'baseline',
+        },
+        {
+          company: 'ExampleCo',
+          roleTitle: 'Operations Manager',
+          bullets: ['Led recurring operating reviews.', 'Owned process improvements across support workflows.'],
           source: 'baseline',
         },
       ],
@@ -20,6 +26,7 @@ describe('baselineTemplateReadiness', () => {
 
     expect(readiness.canGenerateResume).toBe(true);
     expect(readiness.canGenerateCoverLetter).toBe(true);
+    expect(readiness.artifactReady).toBe(true);
     expect(readiness.hardBlockReasons).toEqual([]);
     expect(['strong', 'usable', 'insufficient']).toContain(readiness.evidence.threshold);
   });
@@ -42,11 +49,12 @@ describe('baselineTemplateReadiness', () => {
 
     expect(readiness.canGenerateResume).toBe(false);
     expect(readiness.canGenerateCoverLetter).toBe(false);
+    expect(readiness.artifactReady).toBe(false);
     expect(readiness.hardBlockReasons[0]?.code).toBe('baseline_template_not_ready');
     expect(readiness.stats.validExperience).toBe(0);
   });
 
-  it('does not block strong hybrid baselines with legal suffix punctuation (Dalen-style)', () => {
+  it('blocks strong hybrid baselines until they have enough artifact-ready evidence', () => {
     const readiness = evaluateBaselineTemplateReadiness({
       summary: 'Hybrid engineer with software, infrastructure, and lab experience.',
       skills: ['Python', 'Docker', 'Kubernetes', 'Ansible', 'Terraform', 'DNS'],
@@ -68,9 +76,10 @@ describe('baselineTemplateReadiness', () => {
       missingEvidenceReasons: [],
     } as any);
 
-    expect(readiness.canGenerateResume).toBe(true);
-    expect(readiness.canGenerateCoverLetter).toBe(true);
-    expect(readiness.hardBlockReasons).toEqual([]);
+    expect(readiness.canGenerateResume).toBe(false);
+    expect(readiness.canGenerateCoverLetter).toBe(false);
+    expect(readiness.artifactReady).toBe(false);
+    expect(readiness.hardBlockReasons[0]?.code).toBe('baseline_template_not_ready');
     expect(readiness.stats.validExperience).toBeGreaterThan(0);
   });
 });
