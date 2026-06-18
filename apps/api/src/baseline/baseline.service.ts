@@ -1286,8 +1286,10 @@ export class BaselineService {
       isActive: shouldBecomeActive,
       sections: sectionPayloads,
     });
+    delete (baseline as any).verifiedBaseline;
 
     const savedBaseline = await manager.save(baseline);
+    delete (savedBaseline as any).verifiedBaseline;
 
     const nextVersionNumber = await this.getNextBaselineVersionNumber(userId);
 
@@ -1371,8 +1373,8 @@ export class BaselineService {
       archivedAt: null,
       isActive: shouldBecomeActive,
       versions: [savedVersion],
-      verifiedBaseline: savedBaseline.verifiedBaseline ?? verifiedBaseline,
     } as Baseline;
+    delete (finalBaseline as any).verifiedBaseline;
 
     if (process.env.NODE_ENV !== 'production') {
       // eslint-disable-next-line no-console
