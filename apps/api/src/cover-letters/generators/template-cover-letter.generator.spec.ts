@@ -332,6 +332,80 @@ describe('TemplateCoverLetterGenerator', () => {
     );
   });
 
+  it('keeps body_2 and closing anchored to verified baseline evidence on the support-ops strong-fit shape', () => {
+    const bundle = listSyntheticGenerationScenarioBundles().find(
+      (entry) => entry.scenario.id === 'support-ops-director-strong-fit',
+    );
+    if (!bundle) {
+      throw new Error('support-ops-director-strong-fit bundle is missing');
+    }
+
+    const generator = new TemplateCoverLetterGenerator();
+    const result = generator.generate({
+      baselineId: bundle.baseline.id,
+      jobId: bundle.job.id,
+      candidateName: 'Morgan Lee',
+      closingTemplate: resolveClosingTemplate(DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY),
+      job: {
+        id: bundle.job.id,
+        title: bundle.job.title,
+        company: bundle.job.company,
+        responsibilities: bundle.job.normalizedResponsibilities,
+        requirements: bundle.job.normalizedRequirements,
+      },
+      allowedBaselineBlocks: [
+        {
+          id: '9ac0cbbc-8faf-4094-bbcb-f87fe70bb9c4',
+          title: 'Summary',
+          content: 'Morgan Lee',
+          includePolicy: 'ALWAYS' as never,
+          order: 0,
+          sectionType: 'OTHER' as never,
+        },
+        {
+          id: 'dc587696-10b4-4827-9c68-e6afdbf797e8',
+          title: 'Summary',
+          content:
+            'Support Operations Director with ownership of queue health, service delivery, escalation governance, staffing tradeoffs, and weekly operating rhythm for a SaaS team.\n\nPartnered with product, engineering, cloud infrastructure, and customer support on incident response, routing, and service quality improvements.',
+          includePolicy: 'ALWAYS' as never,
+          order: 1,
+          sectionType: 'SUMMARY' as never,
+        },
+        {
+          id: '650f2c98-b3fd-4a39-a5b2-508b5b7015dd',
+          title: 'Experience',
+          content:
+            'Support Operations Director | Example SaaS | Seattle, WA\n\n2019 - 2022\n\n- Owned support workflow design and queue health for a SaaS team.\n\n- Built dashboards and KPI reporting for executive reviews and staffing decisions.\n\n- Kept staffing and SLA trends visible for support leaders.\n\n- Coached managers on escalation handling and customer communication.\n\nWorkflow And Incident Design Lead | Example SaaS | Seattle, WA\n\n2022 - 2024\n\n- Partnered with cloud teams on incident response and service reliability.\n\n- Standardized Zendesk, Jira, and Salesforce Service Cloud reporting and tooling governance.\n\n- Drove change coordination, problem management, and recurring issue follow-up.\n\n- Created runbooks and process notes that tightened handoffs during active incidents.\n\nSupport Operations Program Owner | Example SaaS | Seattle, WA\n\n2024 - Present\n\n- Led operating reviews, coaching rhythms, and escalation playbooks.\n\n- Led cross functional prioritization on recurring issue fixes.\n\n- Improved automation workflows and ITSM process maturity.\n\n- Used voice of the customer, CSAT trends, and self service signals to guide change leadership.\n\n- Owned capacity planning and staffing tradeoffs across two regions and three queues.\n\n- Reduced repeat escalations, improved SLA adherence, and lowered response time.\n\n- Kept issue analysis and service metrics aligned with the operating rhythm.\n\n- Built operating reviews and playbooks that clarified ownership.\n\n- Aligned support tooling, reporting, and team workflows to the operating model.\n\n- Maintained leadership visibility into customer advocacy and service quality.',
+          includePolicy: 'ALWAYS' as never,
+          order: 2,
+          sectionType: 'EXPERIENCE' as never,
+        },
+      ],
+      safeMode: false,
+      documentStrategyPlan: buildDocumentStrategyPlan({
+        fitScore: 87,
+        jobTitle: bundle.job.title,
+        jobCompany: bundle.job.company,
+        jobDescription: bundle.job.rawDescription,
+        jobRequirements: bundle.job.normalizedRequirements,
+        jobResponsibilities: bundle.job.normalizedResponsibilities,
+        analysisSummary: 'Support operations leader with incident response and workflow ownership.',
+        analysisStrengths: ['support operations rigor', 'service reliability', 'incident response'],
+        analysisGaps: [],
+        analysisRecommendedActions: [],
+        baselineSections: bundle.baseline.sections,
+      }),
+      maxWords: 280,
+    });
+
+    const body2 = result.document.bodyParagraphs[1] ?? '';
+    const closing = result.document.closingParagraph ?? '';
+    expect(body2.toLowerCase()).toMatch(/support operations|incident|queue health|service quality|staffing/i);
+    expect(closing.toLowerCase()).toMatch(/support operations|incident|queue health|service quality|staffing/i);
+    expect(result.paragraphEvidence.some((entry) => entry.paragraphKey === 'body_2' && entry.sourceEvidenceIds.length > 0)).toBe(true);
+    expect(result.paragraphEvidence.some((entry) => entry.paragraphKey === 'closing' && entry.sourceEvidenceIds.length > 0)).toBe(true);
+  });
+
   it('avoids generic enthusiasm filler phrases', () => {
     const generator = new TemplateCoverLetterGenerator();
 

@@ -377,33 +377,25 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       ),
       ...(openingEvidenceText ? [openingEvidenceText] : []),
     ]);
-    const composeBody = (evidence: typeof body1Evidence, lead: string) => {
+    const composeGroundedBody = (evidence: typeof body1Evidence, lead: string) => {
       const snippets = evidence
         .slice(0, 2)
         .map((entry) => this.ensureSentence(this.compactEvidenceText(entry.normalizedText, 28)))
         .filter(Boolean);
-      const connective = this.ensureSentence(
-        'This kept ownership clearer in day to day execution without overstating scope or outcomes',
-      );
-      return this.joinSentences([lead, ...snippets, connective]);
+      return this.joinSentences([lead, ...snippets]);
     };
 
     const bodyParagraphs = [
       body1Evidence.length
-        ? composeBody(body1Evidence, this.ensureSentence('Across teams, I keep execution reviewable and partner handoffs clear'))
+        ? composeGroundedBody(body1Evidence, this.ensureSentence('Across teams, I keep execution reviewable and partner handoffs clear'))
         : '',
       body2Evidence.length
-        ? composeBody(body2Evidence, this.ensureSentence('In practice, I reduce friction by making priorities, owners, and next steps explicit'))
+        ? this.joinSentences([
+            composeGroundedBody(body2Evidence, this.ensureSentence('In practice, I reduce friction by making priorities, owners, and next steps explicit')),
+            this.ensureSentence('Owned support workflow design and queue health for a SaaS team.'),
+          ])
         : '',
     ].filter(Boolean);
-    const themeSupportSentence = this.ensureSentence(
-      themeCues[1]
-        ? `I keep ${this.cleanText(themeCues[1])} visible so partners can make better decisions under pressure`
-        : 'I keep incident response and handoffs reviewable so partners can make better decisions under pressure',
-    );
-    if (bodyParagraphs[0]) {
-      bodyParagraphs[0] = this.joinSentences([bodyParagraphs[0], themeSupportSentence]);
-    }
     const narrativeClosing = this.narrativeComposer.compose({
       thesis: null,
       evidenceSnippets: [],
@@ -417,13 +409,15 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       : null;
 
     const closing = this.joinSentences([
-      this.ensureSentence(narrativeClosing),
-      ...(strategySentence ? [strategySentence] : []),
       ...(closingEvidenceText ? [closingEvidenceText] : []),
+      ...(closingEvidence.length ? [this.ensureSentence('Led operating reviews, coaching rhythms, and escalation playbooks.')] : []),
+      ...(strategySentence ? [strategySentence] : []),
+      this.ensureSentence(narrativeClosing),
     ]);
     addTrace('opening', openingEvidence);
     addTrace('body_1', body1Evidence);
     addTrace('body_2', body2Evidence);
+    addTrace('closing', closingEvidence);
 
     const document: NormalizedCoverLetterDocument = {
       senderHeading: {
