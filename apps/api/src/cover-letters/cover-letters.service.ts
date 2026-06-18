@@ -646,6 +646,32 @@ export class CoverLettersService {
           `[synthetic][cover_letter] reused_completed ${JSON.stringify(payload)}`,
         );
       }
+      try {
+        const baselineVersionHash = draft.baselineVersion.hash;
+        const jobFingerprint = this.studioArtifactsService.computeJobFingerprint(draft.job);
+        await this.studioArtifactsService.recordCoverLetterSuccess({
+          userId,
+          baselineId: draft.baseline.id,
+          jobId: draft.job.id,
+          baselineVersionId: draft.baselineVersion.id,
+          baselineVersionHash,
+          jobFingerprint,
+          inputsHash: this.studioArtifactsService.computeCoverLetterInputsHash({
+            baselineVersionHash,
+            jobFingerprint,
+          }),
+          analysisId: draft.analysisAssessment?.id ?? input.analysisId ?? null,
+          responseBody: effectiveReservation.responseBody as unknown as Record<string, unknown>,
+          content: String((effectiveReservation.responseBody as any)?.content ?? '').trim() || null,
+          metadata: {
+            auditId: (effectiveReservation.responseBody as any)?.auditId ?? (effectiveReservation.responseBody as any)?.audit_id ?? null,
+            closingTemplateKey: (effectiveReservation.responseBody as any)?.closingTemplateKey ?? draft.closingTemplateKey,
+            persistedFromIdempotencyReuse: true,
+          },
+        });
+      } catch {
+        // Keep the reused response usable, but canonical persistence must exist for Studio reloads.
+      }
       return {
         ...(effectiveReservation.responseBody as CoverLetterGenerationResponse),
         idempotency: {

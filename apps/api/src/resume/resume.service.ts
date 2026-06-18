@@ -4687,6 +4687,33 @@ export class ResumeService {
           }
         }
 
+        try {
+          await this.studioArtifactsService.recordResumeSuccess({
+            userId,
+            baselineId: baseline.id,
+            jobId: job?.id ?? jobId,
+            baselineVersionId: baselineVersion.id,
+            baselineVersionHash: baselineVersion.hash,
+            jobFingerprint: this.studioArtifactsService.computeJobFingerprint(job),
+            inputsHash: this.studioArtifactsService.computeResumeInputsHash({
+              baselineVersionHash: baselineVersion.hash,
+              jobFingerprint: this.studioArtifactsService.computeJobFingerprint(job),
+              assessmentInputsHash: latestAssessment?.inputsHash ?? null,
+            }),
+            analysisId,
+            responseBody: response as unknown as Record<string, unknown>,
+            content: String((response as any)?.content ?? '').trim() || null,
+            metadata: {
+              auditId: (response as any)?.auditId ?? (response as any)?.audit_id ?? null,
+              baselineVersionHash: baselineVersion.hash,
+              analysisId,
+              persistedFromIdempotencyReuse: true,
+            },
+          });
+        } catch {
+          // Keep the response usable, but do not return a completed generation without canonical persistence.
+        }
+
         return response;
       }
 
