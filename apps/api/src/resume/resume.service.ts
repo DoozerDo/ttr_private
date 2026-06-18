@@ -5783,6 +5783,18 @@ export class ResumeService {
           }
         })();
 
+        if (isResumeV2 && persistedResumeV2HasUsableExperience) {
+          try {
+            const normalized = normalizeNormalizedResumeDocument(
+              persistedResumeV2ForFailSafe as NormalizedResumeDocument,
+            );
+            normalizedDocument = normalized as any;
+            lastResumeGenerationCheckpoint = 'persisted_resume_v2_recovered';
+          } catch {
+            // keep the original fail-safe path only if the persisted canonical model is unusable
+          }
+        }
+
         const failSafeExperienceCount = Array.isArray((normalizedDocument as any)?.experience)
           ? (normalizedDocument as any).experience.length
           : 0;
