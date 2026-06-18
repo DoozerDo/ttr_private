@@ -323,7 +323,7 @@ type FitScoreResponse = {
   overallScore?: number;
   dimensionScores?: FitAssessment['dimensionScores'];
   complianceFlags?: FitAssessment['complianceFlags'];
-  jobAnalysis?: FitAssessment['jobAnalysis'];
+  jobAnalysis?: JobAnalysis | null;
   fitScore?: FitAssessment['fitScore'];
   compliance_debug?: ComplianceDebugTrace;
   summary?: string;
@@ -3531,7 +3531,6 @@ export class AnalysisService {
         confidenceScore: confidenceResult.confidenceScore,
         confidenceReasons: confidenceResult.confidenceReasons,
         scoringReliability,
-        jobAnalysis,
         fitScore,
         ...(scoringReliabilityReason ? { scoringReliabilityReason } : {}),
       });
@@ -3735,7 +3734,7 @@ export class AnalysisService {
         scoreSanityFlags: scoringV2.scoreSanityFlags,
         likelyUnderestimatedFit: scoringV2.likelyUnderestimatedFit,
         scorePresentationMode: scoringV2.scorePresentationMode,
-        jobAnalysis: savedAssessment.jobAnalysis ?? null,
+        jobAnalysis: null,
         fitScore: savedAssessment.fitScore ?? null,
         baseline_version_hash:
           compliance.audit.baselineVersionHash ?? baselineVersionHash,
@@ -4270,7 +4269,7 @@ export class AnalysisService {
       confidenceScore: assessment.confidenceScore ?? null,
       confidenceReasons: assessment.confidenceReasons ?? [],
       createdAt: assessment.createdAt,
-      jobAnalysis: assessment.jobAnalysis ?? null,
+      jobAnalysis: null,
       fitScore: null,
       scoring_v2: refreshedScoringV2,
       supportingSignals,
@@ -4538,7 +4537,7 @@ export class AnalysisService {
       supportingSignals: [],
       baselineEvidence: [],
       verification_coverage: null,
-      score_breakdown: this.buildScoreBreakdown(assessment as FitAssessment),
+      score_breakdown: this.buildScoreBreakdown(assessment as unknown as FitAssessment),
       narrative: null,
     };
   }

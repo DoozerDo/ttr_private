@@ -96,9 +96,6 @@ export class FitAssessment {
   scoringV2!: CxFitV2Result | null;
 
   @Column({ type: 'jsonb', nullable: true })
-  jobAnalysis!: JobAnalysis | null;
-
-  @Column({ type: 'jsonb', nullable: true })
   fitScore!: FitScore | null;
 
   /**

@@ -244,5 +244,5 @@ export async function validateAnalysisContext({
     );
   }
 
-  return assessment as FitAssessment;
+  return assessment as unknown as FitAssessment;
 }
