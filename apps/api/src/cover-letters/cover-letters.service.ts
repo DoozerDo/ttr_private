@@ -141,6 +141,9 @@ type CoverLetterDraft = {
   baseline: Baseline;
   baselineVersion: BaselineVersion;
   job: Job;
+  generationAuthority: 'baseline_file' | 'fallback';
+  baselineFileUsable: boolean;
+  baselineFileVersionHash: string | null;
   allowedBlocks: AllowedBaselineBlock[];
   positioningMetadata?: unknown;
   interpretedEvidenceIdToItem?: Map<string, EvidenceItem>;
@@ -231,6 +234,10 @@ export type CoverLetterGenerationResponse = {
   audit_id: string;
   auditId: string;
   baseline_version_hash: string | null;
+  generationAuthority?: 'baseline_file' | 'fallback';
+  baselineVerified?: boolean;
+  baselineFileUsable?: boolean;
+  baselineFileVersionHash?: string | null;
   exports: DocumentGenerationExports;
   display: UserSafeDisplayPayload;
   safeDisplay: UserSafeDisplayPayload;
@@ -241,6 +248,9 @@ export type CoverLetterGenerationResponse = {
     auditId: string;
     baselineVersionHash: string | null;
     complianceFlags: ComplianceFlag[];
+    generationAuthority?: 'baseline_file' | 'fallback';
+    baselineFileUsable?: boolean;
+    baselineFileVersionHash?: string | null;
   };
   idempotency?: {
     status:
@@ -364,6 +374,20 @@ export class CoverLettersService {
         (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
       ) as Baseline['parsedRecords'],
     } as Baseline;
+  }
+
+  private getLatestPersistedResumeV2Json(parsedRecords: any[] | null | undefined): unknown | null {
+    if (!Array.isArray(parsedRecords) || parsedRecords.length === 0) return null;
+    const candidates = parsedRecords
+      .filter((record) => record && typeof record === 'object' && (record as any).resumeV2Json && typeof (record as any).resumeV2Json === 'object')
+      .slice();
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => {
+      const at = (a as any)?.createdAt ? new Date((a as any).createdAt).getTime() : 0;
+      const bt = (b as any)?.createdAt ? new Date((b as any).createdAt).getTime() : 0;
+      return at - bt;
+    });
+    return (candidates[candidates.length - 1] as any).resumeV2Json ?? null;
   }
 
   private throwGenerationBlockedError(blockers: Array<{ code: string; message: string }>): never {
@@ -674,6 +698,10 @@ export class CoverLettersService {
       }
       return {
         ...(effectiveReservation.responseBody as CoverLetterGenerationResponse),
+        generationAuthority: draft.generationAuthority,
+        baselineVerified: draft.baselineFileUsable ? Boolean((draft.baseline as any).parsedRecords?.[0]?.flagsJson?.reviewState?.verified) : false,
+        baselineFileUsable: draft.baselineFileUsable,
+        baselineFileVersionHash: draft.baselineFileVersionHash,
         idempotency: {
           status: effectiveReservation.status,
           runId: effectiveReservation.runId,
@@ -905,6 +933,10 @@ export class CoverLettersService {
         },
       } as unknown as CoverLetterGenerationResponse;
 
+      (response as any).generationAuthority = draft.generationAuthority;
+      (response as any).baselineVerified = draft.baselineFileUsable ? Boolean((draft.baseline as any).parsedRecords?.[0]?.flagsJson?.reviewState?.verified) : false;
+      (response as any).baselineFileUsable = draft.baselineFileUsable;
+      (response as any).baselineFileVersionHash = draft.baselineFileVersionHash;
       draft.complianceResult.normalizedContent = trimIncompleteTrailingFragments(draft.complianceResult.normalizedContent);
       (response as any).content = draft.complianceResult.normalizedContent;
 
@@ -1510,12 +1542,6 @@ export class CoverLettersService {
       order: { order: 'ASC' },
     });
 
-    const sourceSections = resolveBaselineSectionsForGeneration(baseline);
-    const sections = this.applyPoliciesToSections(
-      sourceSections,
-      policies,
-    );
-
     const evidenceBundle = resolveGenerationEvidence({
       baseline: baseline as any,
       baselineVersionId: baselineVersion.id,
@@ -1531,19 +1557,28 @@ export class CoverLettersService {
     );
     const closingTemplate = resolveClosingTemplate(closingTemplateKey);
 
-    const allowedSections = sections.filter(
-      (section) =>
-        (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
-        BaselineIncludePolicy.NEVER,
-    );
+    const persistedResumeV2 = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) as any;
+    const baselineFileUsable = Boolean(persistedResumeV2?.readiness?.usable);
+    const baselineFileVersionHash = baselineVersion.hash ?? null;
+    const sourceSections = baselineFileUsable ? [] : resolveBaselineSectionsForGeneration(baseline);
+    const sections = baselineFileUsable ? [] : this.applyPoliciesToSections(sourceSections, policies);
+    const allowedSections = baselineFileUsable
+      ? []
+      : sections.filter(
+          (section) =>
+            (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
+            BaselineIncludePolicy.NEVER,
+        );
 
     const evidenceSignals = buildBaselineEvidenceSignals({
       baselineId: baseline.id,
       baselineVersionId: baselineVersion.id,
-      baselineSections: allowedSections as any,
+      baselineSections: baselineFileUsable ? [] : (allowedSections as any),
     });
-    const structuredBaseline = evidenceSignals.structuredBaseline;
-    const templateReadiness = evaluateBaselineTemplateReadiness(structuredBaseline);
+    const structuredBaseline = baselineFileUsable
+      ? normalizeNormalizedResumeDocument(persistedResumeV2 as any)
+      : evidenceSignals.structuredBaseline;
+    const templateReadiness = evaluateBaselineTemplateReadiness(structuredBaseline as any);
     const interpretedEvidence = evidenceSignals.interpretedEvidence ?? [];
     const interpretedEligibility = evaluateInterpretedEvidenceEligibility(interpretedEvidence);
     const meaningfulInterpretedEvidenceExists = interpretedEligibility.hasMeaningfulInterpretedEvidence;
@@ -1557,7 +1592,11 @@ export class CoverLettersService {
         String(entry?.dates ?? '').trim(),
         ...(Array.isArray(entry?.bullets) ? entry.bullets.map((bullet: unknown) => String(bullet ?? '').trim()) : []),
       ]),
-      ...(Array.isArray(structuredBaseline?.skills) ? structuredBaseline.skills : []),
+      ...(Array.isArray((structuredBaseline as any)?.skills)
+        ? (structuredBaseline as any).skills
+        : Array.isArray((structuredBaseline as any)?.competencies)
+          ? (structuredBaseline as any).competencies
+          : []),
     ]
       .map((value) => String(value ?? '').trim())
       .filter(Boolean)
@@ -1656,7 +1695,9 @@ export class CoverLettersService {
     }
     const artifactReadyByEvidenceBlocks = allowedBlocks.length > 0 || meaningfulInterpretedEvidenceExists;
     const baselineIdentity = resolveBaselineIdentity(baseline);
-    let candidateName = this.cleanText(baselineIdentity?.fullName);
+    let candidateName = baselineFileUsable
+      ? this.cleanText((structuredBaseline as any)?.heading?.name ?? baselineIdentity?.fullName)
+      : this.cleanText(baselineIdentity?.fullName);
     if (syntheticMetadata?.isSynthetic) {
       candidateName = resolveSyntheticCandidateName(candidateName);
     }
@@ -1710,7 +1751,7 @@ export class CoverLettersService {
 
       if (templateReadiness.canGenerateCoverLetter) {
         const document = assembleCoverLetterFromStructuredBaseline({
-          structured: structuredBaseline,
+          structured: structuredBaseline as any,
           senderName: candidateName || 'Candidate',
           senderContactLine: null,
           jobTitle: job?.title ?? null,
@@ -2109,6 +2150,9 @@ export class CoverLettersService {
       baseline,
       baselineVersion,
       job,
+      generationAuthority: baselineFileUsable ? 'baseline_file' : 'fallback',
+      baselineFileUsable,
+      baselineFileVersionHash,
       analysisAssessment,
       allowedBlocks,
       positioningMetadata,

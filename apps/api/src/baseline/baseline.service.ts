@@ -833,6 +833,28 @@ export class BaselineService {
     });
   }
 
+  async markBaselineVerifiedForUser(baselineId: string, userId: string) {
+    const record = await this.baselineParsedRepository.findOne({
+      where: { baselineId, baseline: { userId } as any },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!record) {
+      throw new NotFoundException('Baseline parsed record not found');
+    }
+
+    const flagsJson = {
+      ...(record.flagsJson ?? {}),
+      reviewState: {
+        verified: true,
+        verifiedAt: new Date().toISOString(),
+      },
+    };
+
+    record.flagsJson = flagsJson;
+    return this.baselineParsedRepository.save(record);
+  }
+
   private normalizePoliciesFromSections(
     sections: PolicySectionInput[],
   ): PolicyState[] {

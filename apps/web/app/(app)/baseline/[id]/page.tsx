@@ -11,6 +11,7 @@ import { sanitizeRenderedTextValue } from "@/lib/renderedText";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
 import { backendFetch } from "@/app/api/_lib/backendFetch";
 import { getRequiredServerApiBaseUrl, UpstreamApiConfigError } from "@/app/api/_lib/serverApiConfig";
+import { BaselineReviewPanel } from "./BaselineReviewPanel";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -539,6 +540,7 @@ export default async function BaselineDetailPage({
 
   const baseline = baselineResult.baseline;
   const groupedSections: GroupedSections = organizeSections(baseline.sections ?? []);
+  const review = (baseline as any).review ?? null;
   const filteredEntries = Object.entries(groupedSections)
     .map(
       ([key, sections]) =>
@@ -585,6 +587,8 @@ export default async function BaselineDetailPage({
             Back to baselines
           </Link>
         </div>
+
+        <BaselineReviewPanel baselineId={resolvedId} review={review} />
 
         <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
           <h2 className="text-xl font-semibold text-gray-900">Parsed sections</h2>

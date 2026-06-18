@@ -360,7 +360,18 @@ export class BaselineController {
     }
 
     const baseline = await this.baselineService.getBaselineByIdForUser(id, userId);
-    return stripBaselineVersioning(baseline as unknown as Record<string, unknown>);
+    const parsed = await this.baselineService.getLatestParsedBaseline(id);
+    return stripBaselineVersioning({
+      ...(baseline as unknown as Record<string, unknown>),
+      review: parsed
+        ? {
+            baselineParsedId: parsed.id,
+            baselineFile: parsed.resumeV2Json,
+            verified: Boolean((parsed.flagsJson as any)?.reviewState?.verified),
+            verifiedAt: (parsed.flagsJson as any)?.reviewState?.verifiedAt ?? null,
+          }
+        : null,
+    });
   }
 
   @Patch(':id/analysis-score')
@@ -408,6 +419,24 @@ export class BaselineController {
       baselineId,
     );
     return stripBaselineVersioning(baseline as unknown as Record<string, unknown>);
+  }
+
+  @Post(':id/verify')
+  async verifyBaseline(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    const record = await this.baselineService.markBaselineVerifiedForUser(id, userId);
+    return {
+      baselineParsedId: record.id,
+      verified: Boolean((record.flagsJson as any)?.reviewState?.verified),
+      verifiedAt: (record.flagsJson as any)?.reviewState?.verifiedAt ?? null,
+    };
   }
 
   @Patch(':id/strengthening-additions')

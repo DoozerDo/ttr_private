@@ -51,6 +51,10 @@ export type GenerationEvidenceBundle = {
   usableWorkHistoryEvidence: boolean;
   resumePlainText: string;
   structuredBaselineExperienceCount: number;
+  generationAuthority: 'baseline_file' | 'fallback';
+  baselineFileUsable: boolean;
+  baselineVerified: boolean;
+  baselineFileVersionHash: string | null;
 };
 
 function normalizeLine(value: string): string {
@@ -76,6 +80,16 @@ function extractWorkHistoryFromResumeV2(params: {
     warnings.push({
       code: 'resume_v2_missing',
       message: 'Persisted Resume V2 is missing; falling back to verified baseline evidence.',
+    });
+    return { items: [], resumeText: '', warnings };
+  }
+
+  const readiness = (params.resumeV2Json as any)?.readiness;
+  if (readiness && readiness.usable === false) {
+    warnings.push({
+      code: 'resume_v2_invalid',
+      message: 'Persisted Baseline File is marked needs_review; falling back to verified baseline evidence.',
+      details: { readiness },
     });
     return { items: [], resumeText: '', warnings };
   }
@@ -189,6 +203,9 @@ export function resolveGenerationEvidence(params: {
   const sourceSections = resolveBaselineSectionsForGeneration(baseline);
 
   const parsedRecord = (baseline.parsedRecords?.[0] as any) ?? null;
+  const baselineFileUsable = Boolean(parsedRecord?.resumeV2Json?.readiness?.usable);
+  const baselineVerified = Boolean(parsedRecord?.flagsJson?.reviewState?.verified);
+  const baselineFileVersionHash = typeof baselineVersionId === 'string' ? baselineVersionId : null;
   const v2 = extractWorkHistoryFromResumeV2({
     baselineId: baseline.id,
     baselineVersionId,
@@ -206,6 +223,10 @@ export function resolveGenerationEvidence(params: {
       usableWorkHistoryEvidence: true,
       resumePlainText: v2.resumeText,
       structuredBaselineExperienceCount: 0,
+      generationAuthority: baselineFileUsable && baselineVerified ? 'baseline_file' : 'fallback',
+      baselineFileUsable,
+      baselineVerified,
+      baselineFileVersionHash,
     };
   }
 
@@ -224,6 +245,10 @@ export function resolveGenerationEvidence(params: {
       usableWorkHistoryEvidence: true,
       resumePlainText: buildConservativeRawBaselineText(sourceSections as any),
       structuredBaselineExperienceCount: structured.structuredExperienceCount,
+      generationAuthority: 'fallback',
+      baselineFileUsable,
+      baselineVerified,
+      baselineFileVersionHash,
     };
   }
 
@@ -236,5 +261,9 @@ export function resolveGenerationEvidence(params: {
     usableWorkHistoryEvidence: false,
     resumePlainText: rawText,
     structuredBaselineExperienceCount: 0,
+    generationAuthority: 'fallback',
+    baselineFileUsable,
+    baselineVerified,
+    baselineFileVersionHash,
   };
 }

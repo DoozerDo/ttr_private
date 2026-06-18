@@ -95,6 +95,12 @@ export interface BaselineDto {
   updatedAt: string;
   sections?: BaselineSectionDto[];
   versions?: BaselineVersionDto[];
+  review?: {
+    baselineParsedId: string;
+    baselineFile: unknown | null;
+    verified: boolean;
+    verifiedAt: string | null;
+  } | null;
 }
 
 export function getActiveBaselines(baselines: BaselineDto[]): BaselineDto[] {
@@ -352,6 +358,22 @@ export async function updateBaselineBlockPolicies(
     response,
     "Update baseline blocks",
   );
+}
+
+export async function reprocessBaseline(id: string): Promise<BaselineDto> {
+  const response = await fetch(`${BASELINE_API_PATH}/${encodeURIComponent(id)}/reparse`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return ensureJsonResponse(response, "Reprocess baseline");
+}
+
+export async function verifyBaseline(id: string): Promise<{ baselineParsedId: string; verified: boolean; verifiedAt: string | null }> {
+  const response = await fetch(`${BASELINE_API_PATH}/${encodeURIComponent(id)}/verify`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return ensureJsonPayload(response, "Verify baseline");
 }
 
 export async function appendStrengtheningAddition(

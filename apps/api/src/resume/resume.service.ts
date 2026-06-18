@@ -740,6 +740,10 @@ export type ResumeGenerationResponse = {
   audit_id: string;
   auditId: string;
   baseline_version_hash: string | null;
+  generationAuthority?: 'baseline_file' | 'fallback';
+  baselineVerified?: boolean;
+  baselineFileUsable?: boolean;
+  baselineFileVersionHash?: string | null;
   quality: 'optimized' | 'draft';
   traceMap: ArtifactTraceAudit['traceMap'];
   debugTrace: ArtifactTraceAudit['debugTrace'];
@@ -4660,6 +4664,10 @@ export class ResumeService {
         preview: {
           resume: null,
         },
+        generationAuthority: persistedResumeV2ForAuthority ? 'baseline_file' : 'fallback',
+        baselineVerified: Boolean((baseline.parsedRecords?.[0] as any)?.flagsJson?.reviewState?.verified),
+        baselineFileUsable: Boolean(persistedResumeV2ForAuthority),
+        baselineFileVersionHash: baselineVersionForFailSafe?.hash ?? null,
         trackerEntryId: null,
         trackerStatus: null,
         opportunityId: null,
@@ -4672,6 +4680,10 @@ export class ResumeService {
           auditId: audit.id,
           baselineVersionHash: audit.baselineVersionHash,
           complianceFlags,
+          generationAuthority: persistedResumeV2ForAuthority ? 'baseline_file' : 'fallback',
+          baselineVerified: Boolean((baseline.parsedRecords?.[0] as any)?.flagsJson?.reviewState?.verified),
+          baselineFileUsable: Boolean(persistedResumeV2ForAuthority),
+          baselineFileVersionHash: baselineVersionForFailSafe?.hash ?? null,
           resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
           resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
           resumeGenerationDiagnostics: experienceDiagnostics,
