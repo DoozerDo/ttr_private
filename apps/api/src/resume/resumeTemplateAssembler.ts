@@ -426,7 +426,19 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
     };
   });
 
-  const finalExperience = selectedExperience;
+  const finalExperience = (() => {
+    if (selectedExperience.length > 0) return selectedExperience;
+
+    // Preserve the authoritative structured experience source when plan selection
+    // filters everything away. Readiness already established these entries as usable.
+    const fallbackExperience = baselineExperience.map((entry) => ({
+      company: trimToText(entry.company),
+      roleTitle: trimToText(entry.roleTitle),
+      ...(entry.dateRange ? { dateRange: trimToText(entry.dateRange) } : {}),
+      bullets: (entry.bullets ?? []).map((bullet) => trimToText(bullet)).filter(Boolean),
+    }));
+    return fallbackExperience.filter((entry) => entry.company && entry.roleTitle);
+  })();
   const precomposition = detectPrecompositionContamination({ experience: finalExperience as any });
   const authorityFingerprint = buildAuthorityFingerprint({ experience: finalExperience as any, renderPlan: input.renderPlan ?? null });
 
