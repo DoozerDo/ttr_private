@@ -559,7 +559,7 @@ export class AnalysisService {
     userId: string,
     assessment: FitAssessment,
   ) {
-    const persistedScore = assessment.fitScore?.score ?? assessment.overallScore ?? null;
+    const persistedScore = assessment.overallScore ?? null;
     if (
       typeof persistedScore !== 'number' ||
       persistedScore < VERIFIED_ONLY_GENERATION_THRESHOLD
