@@ -1622,6 +1622,129 @@ export class ResumeService {
     });
   }
 
+  private buildResumeV2AuthoritySectionsFromNormalizedDocument(
+    resumeV2: NormalizedResumeDocument,
+    baselineId: string,
+  ): ResumeDraftSection[] {
+    const sections: ResumeDraftSection[] = [];
+    const summary = String(resumeV2.summary ?? '').trim();
+    if (summary) {
+      sections.push({
+        id: `${baselineId}:resume-v2:summary`,
+        type: BaselineSectionType.SUMMARY,
+        title: 'Summary',
+        order: 0,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        source: 'baseline',
+        content: summary,
+        rawContent: summary,
+        bullets: [],
+      } as any);
+    }
+
+    const skills = [
+      ...(Array.isArray((resumeV2 as any)?.competencies) ? ((resumeV2 as any).competencies as unknown[]) : []),
+      ...(Array.isArray((resumeV2 as any)?.coreCompetencies) ? ((resumeV2 as any).coreCompetencies as unknown[]) : []),
+    ]
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean);
+    if (skills.length) {
+      const content = skills.join(', ');
+      sections.push({
+        id: `${baselineId}:resume-v2:skills`,
+        type: BaselineSectionType.SKILLS,
+        title: 'Skills',
+        order: 1,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        source: 'baseline',
+        content,
+        rawContent: content,
+        bullets: [],
+      } as any);
+    }
+
+    const experienceText = Array.isArray((resumeV2 as any)?.experience)
+      ? ((resumeV2 as any).experience as Array<Record<string, unknown>>)
+          .map((entry) => {
+            const company = String(entry?.company ?? '').trim();
+            const roleTitle = String(entry?.roleTitle ?? '').trim();
+            const dateRange = String(entry?.dateRange ?? entry?.startDate ?? entry?.endDate ?? '').trim();
+            const bullets = Array.isArray(entry?.bullets) ? (entry.bullets as unknown[]) : [];
+            const header = [company, roleTitle, dateRange].filter(Boolean).join(' | ');
+            const bulletLines = bullets
+              .map((bullet) => String(bullet ?? '').trim())
+              .filter(Boolean)
+              .map((bullet) => `- ${bullet.replace(/^[-*•]\s+/, '')}`);
+            return [header, ...bulletLines].filter(Boolean).join('\n').trim();
+          })
+          .filter(Boolean)
+      : [];
+    if (experienceText.length) {
+      const content = experienceText.join('\n\n');
+      sections.push({
+        id: `${baselineId}:resume-v2:experience`,
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        order: 2,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        source: 'baseline',
+        content,
+        rawContent: content,
+        bullets: [],
+      } as any);
+    }
+
+    const educationText = Array.isArray((resumeV2 as any)?.education)
+      ? ((resumeV2 as any).education as Array<Record<string, unknown>>)
+          .map((entry) => {
+            const degree = String(entry?.degree ?? '').trim();
+            const institution = String(entry?.institution ?? '').trim();
+            const location = String(entry?.location ?? '').trim();
+            return [degree, institution, location].filter(Boolean).join(' | ');
+          })
+          .filter(Boolean)
+      : [];
+    if (educationText.length) {
+      const content = educationText.join('\n');
+      sections.push({
+        id: `${baselineId}:resume-v2:education`,
+        type: BaselineSectionType.EDUCATION,
+        title: 'Education',
+        order: 3,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        source: 'baseline',
+        content,
+        rawContent: content,
+        bullets: [],
+      } as any);
+    }
+
+    const additionalSections = Array.isArray((resumeV2 as any)?.additionalSections)
+      ? ((resumeV2 as any).additionalSections as Array<{ title?: unknown; items?: unknown[] }>)
+      : [];
+    additionalSections.forEach((section, index) => {
+      const title = String(section?.title ?? '').trim();
+      const items = Array.isArray(section?.items)
+        ? section.items.map((item) => String(item ?? '').trim()).filter(Boolean)
+        : [];
+      if (!title || !items.length) return;
+      const content = [title, ...items.map((item) => `- ${item}`)].join('\n').trim();
+      sections.push({
+        id: `${baselineId}:resume-v2:additional:${index}`,
+        type: BaselineSectionType.OTHER,
+        title,
+        order: 4 + index,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        source: 'baseline',
+        content,
+        rawContent: content,
+        bullets: [],
+      } as any);
+    });
+
+    return sections;
+  }
+
   private applyJobAlignedPresentation(payload: {
     sections: ResumeDraftSection[];
     jobText: string | null;
@@ -2814,9 +2937,24 @@ export class ResumeService {
       order: { order: 'ASC' },
     });
 
+    const persistedResumeV2ForAuthority = (() => {
+      try {
+        const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
+        if (!persisted || typeof persisted !== 'object') return null;
+        const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
+        const validation = validateNormalizedResumeDocument(normalized);
+        return validation.valid ? normalized : null;
+      } catch {
+        return null;
+      }
+    })();
     const sourceSections = resolveBaselineSectionsForGeneration(baseline);
+    const resumeV2AuthoritySections = persistedResumeV2ForAuthority
+      ? this.buildResumeV2AuthoritySectionsFromNormalizedDocument(persistedResumeV2ForAuthority as NormalizedResumeDocument, baseline.id)
+      : null;
+    const primaryGenerationSections = (resumeV2AuthoritySections ?? sourceSections) as any;
     const sectionsWithPolicies = this.applyPoliciesToSections(
-      sourceSections,
+      primaryGenerationSections as any,
       policies,
     );
 
@@ -2826,7 +2964,9 @@ export class ResumeService {
 	        BaselineIncludePolicy.NEVER,
 	    );
 	    try {
-	      const baselineProofStructured = extractStructuredBaselineFromSections(allowedSections as any);
+	      const baselineProofStructured = persistedResumeV2ForAuthority
+          ? extractStructuredBaselineFromSections(primaryGenerationSections as any)
+          : extractStructuredBaselineFromSections(allowedSections as any);
 	      const proofPayload = {
 	        baselineId: baseline.id,
 	        baselineVersionId: baselineVersion.id,
@@ -2859,11 +2999,16 @@ export class ResumeService {
 	    } catch {
 	      // ignore proof logging failures
 	    }
-		    let resumeInputSections =
-		      this.promoteExperienceLikeSections(allowedSections);
+		    let resumeInputSections: any[] =
+		      this.promoteExperienceLikeSections(allowedSections) as any[];
+        if (persistedResumeV2ForAuthority) {
+          resumeInputSections = primaryGenerationSections as any[];
+        }
 		    lastResumeGenerationCheckpoint = 'resume_input_sections_resolved';
 
-		    const structuredBaselineForAuthorityGate = extractStructuredBaselineFromSections(resumeInputSections as any);
+		    const structuredBaselineForAuthorityGate = persistedResumeV2ForAuthority
+          ? extractStructuredBaselineFromSections(primaryGenerationSections as any)
+          : extractStructuredBaselineFromSections(resumeInputSections as any);
 		    emitStructuredBaselineExtractionDebug(
 		      'authority_gate',
 		      resumeInputSections as unknown[],
@@ -5674,7 +5819,22 @@ export class ResumeService {
 	            (section) => (section.content ?? '').trim().length > 0,
 	          );
 
-	        if (hasBaselineText && baselineForFailSafe && baselineVersionForFailSafe && minimalDraftSectionsForFailSafe) {
+        const hasPersistedResumeV2Authority = (() => {
+          try {
+            const persisted = this.getLatestPersistedResumeV2Json(baselineForFailSafe?.parsedRecords ?? null) ?? null;
+            if (!persisted || typeof persisted !== 'object') return false;
+            const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
+            return validateNormalizedResumeDocument(normalized).valid;
+          } catch {
+            return false;
+          }
+        })();
+        const failSafeGenerationMode = hasPersistedResumeV2Authority
+          ? 'resume_v2_authoritative'
+          : 'top_level_fail_safe_minimal';
+        const failSafeMinimalUsed = !hasPersistedResumeV2Authority;
+
+        if (hasBaselineText && baselineForFailSafe && baselineVersionForFailSafe && minimalDraftSectionsForFailSafe) {
         // Top-level fail-safe: never return a full resume generation failure when baseline content exists.
         // This fallback is baseline-only and intentionally skips tailoring, trace auditing, and compliance enforcement.
         this.logger.error('[resume-generation] top_level_fail_safe_minimal', {
@@ -5937,9 +6097,9 @@ export class ResumeService {
           display: this.buildSuccessDisplayPayload(),
 	          safeDisplay: this.buildSuccessDisplayPayload(),
 		            internal: {
-		            minimalFallback: true,
-		            resumeGenerationMode: 'top_level_fail_safe_minimal',
-		            resumeFailSafeMinimalUsed: true,
+		            minimalFallback: !hasPersistedResumeV2Authority,
+		            resumeGenerationMode: failSafeGenerationMode,
+		            resumeFailSafeMinimalUsed: failSafeMinimalUsed,
 		            ...(topLevelFailSafeEntryTraceForResponse
 		              ? { topLevelFailSafeEntryTrace: topLevelFailSafeEntryTraceForResponse }
 		              : {}),
@@ -6137,8 +6297,8 @@ export class ResumeService {
                 auditId: minimalAuditId,
                 baselineVersionHash: baselineVersionForFailSafe.hash ?? null,
                 analysisId: studioArtifactContext.analysisId,
-                resumeGenerationMode: 'top_level_fail_safe_minimal',
-                resumeFailSafeMinimalUsed: true,
+                resumeGenerationMode: failSafeGenerationMode,
+                resumeFailSafeMinimalUsed: failSafeMinimalUsed,
                 interpretedEvidenceAuditUnavailableReason: 'minimal_fail_safe_no_trace_audit',
                 interpretedEvidenceAvailable,
                 ...(interpretedEvidenceAvailable
@@ -6182,8 +6342,8 @@ export class ResumeService {
                 'Resume V2 produced an invalid normalized resume model. Please reprocess your baseline resume and try again.',
               metadata: {
                 analysisId: studioArtifactContext.analysisId,
-                resumeGenerationMode: 'top_level_fail_safe_minimal',
-                resumeFailSafeMinimalUsed: true,
+                resumeGenerationMode: failSafeGenerationMode,
+                resumeFailSafeMinimalUsed: failSafeMinimalUsed,
                 qualityGateStatus: qualityGate.status,
                 resumeArtifactInvalidDiagnostics,
               },
