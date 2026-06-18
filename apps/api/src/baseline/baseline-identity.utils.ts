@@ -22,9 +22,24 @@ export function resolveBaselineIdentity(
 
   const parsedCore = parsed.parsedJson as Partial<BaselineSchemaCoreShape>;
   const identity = parsedCore.identity;
+  const resumeV2ContactLine = extractContactLineFromResumeV2Json(parsed.resumeV2Json);
 
   if (!identity) {
-    return resolveIdentityFromSections(baseline);
+    const sectionIdentity = resolveIdentityFromSections(baseline);
+    return sectionIdentity
+      ? {
+          ...sectionIdentity,
+          contactLine: sectionIdentity.contactLine ?? resumeV2ContactLine,
+        }
+      : resumeV2ContactLine
+        ? {
+            fullName: undefined,
+            currentTitle: undefined,
+            currentCompany: undefined,
+            location: undefined,
+            contactLine: resumeV2ContactLine,
+          }
+        : resolveIdentityFromSections(baseline);
   }
 
   return {
@@ -32,7 +47,7 @@ export function resolveBaselineIdentity(
     currentTitle: identity.current_title?.trim() || null,
     currentCompany: identity.current_company?.trim() || null,
     location: identity.location?.trim() || null,
-    contactLine: extractContactLineFromIdentity(identity),
+    contactLine: extractContactLineFromIdentity(identity) ?? resumeV2ContactLine,
   };
 }
 
@@ -92,6 +107,14 @@ function extractContactLineFromIdentity(identity: unknown): string | null {
   if (github) contactParts.push(github);
 
   return contactParts.length ? contactParts.join(' | ') : null;
+}
+
+function extractContactLineFromResumeV2Json(resumeV2Json: unknown): string | null {
+  if (!resumeV2Json || typeof resumeV2Json !== 'object') return null;
+  const heading = (resumeV2Json as Record<string, unknown>).heading;
+  if (!heading || typeof heading !== 'object') return null;
+  const contactLine = trimText((heading as Record<string, unknown>).contactLine);
+  return contactLine || null;
 }
 
 function extractContactLineFromLines(candidateLines: string[], fullName: string): string | null {
