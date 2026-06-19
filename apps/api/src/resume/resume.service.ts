@@ -2941,6 +2941,8 @@ export class ResumeService {
       order: { order: 'ASC' },
     });
 
+    const latestParsedRecord = baseline.parsedRecords?.[0] ?? null;
+    const baselineVerified = Boolean((latestParsedRecord as any)?.flagsJson?.reviewState?.verified);
     const persistedResumeV2ForAuthority = (() => {
       try {
         const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
@@ -2952,11 +2954,25 @@ export class ResumeService {
         return null;
       }
     })();
-    const sourceSections = resolveBaselineSectionsForGeneration(baseline);
-    const resumeV2AuthoritySections = persistedResumeV2ForAuthority
-      ? this.buildResumeV2AuthoritySectionsFromNormalizedDocument(persistedResumeV2ForAuthority as NormalizedResumeDocument, baseline.id)
-      : null;
-    const primaryGenerationSections = (resumeV2AuthoritySections ?? sourceSections) as any;
+    const baselineFileUsable = Boolean(persistedResumeV2ForAuthority);
+    if (!baselineFileUsable || !baselineVerified) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'baseline_file_unavailable',
+          message: 'Resume generation requires a verified usable Baseline File.',
+          details: {
+            baselineFileUsable,
+            baselineVerified,
+            generationAuthority: 'fallback',
+          },
+        },
+      });
+    }
+    const resumeV2AuthoritySections = this.buildResumeV2AuthoritySectionsFromNormalizedDocument(
+      persistedResumeV2ForAuthority as NormalizedResumeDocument,
+      baseline.id,
+    );
+    const primaryGenerationSections = resumeV2AuthoritySections as any;
     const sectionsWithPolicies = this.applyPoliciesToSections(
       primaryGenerationSections as any,
       policies,
@@ -2968,9 +2984,7 @@ export class ResumeService {
 	        BaselineIncludePolicy.NEVER,
 	    );
 	    try {
-	      const baselineProofStructured = persistedResumeV2ForAuthority
-          ? extractStructuredBaselineFromSections(primaryGenerationSections as any)
-          : extractStructuredBaselineFromSections(allowedSections as any);
+      const baselineProofStructured = extractStructuredBaselineFromSections(primaryGenerationSections as any);
 	      const proofPayload = {
 	        baselineId: baseline.id,
 	        baselineVersionId: baselineVersion.id,
@@ -3005,14 +3019,10 @@ export class ResumeService {
 	    }
 		    let resumeInputSections: any[] =
 		      this.promoteExperienceLikeSections(allowedSections) as any[];
-        if (persistedResumeV2ForAuthority) {
-          resumeInputSections = primaryGenerationSections as any[];
-        }
+        resumeInputSections = primaryGenerationSections as any[];
 		    lastResumeGenerationCheckpoint = 'resume_input_sections_resolved';
 
-		    const structuredBaselineForAuthorityGate = persistedResumeV2ForAuthority
-          ? extractStructuredBaselineFromSections(primaryGenerationSections as any)
-          : extractStructuredBaselineFromSections(resumeInputSections as any);
+		    const structuredBaselineForAuthorityGate = extractStructuredBaselineFromSections(primaryGenerationSections as any);
 		    emitStructuredBaselineExtractionDebug(
 		      'authority_gate',
 		      resumeInputSections as unknown[],
@@ -4664,9 +4674,9 @@ export class ResumeService {
         preview: {
           resume: null,
         },
-        generationAuthority: persistedResumeV2ForAuthority ? 'baseline_file' : 'fallback',
-        baselineVerified: Boolean((baseline.parsedRecords?.[0] as any)?.flagsJson?.reviewState?.verified),
-        baselineFileUsable: Boolean(persistedResumeV2ForAuthority),
+        generationAuthority: 'baseline_file',
+        baselineVerified: baselineVerified,
+        baselineFileUsable: baselineFileUsable,
         baselineFileVersionHash: baselineVersionForFailSafe?.hash ?? null,
         trackerEntryId: null,
         trackerStatus: null,
@@ -4680,9 +4690,9 @@ export class ResumeService {
           auditId: audit.id,
           baselineVersionHash: audit.baselineVersionHash,
           complianceFlags,
-          generationAuthority: persistedResumeV2ForAuthority ? 'baseline_file' : 'fallback',
-          baselineVerified: Boolean((baseline.parsedRecords?.[0] as any)?.flagsJson?.reviewState?.verified),
-          baselineFileUsable: Boolean(persistedResumeV2ForAuthority),
+          generationAuthority: 'baseline_file',
+          baselineVerified: baselineVerified,
+          baselineFileUsable: baselineFileUsable,
           baselineFileVersionHash: baselineVersionForFailSafe?.hash ?? null,
           resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
           resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
