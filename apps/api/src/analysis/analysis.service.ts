@@ -588,7 +588,7 @@ export class AnalysisService {
 
     const generationRequest = {
       baselineId: assessment.baselineId,
-      baselineVersionId: assessment.baselineVersion?.toString() ?? null,
+      baselineVersionId: null,
       jobId: assessment.jobId,
       analysisId: assessment.id,
     };
