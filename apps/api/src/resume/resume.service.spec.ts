@@ -4467,7 +4467,8 @@ describe('ResumeService contract', () => {
         baselineId: 'baseline-1',
         sectionType: BaselineSectionType.EXPERIENCE,
         title: 'Experience',
-        content: '- Improved service reliability.\n- Built dashboards.',
+        content:
+          '- Improved service reliability across incident response.\n- Built dashboards for leadership review.',
         includePolicy: BaselineIncludePolicy.ALWAYS,
         order: 0,
         createdAt: new Date(),
@@ -4484,7 +4485,7 @@ describe('ResumeService contract', () => {
             company: 'Acme',
             roleTitle: 'Operator',
             bullets: [
-              { text: 'Improved service reliability.' },
+              { text: 'Improved service reliability across incident response and escalation handling.' },
               { text: 'Delivered consistent execution by clarifying priorities and maintaining a steady operating rhythm.' },
             ],
           },
@@ -4500,13 +4501,17 @@ describe('ResumeService contract', () => {
         roleTitle: 'Operator',
         bullets: [
           expect.objectContaining({
-            text: 'Improved service reliability.',
+            text: 'Improved service reliability across incident response and escalation handling.',
             sourceEvidenceIds: expect.arrayContaining([expect.any(String)]),
+            source: expect.objectContaining({
+              sourceEvidenceIds: expect.arrayContaining([expect.any(String)]),
+            }),
           }),
         ],
       },
     ]);
     expect(result.usedEvidenceIds.length).toBe(1);
+    expect(result.usedEvidenceIds).toEqual(expect.arrayContaining([expect.any(String)]));
   });
 
   it('throws resume_v2_evidence_missing_before_persistence before recordResumeSuccess when no evidence is present', () => {

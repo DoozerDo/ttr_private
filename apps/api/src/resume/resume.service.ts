@@ -1523,23 +1523,67 @@ export class ResumeService {
   ): { resume: NormalizedResumeDocument; usedEvidenceIds: string[] } {
     const preview = structuredClone(resume) as any;
     const usedEvidenceIds = new Set<string>();
-    const evidenceByNormalizedText = new Map<string, string[]>();
-    const normalizeBulletKey = (value: unknown): string =>
-      String(value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const evidenceEntries: Array<{ id: string; texts: string[] }> = [];
+    const normalizeEvidenceText = (value: unknown): string =>
+      String(value ?? '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/^[\s\u2022\u25CF\u25E6*-]+/, '')
+        .replace(/\s+/g, ' ')
+        .replace(/[.?!]+$/g, '')
+        .trim()
+        .toLowerCase();
+    const isTextLikeKey = (key: string): boolean =>
+      /(?:^|\.)(?:text|bulletText|content|rawText|normalizedText|displayText|anchorText|sourceText)$/i.test(key);
+    const extractEvidenceTexts = (evidence: Record<string, unknown>): string[] => {
+      const texts = new Set<string>();
+      for (const [key, value] of Object.entries(evidence)) {
+        if (!isTextLikeKey(key) || typeof value !== 'string') continue;
+        const normalized = normalizeEvidenceText(value);
+        if (normalized) texts.add(normalized);
+      }
+      const nestedSource = evidence.source && typeof evidence.source === 'object' ? (evidence.source as Record<string, unknown>) : null;
+      if (nestedSource) {
+        for (const [key, value] of Object.entries(nestedSource)) {
+          if (!isTextLikeKey(key) || typeof value !== 'string') continue;
+          const normalized = normalizeEvidenceText(value);
+          if (normalized) texts.add(normalized);
+        }
+      }
+      return Array.from(texts);
+    };
+    const isMeaningfulContainment = (left: string, right: string): boolean => {
+      const a = normalizeEvidenceText(left);
+      const b = normalizeEvidenceText(right);
+      if (!a || !b) return false;
+      if (a === b) return true;
+      const shorter = a.length <= b.length ? a : b;
+      const longer = a.length <= b.length ? b : a;
+      if (shorter.length < 28) return false;
+      if (shorter.split(' ').filter(Boolean).length < 5) return false;
+      if (shorter.length / longer.length < 0.7) return false;
+      return longer.includes(shorter);
+    };
 
     for (const section of resumeInputSections ?? []) {
       const logicalUnits = ResumeDraftBullets.reconstructLogicalTextUnits(section.content ?? '');
       const evidenceUnits = ResumeDraftBullets.extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits);
       for (const evidence of evidenceUnits) {
-        const candidates = [
-          normalizeBulletKey(evidence.normalizedText),
-          normalizeBulletKey(evidence.sourceText),
-        ].filter(Boolean);
-        for (const key of candidates) {
-          const existing = evidenceByNormalizedText.get(key) ?? [];
-          if (!existing.includes(evidence.id)) {
-            evidenceByNormalizedText.set(key, [...existing, evidence.id]);
-          }
+        const texts = extractEvidenceTexts({
+          ...evidence,
+          text: evidence.normalizedText,
+          bulletText: evidence.sourceText,
+          content: evidence.sourceText,
+          rawText: evidence.sourceText,
+          displayText: evidence.sourceText,
+          anchorText: evidence.sourceText,
+          sourceText: evidence.sourceText,
+        } as any);
+        if (texts.length) {
+          evidenceEntries.push({
+            id: evidence.id,
+            texts,
+          });
         }
       }
     }
@@ -1552,16 +1596,30 @@ export class ResumeService {
       .map((entry, sectionIndex) => {
         if (!entry || typeof entry !== 'object') return null;
         const bullets = Array.isArray(entry.bullets) ? entry.bullets : [];
-      const nextBullets = bullets
-        .map((bullet, bulletIndex) => {
-          const text = typeof bullet === 'string' ? bullet : String((bullet as any)?.text ?? '');
-          const traceEvidenceIds = (traceMap[`experience:${sectionIndex}:${bulletIndex}`] ?? []).filter(Boolean);
-          const fallbackEvidenceIds = evidenceByNormalizedText.get(normalizeBulletKey(text)) ?? [];
-          const sourceEvidenceIds = Array.from(new Set([...traceEvidenceIds, ...fallbackEvidenceIds])).filter(Boolean);
-          if (!text || !sourceEvidenceIds.length) return null;
-          sourceEvidenceIds.forEach((id) => usedEvidenceIds.add(id));
-          return typeof bullet === 'string'
-            ? { text, sourceEvidenceIds }
+        const nextBullets = bullets
+          .map((bullet, bulletIndex) => {
+            const text = typeof bullet === 'string' ? bullet : String((bullet as any)?.text ?? '');
+            const traceEvidenceIds = (traceMap[`experience:${sectionIndex}:${bulletIndex}`] ?? []).filter(Boolean);
+            const normalizedBullet = normalizeEvidenceText(text);
+            const exactEvidenceIds = evidenceEntries
+              .filter((candidate) => candidate.texts.some((candidateText) => candidateText === normalizedBullet))
+              .map((candidate) => candidate.id);
+            const containedEvidenceIds = exactEvidenceIds.length
+              ? []
+              : evidenceEntries
+                  .filter((candidate) =>
+                    candidate.texts.some((candidateText) =>
+                      normalizedBullet === candidateText || isMeaningfulContainment(normalizedBullet, candidateText),
+                    ),
+                  )
+                  .map((candidate) => candidate.id);
+            const sourceEvidenceIds = Array.from(
+              new Set([...traceEvidenceIds, ...exactEvidenceIds, ...containedEvidenceIds]),
+            ).filter(Boolean);
+            if (!text || !sourceEvidenceIds.length) return null;
+            sourceEvidenceIds.forEach((id) => usedEvidenceIds.add(id));
+            return typeof bullet === 'string'
+              ? { text, sourceEvidenceIds }
               : {
                   ...(bullet as Record<string, unknown>),
                   text,
