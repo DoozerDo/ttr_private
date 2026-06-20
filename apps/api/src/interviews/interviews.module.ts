@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Baseline } from '../baseline/baseline.entity';
+import { BaselineParsed } from '../baseline/baseline-parsed.entity';
 import { BaselineSection } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
@@ -42,6 +43,7 @@ import { ResumeModule } from '../resume/resume.module';
       Job,
       FitAssessment,
       Baseline,
+      BaselineParsed,
       BaselineSection,
       BaselineVersion,
       BaselineBlockPolicy,
