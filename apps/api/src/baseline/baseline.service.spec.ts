@@ -624,6 +624,11 @@ const ingestionResult = {
         validationReasons: [],
       }),
     );
+    expect(created.flagsJson?.reviewState).toEqual(
+      expect.objectContaining({
+        verified: true,
+      }),
+    );
     expect(created.resumeV2Json?.experience?.[0]?.evidence?.length).toBeGreaterThan(0);
     const validation = validateNormalizedResumeDocument(created.resumeV2Json);
     expect(validation.valid).toBe(true);

@@ -55,7 +55,10 @@ import {
   classifyStrengtheningImpact,
   type StrengtheningImpactResult,
 } from './strengthening-impact';
-import { buildValidatedResumeV2FromParsedBaseline } from './baseline-resume-v2';
+import {
+  buildValidatedResumeV2FromParsedBaseline,
+  evaluateResumeV2Usability,
+} from './baseline-resume-v2';
 
 export type FileMetadata = {
   originalname: string;
@@ -1516,6 +1519,7 @@ export class BaselineService {
       });
     }
 
+    const resumeV2Usability = evaluateResumeV2Usability(resumeV2Json);
     const parsedRecord = manager.create(BaselineParsed, {
       baselineId: baseline.id,
       sourceFileId: baseline.id,
@@ -1524,7 +1528,12 @@ export class BaselineService {
       ingestedAt: new Date(parsedBaseline.ingested_at),
       parsedJson: parsedBaseline,
       resumeV2Json,
-      flagsJson: parsedBaseline.system_generated_read_only,
+      flagsJson: {
+        ...(parsedBaseline.system_generated_read_only ?? {}),
+        reviewState: {
+          verified: resumeV2Usability.usable,
+        },
+      },
     });
 
     await manager.save(parsedRecord);
