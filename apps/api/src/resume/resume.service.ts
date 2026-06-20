@@ -1586,52 +1586,6 @@ export class ResumeService {
     };
   }
 
-  private buildResumeEvidenceLifecycleDiagnostic(input: {
-    stage: string;
-    resume: NormalizedResumeDocument | Record<string, unknown> | null;
-    usedEvidenceIds?: string[];
-  }) {
-    const experience = Array.isArray((input.resume as any)?.experience)
-      ? ((input.resume as any).experience as any[])
-      : [];
-    let evidenceBackedBulletCount = 0;
-    let unevidencedBulletCount = 0;
-    let firstBulletText = '';
-    let firstEvidenceIds: string[] = [];
-
-    for (const role of experience) {
-      const bullets = Array.isArray(role?.bullets) ? role.bullets : [];
-      for (const bullet of bullets) {
-        const text = String(bullet?.text ?? bullet ?? '').trim();
-        const evidenceIds = Array.isArray(bullet?.sourceEvidenceIds)
-          ? bullet.sourceEvidenceIds.filter(Boolean)
-          : Array.isArray(bullet?.source?.sourceEvidenceIds)
-            ? bullet.source.sourceEvidenceIds.filter(Boolean)
-            : [];
-        if (!firstBulletText && text) {
-          firstBulletText = text;
-          firstEvidenceIds = evidenceIds.slice(0, 5);
-        }
-        if (evidenceIds.length > 0) {
-          evidenceBackedBulletCount += 1;
-        } else {
-          unevidencedBulletCount += 1;
-        }
-      }
-    }
-
-    return {
-      stage: input.stage,
-      bulletTextHash: createHash('sha256').update(firstBulletText || '').digest('hex'),
-      sourceEvidenceIdsCount: firstEvidenceIds.length,
-      sourceEvidenceIdsFirst5: firstEvidenceIds.slice(0, 5),
-      totalResumeUsedEvidenceIdsCount: Array.isArray(input.usedEvidenceIds) ? input.usedEvidenceIds.filter(Boolean).length : 0,
-      evidenceBackedBulletCount,
-      unevidencedBulletCount,
-      experienceCount: experience.length,
-    };
-  }
-
   private getLatestPersistedResumeV2Json(parsedRecords: any[] | null | undefined): unknown | null {
     if (!Array.isArray(parsedRecords) || parsedRecords.length === 0) return null;
     const candidates = parsedRecords
@@ -3152,9 +3106,8 @@ export class ResumeService {
 	    } catch {
 	      // ignore proof logging failures
 	    }
-		    let resumeInputSections: any[] =
-		      this.promoteExperienceLikeSections(allowedSections) as any[];
-        resumeInputSections = primaryGenerationSections as any[];
+    let resumeInputSections: any[] =
+      this.promoteExperienceLikeSections(allowedSections) as any[];
 		    lastResumeGenerationCheckpoint = 'resume_input_sections_resolved';
 
 		    const structuredBaselineForAuthorityGate = extractStructuredBaselineFromSections(primaryGenerationSections as any);
@@ -5296,12 +5249,6 @@ export class ResumeService {
         resumeInputSections,
       );
       response.preview.resume = previewEvidence.resume as any;
-      // eslint-disable-next-line no-console
-      console.log('[RESUME_EVIDENCE_LIFECYCLE]', this.buildResumeEvidenceLifecycleDiagnostic({
-        stage: 'after_attachResumePreviewEvidence',
-        resume: response.preview.resume as NormalizedResumeDocument,
-        usedEvidenceIds: previewEvidence.usedEvidenceIds,
-      }));
       const previewExperienceAfter = Array.isArray((response.preview.resume as any)?.experience)
         ? (response.preview.resume as any).experience
         : [];
@@ -6522,12 +6469,6 @@ export class ResumeService {
         })();
 	        try {
 	          if (failSafeSucceeded) {
-            // eslint-disable-next-line no-console
-            console.log('[RESUME_EVIDENCE_LIFECYCLE]', this.buildResumeEvidenceLifecycleDiagnostic({
-              stage: 'before_recordResumeSuccess',
-              resume: response.preview.resume as NormalizedResumeDocument,
-              usedEvidenceIds: (response as any)?.internalTrace?.usedEvidenceIds ?? [],
-            }));
             await this.studioArtifactsService.recordResumeSuccess({
               userId,
               baselineId: studioArtifactContext.baselineId,
