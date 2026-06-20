@@ -658,10 +658,13 @@ export class StudioArtifactsService {
     responseBody: Record<string, unknown>,
   ): void {
     if (kind === 'resume') {
+      const diagnosticResume = normalizeRecord((responseBody as any)?.preview)?.resume;
       // eslint-disable-next-line no-console
       console.log('[RESUME_EVIDENCE_LIFECYCLE]', buildResumeEvidenceLifecycleDiagnostic({
         stage: 'before_resume_artifact_evidence_contract',
-        resume: normalizeRecord((responseBody as any)?.preview)?.resume ?? null,
+        resume: diagnosticResume && typeof diagnosticResume === 'object'
+          ? (diagnosticResume as Record<string, unknown>)
+          : null,
         usedEvidenceIds: Array.isArray((responseBody as any)?.internalTrace?.usedEvidenceIds)
           ? (responseBody as any).internalTrace.usedEvidenceIds
           : [],
