@@ -383,6 +383,50 @@ function sanitizeResumeResponseBodyForEvidenceContract(
   };
 }
 
+function buildResumeEvidenceLifecycleDiagnostic(input: {
+  stage: string;
+  resume: Record<string, unknown> | null;
+  usedEvidenceIds?: string[];
+}) {
+  const experience = Array.isArray((input.resume as any)?.experience)
+    ? ((input.resume as any).experience as any[])
+    : [];
+  let evidenceBackedBulletCount = 0;
+  let unevidencedBulletCount = 0;
+  let firstBulletText = '';
+  let firstEvidenceIds: string[] = [];
+  for (const role of experience) {
+    const bullets = Array.isArray(role?.bullets) ? role.bullets : [];
+    for (const bullet of bullets) {
+      const text = String(bullet?.text ?? bullet ?? '').trim();
+      const evidenceIds = Array.isArray(bullet?.sourceEvidenceIds)
+        ? bullet.sourceEvidenceIds.filter(Boolean)
+        : Array.isArray(bullet?.source?.sourceEvidenceIds)
+          ? bullet.source.sourceEvidenceIds.filter(Boolean)
+          : [];
+      if (!firstBulletText && text) {
+        firstBulletText = text;
+        firstEvidenceIds = evidenceIds.slice(0, 5);
+      }
+      if (evidenceIds.length > 0) {
+        evidenceBackedBulletCount += 1;
+      } else {
+        unevidencedBulletCount += 1;
+      }
+    }
+  }
+  return {
+    stage: input.stage,
+    bulletTextHash: createHash('sha256').update(firstBulletText || '').digest('hex'),
+    sourceEvidenceIdsCount: firstEvidenceIds.length,
+    sourceEvidenceIdsFirst5: firstEvidenceIds.slice(0, 5),
+    totalResumeUsedEvidenceIdsCount: Array.isArray(input.usedEvidenceIds) ? input.usedEvidenceIds.filter(Boolean).length : 0,
+    evidenceBackedBulletCount,
+    unevidencedBulletCount,
+    experienceCount: experience.length,
+  };
+}
+
 function getResponseInternalBool(responseBody: Record<string, unknown> | null, key: string): boolean {
   if (!responseBody) return false;
   const internal = normalizeRecord((responseBody as any).internal);
@@ -613,6 +657,16 @@ export class StudioArtifactsService {
     kind: StudioArtifactKind,
     responseBody: Record<string, unknown>,
   ): void {
+    if (kind === 'resume') {
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_EVIDENCE_LIFECYCLE]', buildResumeEvidenceLifecycleDiagnostic({
+        stage: 'before_resume_artifact_evidence_contract',
+        resume: normalizeRecord((responseBody as any)?.preview)?.resume ?? null,
+        usedEvidenceIds: Array.isArray((responseBody as any)?.internalTrace?.usedEvidenceIds)
+          ? (responseBody as any).internalTrace.usedEvidenceIds
+          : [],
+      }));
+    }
     const blockers = this.collectArtifactEvidenceBlockers(kind, responseBody);
     if (blockers.length > 0) {
       throw new UnprocessableEntityException({
@@ -1766,6 +1820,16 @@ export class StudioArtifactsService {
     analysisId?: string | null;
   }): Promise<string> {
     const filteredResponseBody = sanitizeResumeResponseBodyForEvidenceContract(input.responseBody);
+    // eslint-disable-next-line no-console
+    console.log('[RESUME_EVIDENCE_LIFECYCLE]', buildResumeEvidenceLifecycleDiagnostic({
+      stage: 'after_persistence_payload_built',
+      resume: filteredResponseBody.preview && typeof filteredResponseBody.preview === 'object'
+        ? (filteredResponseBody.preview as any).resume ?? null
+        : null,
+      usedEvidenceIds: Array.isArray((filteredResponseBody as any).internalTrace?.usedEvidenceIds)
+        ? (filteredResponseBody as any).internalTrace.usedEvidenceIds
+        : [],
+    }));
     this.assertCurrentArtifactEvidenceContract('resume', filteredResponseBody);
     if (shouldTraceArtifactIdentity) {
       // eslint-disable-next-line no-console

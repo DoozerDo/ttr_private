@@ -4459,6 +4459,56 @@ describe('ResumeService contract', () => {
     ]);
   });
 
+  it('matches Resume V2 bullets back to canonical baseline evidence when traceMap is empty', () => {
+    const { service } = buildService();
+    const resumeInputSections = [
+      {
+        id: 'section-experience',
+        baselineId: 'baseline-1',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: '- Improved service reliability.\n- Built dashboards.',
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any,
+    ];
+
+    const result = (service as any).attachResumePreviewEvidence(
+      {
+        heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+        summary: 'Supported summary.',
+        experience: [
+          {
+            company: 'Acme',
+            roleTitle: 'Operator',
+            bullets: [
+              { text: 'Improved service reliability.' },
+              { text: 'Delivered consistent execution by clarifying priorities and maintaining a steady operating rhythm.' },
+            ],
+          },
+        ],
+      },
+      {},
+      resumeInputSections,
+    );
+
+    expect(result.resume.experience).toEqual([
+      {
+        company: 'Acme',
+        roleTitle: 'Operator',
+        bullets: [
+          expect.objectContaining({
+            text: 'Improved service reliability.',
+            sourceEvidenceIds: expect.arrayContaining([expect.any(String)]),
+          }),
+        ],
+      },
+    ]);
+    expect(result.usedEvidenceIds.length).toBe(1);
+  });
+
   it('paired high-fit contract: generates both resume and cover letter from verified baseline evidence when Resume V2 is missing, omitting unsupported requirements and persisting both artifacts under the same context', async () => {
     const originalSections = baseline.sections;
     const originalParsed = baseline.parsedRecords;

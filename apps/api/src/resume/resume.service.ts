@@ -1518,9 +1518,30 @@ export class ResumeService {
   private attachResumePreviewEvidence(
     resume: NormalizedResumeDocument,
     traceMap: Record<string, string[]>,
+    resumeInputSections: BaselineSection[],
   ): { resume: NormalizedResumeDocument; usedEvidenceIds: string[] } {
     const preview = structuredClone(resume) as any;
     const usedEvidenceIds = new Set<string>();
+    const evidenceByNormalizedText = new Map<string, string[]>();
+    const normalizeBulletKey = (value: unknown): string =>
+      String(value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+    for (const section of resumeInputSections ?? []) {
+      const logicalUnits = ResumeDraftBullets.reconstructLogicalTextUnits(section.content ?? '');
+      const evidenceUnits = ResumeDraftBullets.extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits);
+      for (const evidence of evidenceUnits) {
+        const candidates = [
+          normalizeBulletKey(evidence.normalizedText),
+          normalizeBulletKey(evidence.sourceText),
+        ].filter(Boolean);
+        for (const key of candidates) {
+          const existing = evidenceByNormalizedText.get(key) ?? [];
+          if (!existing.includes(evidence.id)) {
+            evidenceByNormalizedText.set(key, [...existing, evidence.id]);
+          }
+        }
+      }
+    }
 
     if (!Array.isArray(preview.experience) || preview.experience.length === 0) {
       return { resume: preview, usedEvidenceIds: [] };
@@ -1530,14 +1551,16 @@ export class ResumeService {
       .map((entry, sectionIndex) => {
         if (!entry || typeof entry !== 'object') return null;
         const bullets = Array.isArray(entry.bullets) ? entry.bullets : [];
-        const nextBullets = bullets
-          .map((bullet, bulletIndex) => {
-            const text = typeof bullet === 'string' ? bullet : String((bullet as any)?.text ?? '');
-            const sourceEvidenceIds = (traceMap[`experience:${sectionIndex}:${bulletIndex}`] ?? []).filter(Boolean);
-            if (!text || !sourceEvidenceIds.length) return null;
-            sourceEvidenceIds.forEach((id) => usedEvidenceIds.add(id));
-            return typeof bullet === 'string'
-              ? { text, sourceEvidenceIds }
+      const nextBullets = bullets
+        .map((bullet, bulletIndex) => {
+          const text = typeof bullet === 'string' ? bullet : String((bullet as any)?.text ?? '');
+          const traceEvidenceIds = (traceMap[`experience:${sectionIndex}:${bulletIndex}`] ?? []).filter(Boolean);
+          const fallbackEvidenceIds = evidenceByNormalizedText.get(normalizeBulletKey(text)) ?? [];
+          const sourceEvidenceIds = Array.from(new Set([...traceEvidenceIds, ...fallbackEvidenceIds])).filter(Boolean);
+          if (!text || !sourceEvidenceIds.length) return null;
+          sourceEvidenceIds.forEach((id) => usedEvidenceIds.add(id));
+          return typeof bullet === 'string'
+            ? { text, sourceEvidenceIds }
               : {
                   ...(bullet as Record<string, unknown>),
                   text,
@@ -1560,6 +1583,52 @@ export class ResumeService {
     return {
       resume: preview,
       usedEvidenceIds: Array.from(usedEvidenceIds),
+    };
+  }
+
+  private buildResumeEvidenceLifecycleDiagnostic(input: {
+    stage: string;
+    resume: NormalizedResumeDocument | Record<string, unknown> | null;
+    usedEvidenceIds?: string[];
+  }) {
+    const experience = Array.isArray((input.resume as any)?.experience)
+      ? ((input.resume as any).experience as any[])
+      : [];
+    let evidenceBackedBulletCount = 0;
+    let unevidencedBulletCount = 0;
+    let firstBulletText = '';
+    let firstEvidenceIds: string[] = [];
+
+    for (const role of experience) {
+      const bullets = Array.isArray(role?.bullets) ? role.bullets : [];
+      for (const bullet of bullets) {
+        const text = String(bullet?.text ?? bullet ?? '').trim();
+        const evidenceIds = Array.isArray(bullet?.sourceEvidenceIds)
+          ? bullet.sourceEvidenceIds.filter(Boolean)
+          : Array.isArray(bullet?.source?.sourceEvidenceIds)
+            ? bullet.source.sourceEvidenceIds.filter(Boolean)
+            : [];
+        if (!firstBulletText && text) {
+          firstBulletText = text;
+          firstEvidenceIds = evidenceIds.slice(0, 5);
+        }
+        if (evidenceIds.length > 0) {
+          evidenceBackedBulletCount += 1;
+        } else {
+          unevidencedBulletCount += 1;
+        }
+      }
+    }
+
+    return {
+      stage: input.stage,
+      bulletTextHash: createHash('sha256').update(firstBulletText || '').digest('hex'),
+      sourceEvidenceIdsCount: firstEvidenceIds.length,
+      sourceEvidenceIdsFirst5: firstEvidenceIds.slice(0, 5),
+      totalResumeUsedEvidenceIdsCount: Array.isArray(input.usedEvidenceIds) ? input.usedEvidenceIds.filter(Boolean).length : 0,
+      evidenceBackedBulletCount,
+      unevidencedBulletCount,
+      experienceCount: experience.length,
     };
   }
 
@@ -5224,8 +5293,15 @@ export class ResumeService {
       const previewEvidence = this.attachResumePreviewEvidence(
         response.preview.resume as NormalizedResumeDocument,
         resumeTraceAudit.traceMap,
+        resumeInputSections,
       );
       response.preview.resume = previewEvidence.resume as any;
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_EVIDENCE_LIFECYCLE]', this.buildResumeEvidenceLifecycleDiagnostic({
+        stage: 'after_attachResumePreviewEvidence',
+        resume: response.preview.resume as NormalizedResumeDocument,
+        usedEvidenceIds: previewEvidence.usedEvidenceIds,
+      }));
       const previewExperienceAfter = Array.isArray((response.preview.resume as any)?.experience)
         ? (response.preview.resume as any).experience
         : [];
@@ -6446,10 +6522,16 @@ export class ResumeService {
         })();
 	        try {
 	          if (failSafeSucceeded) {
-	            await this.studioArtifactsService.recordResumeSuccess({
-	              userId,
-	              baselineId: studioArtifactContext.baselineId,
-	              jobId: studioArtifactContext.jobId,
+            // eslint-disable-next-line no-console
+            console.log('[RESUME_EVIDENCE_LIFECYCLE]', this.buildResumeEvidenceLifecycleDiagnostic({
+              stage: 'before_recordResumeSuccess',
+              resume: response.preview.resume as NormalizedResumeDocument,
+              usedEvidenceIds: (response as any)?.internalTrace?.usedEvidenceIds ?? [],
+            }));
+            await this.studioArtifactsService.recordResumeSuccess({
+              userId,
+              baselineId: studioArtifactContext.baselineId,
+              jobId: studioArtifactContext.jobId,
 	              baselineVersionId: studioArtifactContext.baselineVersionId,
 	              baselineVersionHash: studioArtifactContext.baselineVersionHash,
               jobFingerprint: studioArtifactContext.jobFingerprint,
