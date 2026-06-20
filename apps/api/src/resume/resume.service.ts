@@ -1520,11 +1520,13 @@ export class ResumeService {
     resume: NormalizedResumeDocument,
     traceMap: Record<string, string[]>,
     resumeInputSections: BaselineSection[],
-  ): { resume: NormalizedResumeDocument; usedEvidenceIds: string[] } {
+  ): {
+    resume: NormalizedResumeDocument;
+    usedEvidenceIds: string[];
+  } {
     const preview = structuredClone(resume) as any;
     const usedEvidenceIds = new Set<string>();
-    const evidenceEntries: Array<{ id: string; texts: Array<{ fieldName: string; text: string }> }> = [];
-    let emittedMatchDiagnostic = false;
+    const evidenceEntries: Array<{ id: string; texts: string[] }> = [];
     const normalizeEvidenceText = (value: unknown): string =>
       String(value ?? '')
         .replace(/\r\n/g, '\n')
@@ -1534,32 +1536,14 @@ export class ResumeService {
         .replace(/[.?!]+$/g, '')
         .trim()
         .toLowerCase();
-    const isTextLikeKey = (key: string): boolean =>
-      /(?:^|\.)(?:text|bulletText|content|rawText|normalizedText|displayText|anchorText|sourceText)$/i.test(key);
-    const extractEvidenceTexts = (evidence: Record<string, unknown>): Array<{ fieldName: string; text: string }> => {
-      const texts: Array<{ fieldName: string; text: string }> = [];
-      const seen = new Set<string>();
-      const addText = (fieldName: string, value: unknown) => {
-        const normalized = normalizeEvidenceText(value);
-        if (!normalized) return;
-        const key = `${fieldName}:${normalized}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-        texts.push({ fieldName, text: normalized });
-      };
-      for (const [key, value] of Object.entries(evidence)) {
-        if (!isTextLikeKey(key) || typeof value !== 'string') continue;
-        addText(key, value);
-      }
-      const nestedSource = evidence.source && typeof evidence.source === 'object' ? (evidence.source as Record<string, unknown>) : null;
-      if (nestedSource) {
-        for (const [key, value] of Object.entries(nestedSource)) {
-          if (!isTextLikeKey(key) || typeof value !== 'string') continue;
-          addText(`source.${key}`, value);
-        }
-      }
-      return texts;
-    };
+    const extractEvidenceTexts = (evidence: Record<string, unknown>): string[] =>
+      Array.from(
+        new Set(
+          [evidence.normalizedText, evidence.sourceText]
+            .map((value) => normalizeEvidenceText(value))
+            .filter((value) => value.length > 0),
+        ),
+      );
     const isMeaningfulContainment = (left: string, right: string): boolean => {
       const a = normalizeEvidenceText(left);
       const b = normalizeEvidenceText(right);
@@ -1577,16 +1561,7 @@ export class ResumeService {
       const logicalUnits = ResumeDraftBullets.reconstructLogicalTextUnits(section.content ?? '');
       const evidenceUnits = ResumeDraftBullets.extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits);
       for (const evidence of evidenceUnits) {
-        const texts = extractEvidenceTexts({
-          ...evidence,
-          text: evidence.normalizedText,
-          bulletText: evidence.sourceText,
-          content: evidence.sourceText,
-          rawText: evidence.sourceText,
-          displayText: evidence.sourceText,
-          anchorText: evidence.sourceText,
-          sourceText: evidence.sourceText,
-        } as any);
+        const texts = extractEvidenceTexts(evidence as any);
         if (texts.length) {
           evidenceEntries.push({
             id: evidence.id,
@@ -1610,43 +1585,21 @@ export class ResumeService {
             const traceEvidenceIds = (traceMap[`experience:${sectionIndex}:${bulletIndex}`] ?? []).filter(Boolean);
             const normalizedBullet = normalizeEvidenceText(text);
             const exactEvidenceIds = evidenceEntries
-              .filter((candidate) => candidate.texts.some((candidateText) => candidateText.text === normalizedBullet))
+              .filter((candidate) => candidate.texts.some((candidateText) => candidateText === normalizedBullet))
               .map((candidate) => candidate.id);
             const containedEvidenceIds = exactEvidenceIds.length
               ? []
               : evidenceEntries
                   .filter((candidate) =>
                     candidate.texts.some((candidateText) =>
-                      normalizedBullet === candidateText.text ||
-                      isMeaningfulContainment(normalizedBullet, candidateText.text),
+                      normalizedBullet === candidateText ||
+                      isMeaningfulContainment(normalizedBullet, candidateText),
                     ),
                   )
                   .map((candidate) => candidate.id);
             const sourceEvidenceIds = Array.from(
               new Set([...traceEvidenceIds, ...exactEvidenceIds, ...containedEvidenceIds]),
             ).filter(Boolean);
-            const hasTraceMatch = traceEvidenceIds.length > 0;
-            const hasCandidateMatch = sourceEvidenceIds.length > 0;
-            if (!emittedMatchDiagnostic && !hasTraceMatch && evidenceEntries.length > 0 && !hasCandidateMatch) {
-              emittedMatchDiagnostic = true;
-              // eslint-disable-next-line no-console
-              console.log('RESUME_EVIDENCE_MATCH_DIAGNOSTIC', {
-                bullet: {
-                  normalizedText: normalizedBullet,
-                  tokenCount: normalizedBullet ? normalizedBullet.split(/\s+/).filter(Boolean).length : 0,
-                  length: normalizedBullet.length,
-                },
-                candidates: evidenceEntries.slice(0, 10).flatMap((candidate) =>
-                  candidate.texts.slice(0, 10).map((candidateText) => ({
-                    evidenceId: candidate.id,
-                    fieldName: candidateText.fieldName,
-                    normalizedText: candidateText.text,
-                    tokenCount: candidateText.text ? candidateText.text.split(/\s+/).filter(Boolean).length : 0,
-                    length: candidateText.text.length,
-                  })),
-                ),
-              });
-            }
             if (!text || !sourceEvidenceIds.length) return null;
             sourceEvidenceIds.forEach((id) => usedEvidenceIds.add(id));
             return typeof bullet === 'string'

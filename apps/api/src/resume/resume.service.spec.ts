@@ -4475,6 +4475,16 @@ describe('ResumeService contract', () => {
         updatedAt: new Date(),
       } as any,
     ];
+    const canonicalEvidenceUnits = extractEvidenceUnitsFromLogicalUnits(
+      resumeInputSections[0].id,
+      reconstructLogicalTextUnits(resumeInputSections[0].content),
+    );
+    expect(canonicalEvidenceUnits[0]).toEqual(
+      expect.objectContaining({
+        sourceText: 'Improved service reliability across incident response.',
+        normalizedText: 'Improved service reliability across incident response.',
+      }),
+    );
 
     const result = (service as any).attachResumePreviewEvidence(
       {
