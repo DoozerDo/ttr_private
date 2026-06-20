@@ -4404,6 +4404,61 @@ describe('ResumeService contract', () => {
     expect(second.debugTrace).toEqual(first.debugTrace);
   });
 
+  it('omits Resume V2 bullets without evidence and attaches canonical sourceEvidenceIds to the rest', () => {
+    const { service } = buildService();
+    const preview = {
+      heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+      summary: 'Evidence-backed summary.',
+      experience: [
+        {
+          company: 'Cascade Aerial Photography',
+          roleTitle: 'Lead Support Engineer',
+          bullets: [
+            'Customer-facing technical support at the in-store computer helpdesk',
+            'Delivered consistent execution by clarifying priorities and maintaining a steady operating rhythm.',
+          ],
+        },
+        {
+          company: 'Acme',
+          roleTitle: 'Operator',
+          bullets: ['Improved service reliability.'],
+        },
+      ],
+    } as any;
+
+    const result = (service as any).attachResumePreviewEvidence(preview, {
+      'experience:0:0': ['e-1'],
+      'experience:0:1': [],
+      'experience:1:0': ['e-2'],
+    });
+
+    expect(result.usedEvidenceIds).toEqual(['e-1', 'e-2']);
+    expect(result.resume.experience).toEqual([
+      {
+        company: 'Cascade Aerial Photography',
+        roleTitle: 'Lead Support Engineer',
+        bullets: [
+          {
+            text: 'Customer-facing technical support at the in-store computer helpdesk',
+            sourceEvidenceIds: ['e-1'],
+            source: { sourceEvidenceIds: ['e-1'] },
+          },
+        ],
+      },
+      {
+        company: 'Acme',
+        roleTitle: 'Operator',
+        bullets: [
+          {
+            text: 'Improved service reliability.',
+            sourceEvidenceIds: ['e-2'],
+            source: { sourceEvidenceIds: ['e-2'] },
+          },
+        ],
+      },
+    ]);
+  });
+
   it('paired high-fit contract: generates both resume and cover letter from verified baseline evidence when Resume V2 is missing, omitting unsupported requirements and persisting both artifacts under the same context', async () => {
     const originalSections = baseline.sections;
     const originalParsed = baseline.parsedRecords;

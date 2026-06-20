@@ -1515,6 +1515,54 @@ export class ResumeService {
     }));
   }
 
+  private attachResumePreviewEvidence(
+    resume: NormalizedResumeDocument,
+    traceMap: Record<string, string[]>,
+  ): { resume: NormalizedResumeDocument; usedEvidenceIds: string[] } {
+    const preview = structuredClone(resume) as any;
+    const usedEvidenceIds = new Set<string>();
+
+    if (!Array.isArray(preview.experience) || preview.experience.length === 0) {
+      return { resume: preview, usedEvidenceIds: [] };
+    }
+
+    preview.experience = preview.experience
+      .map((entry, sectionIndex) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const bullets = Array.isArray(entry.bullets) ? entry.bullets : [];
+        const nextBullets = bullets
+          .map((bullet, bulletIndex) => {
+            const text = typeof bullet === 'string' ? bullet : String((bullet as any)?.text ?? '');
+            const sourceEvidenceIds = (traceMap[`experience:${sectionIndex}:${bulletIndex}`] ?? []).filter(Boolean);
+            if (!text || !sourceEvidenceIds.length) return null;
+            sourceEvidenceIds.forEach((id) => usedEvidenceIds.add(id));
+            return typeof bullet === 'string'
+              ? { text, sourceEvidenceIds }
+              : {
+                  ...(bullet as Record<string, unknown>),
+                  text,
+                  sourceEvidenceIds,
+                  source: {
+                    ...(((bullet as Record<string, unknown>).source as Record<string, unknown>) ?? {}),
+                    sourceEvidenceIds,
+                  },
+                };
+          })
+          .filter(Boolean);
+        if (!nextBullets.length) return null;
+        return {
+          ...entry,
+          bullets: nextBullets,
+        };
+      })
+      .filter(Boolean);
+
+    return {
+      resume: preview,
+      usedEvidenceIds: Array.from(usedEvidenceIds),
+    };
+  }
+
   private getLatestPersistedResumeV2Json(parsedRecords: any[] | null | undefined): unknown | null {
     if (!Array.isArray(parsedRecords) || parsedRecords.length === 0) return null;
     const candidates = parsedRecords
@@ -5139,6 +5187,17 @@ export class ResumeService {
     // Final safety: ensure the exact preview payload returned to Studio is sanitized.
     if (response?.preview?.resume) {
       response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
+      const previewEvidence = this.attachResumePreviewEvidence(
+        response.preview.resume as NormalizedResumeDocument,
+        resumeTraceAudit.traceMap,
+      );
+      response.preview.resume = previewEvidence.resume as any;
+      response.internalTrace = {
+        ...(response.internalTrace ?? {}),
+        usedEvidenceIds: previewEvidence.usedEvidenceIds.length
+          ? previewEvidence.usedEvidenceIds
+          : Object.values(resumeTraceAudit.traceMap).flat().filter(Boolean),
+      } as any;
     }
     if (typeof normalizedDocument.summary === 'string') {
       normalizedDocument.summary = trimIncompleteTrailingFragments(normalizedDocument.summary);
