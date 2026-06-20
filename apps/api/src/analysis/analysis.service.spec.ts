@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { createHash } from 'crypto';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Baseline } from '../baseline/baseline.entity';
+import { BaselineParsed } from '../baseline/baseline-parsed.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import {
   BaselineIncludePolicy,
@@ -50,6 +51,7 @@ describe('AnalysisService - fit scores contract', () => {
     update: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
+  let baselineParsedRepository: { update: jest.Mock };
   let usersRepository: { findOne: jest.Mock; update: jest.Mock; save: jest.Mock };
   let fitAssessmentRepository: {
     create: jest.Mock;
@@ -412,6 +414,9 @@ const sampleScoringV2: CxFitV2Result = {
         }),
       }),
     };
+    baselineParsedRepository = {
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
     usersRepository = {
       findOne: jest.fn().mockResolvedValue({
         id: 'user-1',
@@ -582,6 +587,10 @@ const sampleScoringV2: CxFitV2Result = {
         {
           provide: getRepositoryToken(BaselineBlockPolicy),
           useValue: { find: jest.fn().mockResolvedValue([]) },
+        },
+        {
+          provide: getRepositoryToken(BaselineParsed),
+          useValue: baselineParsedRepository,
         },
         {
           provide: getRepositoryToken(BaselineVersion),
@@ -1700,6 +1709,21 @@ const sampleScoringV2: CxFitV2Result = {
   });
 
   it('triggers both document generators once when the persisted fit score qualifies', async () => {
+    baselineRepository.findOne.mockImplementation(async () => ({
+      ...baseline,
+      parsedRecords: [
+        {
+          ...(baseline.parsedRecords?.[0] as any),
+          flagsJson: {
+            ...(baseline.parsedRecords?.[0] as any)?.flagsJson,
+            reviewState: {
+              verified: false,
+            },
+          },
+        },
+      ],
+    }));
+    baselineParsedRepository.update.mockResolvedValueOnce({ affected: 1 });
     fitAssessmentRepository.save.mockResolvedValueOnce({
       id: 'fit-high',
       userId: 'user-1',
@@ -1761,6 +1785,16 @@ const sampleScoringV2: CxFitV2Result = {
         jobId: 'job-1',
         analysisId: 'fit-high',
         oneTap: true,
+      }),
+    );
+    expect(baselineParsedRepository.update).toHaveBeenCalledWith(
+      { id: 'parsed-1' },
+      expect.objectContaining({
+        flagsJson: expect.objectContaining({
+          reviewState: expect.objectContaining({
+            verified: true,
+          }),
+        }),
       }),
     );
   });

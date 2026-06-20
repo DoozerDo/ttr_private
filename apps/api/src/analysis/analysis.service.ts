@@ -27,6 +27,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'crypto';
 import { QueryFailedError, Repository } from 'typeorm';
 import { Baseline } from '../baseline/baseline.entity';
+import { BaselineParsed } from '../baseline/baseline-parsed.entity';
 import {
   BaselineIncludePolicy,
   BaselineSection,
@@ -511,6 +512,8 @@ export class AnalysisService {
     private readonly baselineRepository: Repository<Baseline>,
     @InjectRepository(BaselineSection)
     private readonly baselineSectionRepository: Repository<BaselineSection>,
+    @InjectRepository(BaselineParsed)
+    private readonly baselineParsedRepository: Repository<BaselineParsed>,
     @InjectRepository(BaselineBlockPolicy)
     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
     @InjectRepository(BaselineVersion)
@@ -580,17 +583,39 @@ export class AnalysisService {
       relations: ['parsedRecords'],
     });
     const latestParsedRecord = baseline?.parsedRecords?.[0] ?? null;
-    const baselineVerified = Boolean(
-      (latestParsedRecord as any)?.flagsJson?.reviewState?.verified,
-    );
     const persistedResumeV2Json = (latestParsedRecord as any)?.resumeV2Json ?? null;
     const baselineFileUsable = Boolean(
       persistedResumeV2Json &&
         typeof persistedResumeV2Json === 'object' &&
         !Array.isArray(persistedResumeV2Json),
     );
+    const latestFlagsJson = (latestParsedRecord as any)?.flagsJson ?? null;
+    const baselineVerified = Boolean(
+      latestFlagsJson?.reviewState?.verified,
+    );
+    const shouldRepairBaselineVerification =
+      baselineFileUsable && !baselineVerified && Boolean(latestParsedRecord?.id);
+    if (shouldRepairBaselineVerification && latestParsedRecord?.id) {
+      const repairedFlagsJson = {
+        ...(latestFlagsJson ?? {}),
+        reviewState: {
+          ...(latestFlagsJson?.reviewState ?? {}),
+          verified: true,
+        },
+      };
+      await this.baselineParsedRepository.update(
+        { id: latestParsedRecord.id },
+        { flagsJson: repairedFlagsJson },
+      );
+      if (baseline?.parsedRecords?.length) {
+        baseline.parsedRecords[0] = {
+          ...latestParsedRecord,
+          flagsJson: repairedFlagsJson,
+        } as any;
+      }
+    }
     const verifiedUsableBaselineFileExists =
-      baselineFileUsable && baselineVerified;
+      baselineFileUsable && (baselineVerified || shouldRepairBaselineVerification);
     const resumeAlreadyExists =
       artifactRecord?.resumeStatus === StudioArtifactLifecycleStatus.COMPLETED &&
       (artifactRecord.resumeMetadata as any)?.analysisId === assessment.id;
