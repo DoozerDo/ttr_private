@@ -1462,6 +1462,55 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
     });
   });
 
+  it('accepts cover letter evidence when canonical internalTrace and paragraphEvidence are present', async () => {
+    const insertExecute = jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-cover-2' }] });
+    const createQueryBuilder = jest.fn(() => ({
+      insert: () => createQueryBuilder.mock.results[0].value,
+      into: () => createQueryBuilder.mock.results[0].value,
+      values: jest.fn(() => createQueryBuilder.mock.results[0].value),
+      onConflict: () => createQueryBuilder.mock.results[0].value,
+      returning: () => createQueryBuilder.mock.results[0].value,
+      execute: insertExecute,
+      update: () => createQueryBuilder.mock.results[0].value,
+      set: () => createQueryBuilder.mock.results[0].value,
+      where: () => createQueryBuilder.mock.results[0].value,
+    })) as any;
+    const service = buildServiceWithRepo({ createQueryBuilder, findOne: jest.fn() } as any);
+
+    await expect(
+      service.recordCoverLetterSuccess({
+        userId: 'u-1',
+        baselineId: 'b-1',
+        jobId: 'j-1',
+        baselineVersionId: 'bv-1',
+        baselineVersionHash: 'hash-1',
+        jobFingerprint: 'job-fp-1',
+        inputsHash: 'inputs-1',
+        analysisId: 'analysis-1',
+        responseBody: {
+          internalTrace: { usedEvidenceIds: ['e-1'] },
+          preview: {
+            coverLetter: {
+              paragraphs: ['I led support operations using evidence from my baseline.'],
+            },
+          },
+          paragraphEvidence: [
+            {
+              paragraphKey: 'opening',
+              paragraphText: 'I led support operations using evidence from my baseline.',
+              sourceEvidenceIds: ['e-1'],
+              anchorTexts: ['Led support operations across teams.'],
+            },
+          ],
+        },
+        content: 'cover-content',
+        metadata: { auditId: 'audit-1' },
+      }),
+    ).resolves.toBe('artifact-cover-2');
+
+    expect(insertExecute).toHaveBeenCalled();
+  });
+
   it('persists resume and cover letter into the same canonical row for the same baseline/job/analysis context', async () => {
     const insertExecute = jest.fn()
       .mockResolvedValueOnce({ raw: [{ id: 'artifact-1' }] })

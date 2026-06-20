@@ -870,6 +870,8 @@ export class CoverLettersService {
         preview: {
           coverLetter: draft.generation.document,
         },
+        internalTrace: draft.generation.internalTrace,
+        paragraphEvidence: draft.generation.paragraphEvidence,
         compliance_flags: draft.complianceResult.complianceFlags,
         audit_id: draft.complianceResult.audit.id,
         auditId: draft.complianceResult.audit.id,
