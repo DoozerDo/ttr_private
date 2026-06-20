@@ -595,6 +595,7 @@ export class AnalysisService {
     );
     const shouldRepairBaselineVerification =
       baselineFileUsable && !baselineVerified && Boolean(latestParsedRecord?.id);
+    let repairUpdateAffected: number | null = null;
     if (shouldRepairBaselineVerification && latestParsedRecord?.id) {
       const repairedFlagsJson = {
         ...(latestFlagsJson ?? {}),
@@ -603,10 +604,11 @@ export class AnalysisService {
           verified: true,
         },
       };
-      await this.baselineParsedRepository.update(
+      const repairResult = await this.baselineParsedRepository.update(
         { id: latestParsedRecord.id },
         { flagsJson: repairedFlagsJson },
       );
+      repairUpdateAffected = repairResult.affected ?? 0;
       if (baseline?.parsedRecords?.length) {
         baseline.parsedRecords[0] = {
           ...latestParsedRecord,
@@ -634,6 +636,28 @@ export class AnalysisService {
       analysisId: assessment.id,
       oneTap: verifiedUsableBaselineFileExists,
     };
+    this.logger.log(
+      JSON.stringify({
+        marker: 'ANALYSIS_DOWNSTREAM_BASELINE_VERIFICATION_HANDOFF',
+        baselineId: assessment.baselineId,
+        baselineVersionId: null,
+        latestParsedRecordId: latestParsedRecord?.id ?? null,
+        latestParsedRecordBaselineId: latestParsedRecord?.baselineId ?? null,
+        latestParsedRecordBaselineVersionId:
+          (latestParsedRecord as any)?.baselineVersionId ?? null,
+        resumeV2Usable: baselineFileUsable,
+        verifiedBeforeRepair: baselineVerified,
+        repairAttempted: shouldRepairBaselineVerification,
+        repairUpdateAffected,
+        verifiedAfterRepairInMemory:
+          Boolean(
+            (baseline?.parsedRecords?.[0] as any)?.flagsJson?.reviewState?.verified,
+          ),
+        verifiedUsableBaselineFileExists,
+        oneTapToGenerateResume: generationRequest.oneTap,
+        oneTapToGenerateCoverLetter: generationRequest.oneTap,
+      }),
+    );
 
     await Promise.all([
       this.resumeService.generateResume(userId, generationRequest),
