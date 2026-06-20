@@ -4524,6 +4524,75 @@ describe('ResumeService contract', () => {
     expect(result.usedEvidenceIds).toEqual(expect.arrayContaining([expect.any(String)]));
   });
 
+  it('keeps evidence-backed bullet objects intact through the exact guarded Resume V2 response object', async () => {
+    const { service } = buildService();
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    const originalParsed = baseline.parsedRecords;
+    const originalSections = baseline.sections;
+    const originalGuard = (service as any).assertResumeEvidenceBeforePersistence.bind(service);
+    const guardSpy = jest.spyOn(service as any, 'assertResumeEvidenceBeforePersistence');
+    guardSpy.mockImplementation((input: any) => originalGuard(input));
+
+    try {
+      baseline.parsedRecords = [
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          resumeV2Json: {
+            heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+            summary: 'Evidence-backed summary.',
+            experience: [
+              {
+                company: 'Example Co',
+                roleTitle: 'Senior Program Manager',
+                dateRange: '2020 - 2024',
+                bullets: [
+                  'Led support operations and improved service reliability across global teams.',
+                  'Built playbooks, reduced incident volume, and managed executive stakeholder updates.',
+                  'Improved response time and throughput with reporting dashboards.',
+                ],
+              },
+              {
+                company: 'Acme Corp',
+                roleTitle: 'Customer Operations Manager',
+                dateRange: '2017 - 2019',
+                bullets: [
+                  'Managed support queues and improved SLA attainment through process changes.',
+                  'Implemented escalation playbooks and weekly operational reviews.',
+                  'Built KPI reporting to track backlog, response time, and quality trends.',
+                ],
+              },
+            ],
+          },
+        } as any,
+      ];
+      baseline.sections = [baseSection] as any;
+
+      const result = await service.generateResume('user-1', {
+        ...baseRequest,
+        oneTap: true,
+      } as any);
+
+      expect(result.ok).toBe(true);
+      expect(guardSpy).toHaveBeenCalled();
+      const guardInput = guardSpy.mock.calls[0]?.[0] as any;
+      const guardedExperience = Array.isArray(guardInput?.responseBody?.preview?.resume?.experience)
+        ? guardInput.responseBody.preview.resume.experience
+        : [];
+      const guardedBullets = guardedExperience.flatMap((entry: any) => Array.isArray(entry?.bullets) ? entry.bullets : []);
+      expect(guardedBullets).toHaveLength(6);
+      expect(guardedBullets.every((bullet: any) => Array.isArray(bullet?.sourceEvidenceIds) && bullet.sourceEvidenceIds.length > 0)).toBe(true);
+      expect(Array.isArray(guardInput?.responseBody?.internalTrace?.usedEvidenceIds)).toBe(true);
+      expect((guardInput?.responseBody?.internalTrace?.usedEvidenceIds ?? []).length).toBeGreaterThan(0);
+    } finally {
+      guardSpy.mockRestore();
+      baseline.parsedRecords = originalParsed;
+      baseline.sections = originalSections;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    }
+  });
+
   it('seeds canonical evidence ids into the active Resume V2 minimal path before safety matching', () => {
     const { service } = buildService();
     const baselineSections = [

@@ -12,7 +12,7 @@ export type ResumeCompositionInput = {
     company: string;
     roleTitle: string;
     dateRange?: string;
-    bullets: Array<string | { text: string; sourceRoleKey: string; id?: string }>;
+    bullets: Array<string | { text: string; sourceRoleKey: string; id?: string; sourceEvidenceIds?: string[]; source?: { sourceEvidenceIds?: string[] } }>;
   }>;
 };
 
@@ -188,11 +188,17 @@ export class NarrativeCompositionEngine {
 
     const summaryResult = this.summaryComposer.compose({
       positioningThesis: renderPlan?.summaryNarrative ?? (targetAngle ? `${targetAngle}.` : null),
-      experienceSnippets: shapedExperience.flatMap((r) => [r.roleTitle, ...(r.bullets ?? []).slice(0, 2)]),
+      experienceSnippets: shapedExperience.flatMap((r) => [
+        r.roleTitle,
+        ...(r.bullets ?? []).slice(0, 2).map((bullet) => (typeof bullet === 'string' ? bullet : bullet.text)),
+      ]),
       evidencePriorities: evidencePriorityThemes,
     });
 
-    const combined = [summaryResult.summary, ...shapedExperience.flatMap((r) => r.bullets)].join(' ');
+    const combined = [
+      summaryResult.summary,
+      ...shapedExperience.flatMap((r) => r.bullets).map((bullet) => (typeof bullet === 'string' ? bullet : bullet.text)),
+    ].join(' ');
     const quality = this.evaluator.evaluate({
       text: combined,
       positioningThesis: renderPlan?.summaryNarrative,

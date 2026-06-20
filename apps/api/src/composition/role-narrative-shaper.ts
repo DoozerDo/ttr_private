@@ -4,7 +4,7 @@ export type RoleNarrativeShapeInput = {
   company: string;
   roleTitle: string;
   dateRange?: string;
-  bullets: Array<string | { text: string; sourceRoleKey: string; id?: string }>;
+  bullets: Array<string | { text: string; sourceRoleKey: string; id?: string; sourceEvidenceIds?: string[]; source?: { sourceEvidenceIds?: string[] } }>;
   evidencePriorities?: string[] | null;
   prohibitedDomainSignals?: RegExp[] | null;
 };
@@ -12,11 +12,13 @@ export type RoleNarrativeShapeInput = {
 export class RoleNarrativeShaper {
   private rewriter = new BulletNarrativeRewriter();
 
-  private stripRepeatedTrailingIntentPhrases(bullets: string[]): string[] {
+  private stripRepeatedTrailingIntentPhrases(
+    bullets: Array<{ text: string; sourceRoleKey: string; id?: string; sourceEvidenceIds?: string[]; source?: { sourceEvidenceIds?: string[] } }>,
+  ) {
     const tailRe = /,\s*(to\s+[a-z][^.]*)\.\s*$/i;
     const seen = new Set<string>();
     return bullets.map((b) => {
-      const m = String(b ?? '').match(tailRe);
+      const m = String(b?.text ?? '').match(tailRe);
       if (!m) return b;
       const tail = String(m[1] ?? '').toLowerCase().trim();
       if (!tail) return b;
@@ -24,11 +26,16 @@ export class RoleNarrativeShaper {
         seen.add(tail);
         return b;
       }
-      return String(b).replace(tailRe, '.').replace(/\s{2,}/g, ' ').trim();
+      return {
+        ...b,
+        text: String(b.text).replace(tailRe, '.').replace(/\s{2,}/g, ' ').trim(),
+      };
     });
   }
 
-  private diversifyOpenings(bullets: string[]): string[] {
+  private diversifyOpenings(
+    bullets: Array<{ text: string; sourceRoleKey: string; id?: string; sourceEvidenceIds?: string[]; source?: { sourceEvidenceIds?: string[] } }>,
+  ) {
     const seen = new Map<string, number>();
     const variants: Array<[RegExp, string[]]> = [
       [/^\s*Coordinated\b/i, ['Coordinated', 'Owned', 'Led', 'Partnered with', 'Standardized']],
@@ -39,16 +46,19 @@ export class RoleNarrativeShaper {
     ];
 
     return bullets.map((bullet) => {
-      const first = (String(bullet ?? '').trim().split(/\s+/)[0] ?? '').toLowerCase();
+      const first = (String(bullet?.text ?? '').trim().split(/\s+/)[0] ?? '').toLowerCase();
       if (!first) return bullet;
       const count = (seen.get(first) ?? 0) + 1;
       seen.set(first, count);
       if (count <= 1) return bullet;
 
       for (const [pattern, words] of variants) {
-        if (!pattern.test(bullet)) continue;
+        if (!pattern.test(String(bullet?.text ?? ''))) continue;
         const replacement = words[Math.min(words.length - 1, count - 1)] ?? words[0];
-        return bullet.replace(pattern, replacement);
+        return {
+          ...bullet,
+          text: String(bullet.text).replace(pattern, replacement),
+        };
       }
       return bullet;
     });
@@ -155,7 +165,7 @@ export class RoleNarrativeShaper {
     company: string;
     roleTitle: string;
     dateRange?: string;
-    bullets: string[];
+    bullets: Array<{ text: string; sourceRoleKey: string; id?: string; sourceEvidenceIds?: string[]; source?: { sourceEvidenceIds?: string[] } }>;
     bulletSourceRoleKeys: string[];
     rewrittenBulletCount: number;
     genericLanguageFlags: Array<{ role: string; flags: ReturnType<BulletNarrativeRewriter['rewrite']>['genericLanguageFlags'] }>;
@@ -188,6 +198,14 @@ export class RoleNarrativeShaper {
         return {
           rewritten,
           sourceRoleKey,
+          sourceEvidenceIds:
+            typeof bulletValue === 'string'
+              ? []
+              : Array.isArray((bulletValue as any)?.sourceEvidenceIds)
+                ? ((bulletValue as any).sourceEvidenceIds as string[]).filter(Boolean)
+                : Array.isArray((bulletValue as any)?.source?.sourceEvidenceIds)
+                  ? ((bulletValue as any).source.sourceEvidenceIds as string[]).filter(Boolean)
+                  : [],
           score: this.scoreBullet({
             bullet: rewritten,
             roleTitle: input.roleTitle,
@@ -202,7 +220,11 @@ export class RoleNarrativeShaper {
       .sort((a, b) => b.score - a.score)
       ;
 
-    const bullets = bulletsWithProvenance.map((item) => item.rewritten);
+    const bullets = bulletsWithProvenance.map((item) => ({
+      text: item.rewritten,
+      sourceRoleKey: item.sourceRoleKey,
+      ...(item.sourceEvidenceIds.length ? { sourceEvidenceIds: item.sourceEvidenceIds } : {}),
+    }));
     const dedupedIntent = this.stripRepeatedTrailingIntentPhrases(bullets);
     const diversifiedBullets = this.diversifyOpenings(dedupedIntent);
     const bulletSourceRoleKeys = bulletsWithProvenance.map((item) => item.sourceRoleKey);

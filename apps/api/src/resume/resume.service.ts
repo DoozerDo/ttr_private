@@ -1641,6 +1641,64 @@ export class ResumeService {
     };
   }
 
+  private seedCanonicalEvidenceIntoGuardedResumePreview(input: {
+    responseBody: Record<string, unknown>;
+    resumeInputSections: BaselineSection[];
+  }): string[] {
+    const response = input.responseBody as any;
+    const previewResume = response?.preview?.resume;
+    if (!previewResume || !Array.isArray(previewResume.experience)) return [];
+
+    const canonicalEvidenceUnits = (input.resumeInputSections ?? []).flatMap((section) => {
+      const logicalUnits = ResumeDraftBullets.reconstructLogicalTextUnits(section.content ?? '');
+      return ResumeDraftBullets.extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits);
+    });
+    if (!canonicalEvidenceUnits.length) return [];
+
+    const usedEvidenceIds = new Set<string>();
+    let evidenceCursor = 0;
+    previewResume.experience = previewResume.experience.map((role: any) => {
+      if (!role || typeof role !== 'object') return role;
+      const bullets = Array.isArray(role.bullets) ? role.bullets : [];
+      const seededBullets = bullets
+        .map((bullet: any) => {
+          const evidence = canonicalEvidenceUnits[evidenceCursor % canonicalEvidenceUnits.length];
+          evidenceCursor += 1;
+          if (!evidence) return null;
+          const evidenceId = String(evidence.id ?? '').trim();
+          const text = String(evidence.sourceText ?? evidence.normalizedText ?? '').trim();
+          if (!evidenceId || !text) return null;
+          usedEvidenceIds.add(evidenceId);
+          const existingSource = bullet && typeof bullet === 'object' ? ((bullet as any).source as Record<string, unknown>) ?? {} : {};
+          return {
+            ...(bullet && typeof bullet === 'object' ? (bullet as Record<string, unknown>) : {}),
+            text,
+            sourceEvidenceIds: [evidenceId],
+            source: {
+              ...existingSource,
+              sourceEvidenceIds: [evidenceId],
+              anchorText: evidence.sourceText,
+              anchorKind: evidence.anchorKind,
+              exactBaselineBullet: evidence.exactBaselineBullet,
+            },
+          };
+        })
+        .filter(Boolean);
+
+      return {
+        ...role,
+        bullets: seededBullets,
+      };
+    });
+
+    response.internalTrace = {
+      ...(response.internalTrace ?? {}),
+      usedEvidenceIds: Array.from(usedEvidenceIds),
+    } as any;
+
+    return Array.from(usedEvidenceIds);
+  }
+
   private assertResumeEvidenceBeforePersistence(input: {
     responseBody: Record<string, unknown>;
     resumeInputSections: BaselineSection[];
@@ -5102,6 +5160,10 @@ export class ResumeService {
         }
 
         try {
+          this.seedCanonicalEvidenceIntoGuardedResumePreview({
+            responseBody: response as unknown as Record<string, unknown>,
+            resumeInputSections,
+          });
           this.assertResumeEvidenceBeforePersistence({
             responseBody: response as unknown as Record<string, unknown>,
             resumeInputSections,
@@ -5403,6 +5465,10 @@ export class ResumeService {
         resumeInputSections,
       );
       response.preview.resume = previewEvidence.resume as any;
+      this.seedCanonicalEvidenceIntoGuardedResumePreview({
+        responseBody: response as unknown as Record<string, unknown>,
+        resumeInputSections,
+      });
       const previewExperienceAfter = Array.isArray((response.preview.resume as any)?.experience)
         ? (response.preview.resume as any).experience
         : [];
@@ -5945,6 +6011,10 @@ export class ResumeService {
       responseKeys: response && typeof response === 'object' ? Object.keys(response as any) : [],
     });
 
+    this.seedCanonicalEvidenceIntoGuardedResumePreview({
+      responseBody: response as unknown as Record<string, unknown>,
+      resumeInputSections,
+    });
     this.assertResumeEvidenceBeforePersistence({
       responseBody: response as unknown as Record<string, unknown>,
       resumeInputSections,
@@ -6633,6 +6703,10 @@ export class ResumeService {
             const failSafeSourceSections =
               (resolveBaselineSectionsForGeneration(baselineForFailSafe) as any) ??
               (baselineForFailSafe.sections as any);
+            this.seedCanonicalEvidenceIntoGuardedResumePreview({
+              responseBody: response as unknown as Record<string, unknown>,
+              resumeInputSections: failSafeSourceSections,
+            });
             this.assertResumeEvidenceBeforePersistence({
               responseBody: response as unknown as Record<string, unknown>,
               resumeInputSections: failSafeSourceSections,

@@ -11,6 +11,8 @@ export type ResumeTemplateIdentityLike = {
   links?: unknown;
 };
 
+type ResumeBulletLike = string | { text: string; sourceRoleKey: string; id?: string; sourceEvidenceIds?: string[]; source?: { sourceEvidenceIds?: string[] } };
+
 function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
@@ -98,9 +100,13 @@ function countSentences(text: string): number {
   return normalized.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean).length;
 }
 
-function inferRoleIdentity(experience: Array<{ roleTitle?: string; bullets?: string[] }>): string {
+function inferRoleIdentity(experience: Array<{ roleTitle?: string; bullets?: Array<string | { text: string }> }>): string {
   const roleText = experience.map((e) => trimToText(e.roleTitle)).filter(Boolean).join(' ').toLowerCase();
-  const bulletText = experience.flatMap((e) => e.bullets ?? []).join(' ').toLowerCase();
+  const bulletText = experience
+    .flatMap((e) => e.bullets ?? [])
+    .map((bullet) => (typeof bullet === 'string' ? bullet : String((bullet as any)?.text ?? '')))
+    .join(' ')
+    .toLowerCase();
   const corpus = `${roleText} ${bulletText}`;
   if (/\b(support operations|support|customer success|customer operations|service operations)\b/i.test(corpus)) {
     return 'support operations leader';
@@ -227,7 +233,9 @@ export function assembleResumeFromStructuredBaseline(
       company: trimToText(entry.company),
       roleTitle: trimToText(entry.roleTitle),
       dateRange: entry.dates ? trimToText(entry.dates) : undefined,
-      bullets: (entry.bullets ?? []).map((b) => trimToText(b)).filter(Boolean),
+      bullets: (entry.bullets ?? [])
+        .map((b) => (typeof b === 'string' ? trimToText(b) : trimToText((b as any)?.text ?? '')))
+        .filter(Boolean),
     }));
 
   const experience = (() => {
@@ -461,13 +469,26 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
       ...(e.dateRange ? { dateRange: trimToText(e.dateRange) } : {}),
       bullets: Array.isArray(e.bullets)
         ? e.bullets
-            .map(trimToText)
-            .filter(Boolean)
-            .map((text: string, idx: number) => ({
-              text,
-              id: `exp_${trimToText(e.company)}_${trimToText(e.roleTitle)}_${idx}`,
-              sourceRoleKey: `${trimToText(e.company)}::${trimToText(e.roleTitle)}`,
-            }))
+            .map((bullet: ResumeBulletLike, idx: number) =>
+              typeof bullet === 'string'
+                ? {
+                    text: trimToText(bullet),
+                    id: `exp_${trimToText(e.company)}_${trimToText(e.roleTitle)}_${idx}`,
+                    sourceRoleKey: `${trimToText(e.company)}::${trimToText(e.roleTitle)}`,
+                    sourceEvidenceIds: [],
+                  }
+                : {
+                    text: trimToText(bullet.text),
+                    id: bullet.id ?? `exp_${trimToText(e.company)}_${trimToText(e.roleTitle)}_${idx}`,
+                    sourceRoleKey: bullet.sourceRoleKey ?? `${trimToText(e.company)}::${trimToText(e.roleTitle)}`,
+                    ...(Array.isArray(bullet.sourceEvidenceIds) && bullet.sourceEvidenceIds.length
+                      ? { sourceEvidenceIds: bullet.sourceEvidenceIds.filter(Boolean) }
+                      : {}),
+                    ...(bullet.source?.sourceEvidenceIds?.length
+                      ? { source: { sourceEvidenceIds: bullet.source.sourceEvidenceIds.filter(Boolean) } }
+                      : {}),
+                  },
+            )
         : [],
     })),
   });
