@@ -2787,6 +2787,27 @@ export class ResumeService {
 
 	    const isVerifiedOnlyRequest =
 	      Boolean(request.oneTap) || Boolean(options?.enforceOneTap);
+      const latestParsedRecord = baseline.parsedRecords?.[0] ?? null;
+      const baselineVerified = Boolean(
+        (latestParsedRecord as any)?.flagsJson?.reviewState?.verified,
+      );
+      const persistedResumeV2ForAuthority = (() => {
+        try {
+          const persisted =
+            this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
+          if (!persisted || typeof persisted !== 'object') return null;
+          const normalized = normalizeNormalizedResumeDocument(
+            persisted as NormalizedResumeDocument,
+          );
+          const validation = validateNormalizedResumeDocument(normalized);
+          return validation.valid ? normalized : null;
+        } catch {
+          return null;
+        }
+      })();
+      const baselineFileUsable = Boolean(persistedResumeV2ForAuthority);
+      const verifiedUsableBaselineFileExists =
+        baselineFileUsable && baselineVerified;
 
 	    // Studio eligible lane contract:
 	    // - Not oneTap / not verified-only
@@ -2839,7 +2860,10 @@ export class ResumeService {
           const details = (templateNotReadyReason?.details as any) ?? {};
 			          const totalExperience = Number(details?.totalExperience ?? 0);
 			          const validExperience = Number(details?.validExperience ?? 0);
-				          if (totalExperience === 0 && validExperience === 0) {
+          if (totalExperience === 0 && validExperience === 0) {
+            if (verifiedUsableBaselineFileExists) {
+              // Verified usable Baseline File is authoritative; bypass legacy extraction gate.
+            } else {
 			        const isStudioEligibleLaneForFailSafe = Boolean(forceRegenerate);
 			        if (!isStudioEligibleLaneForFailSafe) {
 		              throw new UnprocessableEntityException(buildArtifactFailurePayload({
@@ -2860,6 +2884,7 @@ export class ResumeService {
 		              }));
 		            }
 		            // Studio eligible lane: degrade to baseline-only later in the pipeline instead of hard-blocking.
+            }
 		          } else {
 		            throw new UnprocessableEntityException({
 		              code: 'baseline_template_not_ready',
@@ -2941,20 +2966,6 @@ export class ResumeService {
       order: { order: 'ASC' },
     });
 
-    const latestParsedRecord = baseline.parsedRecords?.[0] ?? null;
-    const baselineVerified = Boolean((latestParsedRecord as any)?.flagsJson?.reviewState?.verified);
-    const persistedResumeV2ForAuthority = (() => {
-      try {
-        const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
-        if (!persisted || typeof persisted !== 'object') return null;
-        const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
-        const validation = validateNormalizedResumeDocument(normalized);
-        return validation.valid ? normalized : null;
-      } catch {
-        return null;
-      }
-    })();
-    const baselineFileUsable = Boolean(persistedResumeV2ForAuthority);
     if (!baselineFileUsable || !baselineVerified) {
       throw new UnprocessableEntityException({
         error: {
@@ -3131,6 +3142,7 @@ export class ResumeService {
 	            },
 	          };
 	        } else {
+	          if (!verifiedUsableBaselineFileExists) {
 	          throw new UnprocessableEntityException(buildArtifactFailurePayload({
 	            code: 'generation_blocked',
 	            category: 'generation_blocked',
@@ -3152,6 +3164,7 @@ export class ResumeService {
 	              resumeV2UsableExperienceCount,
 	            },
 	          }));
+	          }
 	        }
 	      }
 	      if (!templateReadinessDegradedToBaselineOnly) {
