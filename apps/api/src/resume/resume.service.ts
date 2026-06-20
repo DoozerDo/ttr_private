@@ -1527,6 +1527,7 @@ export class ResumeService {
     const preview = structuredClone(resume) as any;
     const usedEvidenceIds = new Set<string>();
     const evidenceEntries: Array<{ id: string; texts: string[] }> = [];
+    const evidenceIdSet = new Set<string>();
     const normalizeEvidenceText = (value: unknown): string =>
       String(value ?? '')
         .replace(/\r\n/g, '\n')
@@ -1567,6 +1568,7 @@ export class ResumeService {
             id: evidence.id,
             texts,
           });
+          evidenceIdSet.add(evidence.id);
         }
       }
     }
@@ -1583,11 +1585,21 @@ export class ResumeService {
           .map((bullet, bulletIndex) => {
             const text = typeof bullet === 'string' ? bullet : String((bullet as any)?.text ?? '');
             const traceEvidenceIds = (traceMap[`experience:${sectionIndex}:${bulletIndex}`] ?? []).filter(Boolean);
+            const seededEvidenceIds = Array.from(
+              new Set([
+                ...(Array.isArray((bullet as any)?.sourceEvidenceIds) ? (bullet as any).sourceEvidenceIds : []),
+                ...(Array.isArray((bullet as any)?.source?.sourceEvidenceIds)
+                  ? (bullet as any).source.sourceEvidenceIds
+                  : []),
+              ]),
+            ).filter((id): id is string => Boolean(id) && evidenceIdSet.has(id));
             const normalizedBullet = normalizeEvidenceText(text);
-            const exactEvidenceIds = evidenceEntries
-              .filter((candidate) => candidate.texts.some((candidateText) => candidateText === normalizedBullet))
-              .map((candidate) => candidate.id);
-            const containedEvidenceIds = exactEvidenceIds.length
+            const exactEvidenceIds = seededEvidenceIds.length
+              ? []
+              : evidenceEntries
+                  .filter((candidate) => candidate.texts.some((candidateText) => candidateText === normalizedBullet))
+                  .map((candidate) => candidate.id);
+            const containedEvidenceIds = seededEvidenceIds.length || exactEvidenceIds.length
               ? []
               : evidenceEntries
                   .filter((candidate) =>
@@ -1598,7 +1610,7 @@ export class ResumeService {
                   )
                   .map((candidate) => candidate.id);
             const sourceEvidenceIds = Array.from(
-              new Set([...traceEvidenceIds, ...exactEvidenceIds, ...containedEvidenceIds]),
+              new Set([...traceEvidenceIds, ...seededEvidenceIds, ...exactEvidenceIds, ...containedEvidenceIds]),
             ).filter(Boolean);
             if (!text || !sourceEvidenceIds.length) return null;
             sourceEvidenceIds.forEach((id) => usedEvidenceIds.add(id));
@@ -1731,14 +1743,30 @@ export class ResumeService {
         bullets: [] as ResumeDraftSection['bullets'],
       }));
 
-    const experienceText = sections
-      .filter((section) => String(section.type ?? '').toUpperCase() === 'EXPERIENCE')
-      .map((section) => section.content ?? '')
-      .join('\n');
-    const experienceBullets = extractBulletLines(experienceText).slice(0, 4);
+    const experienceSections = sections.filter((section) => String(section.type ?? '').toUpperCase() === 'EXPERIENCE');
+    const experienceBullets = experienceSections.flatMap((section) => {
+      const logicalUnits = ResumeDraftBullets.reconstructLogicalTextUnits(section.content ?? '');
+      const evidenceUnits = ResumeDraftBullets.extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits);
+      return evidenceUnits.map((evidence, idx) => ({
+        id: `${section.id}:minimal:${idx}`,
+        text: String(evidence.normalizedText ?? '').trim(),
+        source: {
+          baselineSectionId: String(section.id),
+          baselineSectionType: String(section.type ?? ''),
+          baselineSectionOrder: Number(section.order ?? 0),
+          bulletIndex: idx,
+          sourceEvidenceIds: [evidence.id],
+          anchorText: evidence.sourceText,
+          anchorKind: evidence.anchorKind,
+          exactBaselineBullet: evidence.exactBaselineBullet,
+        },
+        confidence: 'High' as const,
+        claimRisk: NO_CLAIM_RISK,
+      }));
+    }).slice(0, 8);
     const summaryText = experienceBullets.length
-      ? experienceBullets.join(' ')
-      : normalizeMinimalLine(experienceText).slice(0, 240);
+      ? experienceBullets.map((bullet) => bullet.text).join(' ')
+      : normalizeMinimalLine(experienceSections.map((section) => section.content ?? '').join('\n')).slice(0, 240);
 
     if (summaryText) {
       sections.unshift({
@@ -1778,20 +1806,21 @@ export class ResumeService {
     sections.forEach((section) => {
       const upperType = String(section.type ?? '').toUpperCase();
       if (upperType !== 'EXPERIENCE') return;
-      const bullets = extractBulletLines(section.content ?? '').slice(0, 8);
-      if (bullets.length) {
-        section.bullets = bullets.map((text, idx) => ({
+      const logicalUnits = ResumeDraftBullets.reconstructLogicalTextUnits(section.content ?? '');
+      const evidenceUnits = ResumeDraftBullets.extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits).slice(0, 8);
+      if (evidenceUnits.length) {
+        section.bullets = evidenceUnits.map((evidence, idx) => ({
           id: `${section.id}:minimal:${idx}`,
-          text,
+          text: String(evidence.normalizedText ?? '').trim(),
           source: {
             baselineSectionId: String(section.id),
             baselineSectionType: String(section.type ?? ''),
             baselineSectionOrder: Number(section.order ?? 0),
             bulletIndex: idx,
-            sourceEvidenceIds: [],
-            anchorText: text,
-            anchorKind: 'bullet_line' as const,
-            exactBaselineBullet: true,
+            sourceEvidenceIds: [evidence.id],
+            anchorText: evidence.sourceText,
+            anchorKind: evidence.anchorKind,
+            exactBaselineBullet: evidence.exactBaselineBullet,
           },
           confidence: 'High' as const,
           claimRisk: NO_CLAIM_RISK,
@@ -1973,6 +2002,9 @@ export class ResumeService {
             ...bullet.source,
             anchorText: bullet.source?.anchorText ?? bullet.text,
             bulletIndex: typeof bullet.source?.bulletIndex === 'number' ? bullet.source.bulletIndex : idx,
+            sourceEvidenceIds: Array.isArray(bullet.source?.sourceEvidenceIds)
+              ? bullet.source.sourceEvidenceIds.filter(Boolean)
+              : [],
           },
         };
       });

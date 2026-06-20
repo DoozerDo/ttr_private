@@ -4524,6 +4524,65 @@ describe('ResumeService contract', () => {
     expect(result.usedEvidenceIds).toEqual(expect.arrayContaining([expect.any(String)]));
   });
 
+  it('seeds canonical evidence ids into the active Resume V2 minimal path before safety matching', () => {
+    const { service } = buildService();
+    const baselineSections = [
+      {
+        id: 'section-experience',
+        baselineId: 'baseline-1',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content:
+          '- Improved service reliability across incident response.\n- Built dashboards for leadership review.',
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any,
+    ];
+
+    const seededSections = (service as any).buildMinimalResumeSections(baselineSections);
+    const seededExperience = seededSections.find((section: any) => String(section.type ?? '').toUpperCase() === 'EXPERIENCE');
+    expect(seededExperience.bullets[0]).toEqual(
+      expect.objectContaining({
+        text: 'Improved service reliability across incident response.',
+        source: expect.objectContaining({
+          sourceEvidenceIds: expect.arrayContaining([expect.any(String)]),
+          anchorText: 'Improved service reliability across incident response.',
+        }),
+      }),
+    );
+
+    const rewrittenPreview = {
+      heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+      summary: 'Supported summary.',
+      experience: [
+        {
+          company: 'Acme',
+          roleTitle: 'Operator',
+          bullets: [
+            {
+              text: 'Customer-facing service improvements were delivered across incident response and escalation handling.',
+              sourceEvidenceIds: [seededExperience.bullets[0].source.sourceEvidenceIds[0]],
+              source: { sourceEvidenceIds: [seededExperience.bullets[0].source.sourceEvidenceIds[0]] },
+            },
+          ],
+        },
+      ],
+    } as any;
+
+    const result = (service as any).attachResumePreviewEvidence(rewrittenPreview, {}, baselineSections);
+    expect(result.resume.experience[0].bullets[0]).toEqual(
+      expect.objectContaining({
+        sourceEvidenceIds: expect.arrayContaining([expect.any(String)]),
+        source: expect.objectContaining({
+          sourceEvidenceIds: expect.arrayContaining([expect.any(String)]),
+        }),
+      }),
+    );
+    expect(result.usedEvidenceIds.length).toBeGreaterThan(0);
+  });
+
   it('throws resume_v2_evidence_missing_before_persistence before recordResumeSuccess when no evidence is present', () => {
     const { service } = buildService();
     const guard = (service as any).assertResumeEvidenceBeforePersistence.bind(service);
