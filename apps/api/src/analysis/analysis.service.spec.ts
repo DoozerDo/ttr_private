@@ -1715,6 +1715,7 @@ const sampleScoringV2: CxFitV2Result = {
         {
           ...(baseline.parsedRecords?.[0] as any),
           id: 'parsed-null',
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
           flagsJson: {
             ...(baseline.parsedRecords?.[0] as any)?.flagsJson,
             reviewState: {
@@ -1725,6 +1726,7 @@ const sampleScoringV2: CxFitV2Result = {
         {
           ...(baseline.parsedRecords?.[0] as any),
           id: 'parsed-version',
+          createdAt: new Date('2026-02-01T00:00:00.000Z'),
           flagsJson: {
             ...(baseline.parsedRecords?.[0] as any)?.flagsJson,
             reviewState: {

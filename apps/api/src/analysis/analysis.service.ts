@@ -591,7 +591,12 @@ export class AnalysisService {
         })
       : null;
     const generationBaselineVersionId = baselineVersionRecord?.id ?? null;
-    const latestParsedRecord = baseline?.parsedRecords?.[0] ?? null;
+    const latestParsedRecord = [...(baseline?.parsedRecords ?? [])]
+      .sort((a: any, b: any) => {
+        const aTime = new Date(a?.createdAt ?? 0).getTime();
+        const bTime = new Date(b?.createdAt ?? 0).getTime();
+        return bTime - aTime;
+      })[0] ?? null;
     const persistedResumeV2Json = (latestParsedRecord as any)?.resumeV2Json ?? null;
     const baselineFileUsable = Boolean(
       persistedResumeV2Json &&
