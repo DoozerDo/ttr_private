@@ -1560,6 +1560,30 @@ export class AnalysisService {
     return job;
   }
 
+  private assertUuidOrUndefined(
+    value: unknown,
+    fieldName: string,
+  ): string | undefined {
+    if (value == null) {
+      return undefined;
+    }
+    if (typeof value !== 'string') {
+      throw new BadRequestException(`${fieldName} must be a UUID`);
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const isUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        trimmed,
+      );
+    if (!isUuid) {
+      throw new BadRequestException(`${fieldName} must be a UUID`);
+    }
+    return trimmed;
+  }
+
   private async computeExpectedInputsHashForJobBaseline(
     userId: string,
     job: Job,
@@ -2411,8 +2435,7 @@ export class AnalysisService {
           metadata: {
             jobId: job?.id ?? jobId ?? undefined,
             baselineId: baseline.id,
-            baselineVersionId:
-              baselineVersion.versionNumber ?? baseline.version ?? null,
+            baselineVersionId: baselineVersion.id,
           },
           jobTitle: jobPayload.title ?? undefined,
         },
@@ -2907,6 +2930,10 @@ export class AnalysisService {
           );
         }
       }
+      const baselineVersionId = this.assertUuidOrUndefined(
+        normalizedPayload.baseline_version_id,
+        'baselineVersionId',
+      );
 
       const resolvedBaselineId = baselineId!;
       const resolvedJobId = jobId!;
@@ -3156,7 +3183,7 @@ export class AnalysisService {
           metadata: {
             jobId: job?.id ?? resolvedJobId ?? null,
             baselineId: baseline.id,
-            baselineVersionId: baseline.version ?? null,
+            baselineVersionId,
           },
           jobTitle: job?.title ?? undefined,
         },
