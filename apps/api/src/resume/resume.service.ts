@@ -5184,7 +5184,34 @@ export class ResumeService {
       },
     };
 
-    // Final safety: ensure the exact preview payload returned to Studio is sanitized.
+    if (typeof normalizedDocument.summary === 'string') {
+      normalizedDocument.summary = trimIncompleteTrailingFragments(normalizedDocument.summary);
+    }
+    if (Array.isArray((normalizedDocument as any).experience)) {
+      (normalizedDocument as any).experience = (normalizedDocument as any).experience.map((entry: any) => {
+        if (!entry || typeof entry !== 'object') return entry;
+        const bullets = Array.isArray(entry.bullets) ? entry.bullets : [];
+        const cleanedBullets = bullets
+          .map((b: unknown) => (typeof b === 'string' ? trimIncompleteTrailingFragments(b) : ''))
+          .map((b: string) => b.trim())
+          // ResumeV2 authority: do not drop short-but-meaningful bullets, or the artifact can become empty and fail persistence.
+          // Legacy structured lane may keep a minimum-length filter to avoid low-signal fragments.
+          .filter((b: string) => (isResumeV2 ? b.length > 0 : b.length >= 10));
+        return { ...entry, bullets: cleanedBullets };
+      });
+    }
+
+    if (response?.preview?.resume && Array.isArray((response.preview.resume as any).experience)) {
+      const previewEnforced = enforceEmployerRoleBulletProvenance({ experience: (response.preview.resume as any).experience });
+      (response.preview.resume as any).experience = previewEnforced.experience as any;
+      crossCompanyEvidenceBlockedCount += previewEnforced.blockedCount;
+
+      const previewStripped = stripCrossCompanyBullets({ experience: (response.preview.resume as any).experience });
+      (response.preview.resume as any).experience = previewStripped.experience as any;
+      crossCompanyEvidenceBlockedCount += previewStripped.blockedCount;
+    }
+
+    // Final safety: ensure the exact preview payload persisted by Studio is sanitized and evidence-backed.
     if (response?.preview?.resume) {
       response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
       const previewExperienceBefore = Array.isArray(sanitizedPreviewDocument?.experience)
@@ -5253,32 +5280,6 @@ export class ResumeService {
           ? previewEvidence.usedEvidenceIds
           : Object.values(resumeTraceAudit.traceMap).flat().filter(Boolean),
       } as any;
-    }
-    if (typeof normalizedDocument.summary === 'string') {
-      normalizedDocument.summary = trimIncompleteTrailingFragments(normalizedDocument.summary);
-    }
-    if (Array.isArray((normalizedDocument as any).experience)) {
-      (normalizedDocument as any).experience = (normalizedDocument as any).experience.map((entry: any) => {
-        if (!entry || typeof entry !== 'object') return entry;
-        const bullets = Array.isArray(entry.bullets) ? entry.bullets : [];
-        const cleanedBullets = bullets
-          .map((b: unknown) => (typeof b === 'string' ? trimIncompleteTrailingFragments(b) : ''))
-          .map((b: string) => b.trim())
-          // ResumeV2 authority: do not drop short-but-meaningful bullets, or the artifact can become empty and fail persistence.
-          // Legacy structured lane may keep a minimum-length filter to avoid low-signal fragments.
-          .filter((b: string) => (isResumeV2 ? b.length > 0 : b.length >= 10));
-        return { ...entry, bullets: cleanedBullets };
-      });
-    }
-
-    if (response?.preview?.resume && Array.isArray((response.preview.resume as any).experience)) {
-      const previewEnforced = enforceEmployerRoleBulletProvenance({ experience: (response.preview.resume as any).experience });
-      (response.preview.resume as any).experience = previewEnforced.experience as any;
-      crossCompanyEvidenceBlockedCount += previewEnforced.blockedCount;
-
-      const previewStripped = stripCrossCompanyBullets({ experience: (response.preview.resume as any).experience });
-      (response.preview.resume as any).experience = previewStripped.experience as any;
-      crossCompanyEvidenceBlockedCount += previewStripped.blockedCount;
     }
 
     const persistedContent = trimIncompleteTrailingFragments(buildResumePlainText(normalizedDocument));
