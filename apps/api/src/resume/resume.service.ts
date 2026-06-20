@@ -5028,6 +5028,12 @@ export class ResumeService {
         }
 
         try {
+          this.assertResumeEvidenceBeforePersistence({
+            responseBody: response as unknown as Record<string, unknown>,
+            resumeInputSections,
+            allowedSections,
+            promotedExperienceLikeSectionsCount: this.promoteExperienceLikeSections(allowedSections).length,
+          });
           await this.studioArtifactsService.recordResumeSuccess({
             userId,
             baselineId: baseline.id,
@@ -6540,16 +6546,25 @@ export class ResumeService {
         })();
         const failSafeSucceeded = (() => {
           if (qualityGate.status !== 'pass' || !normalizedDocument) return false;
-          try {
-            const normalized = normalizeNormalizedResumeDocument(normalizedDocument);
-            validateNormalizedResumeDocument(normalized);
-            return true;
-          } catch {
-            return false;
-          }
-        })();
+        try {
+          const normalized = normalizeNormalizedResumeDocument(normalizedDocument);
+          validateNormalizedResumeDocument(normalized);
+          return true;
+        } catch {
+          return false;
+        }
+      })();
 	        try {
-	          if (failSafeSucceeded) {
+          if (failSafeSucceeded) {
+            const failSafeSourceSections =
+              (resolveBaselineSectionsForGeneration(baselineForFailSafe) as any) ??
+              (baselineForFailSafe.sections as any);
+            this.assertResumeEvidenceBeforePersistence({
+              responseBody: response as unknown as Record<string, unknown>,
+              resumeInputSections: failSafeSourceSections,
+              allowedSections: failSafeSourceSections,
+              promotedExperienceLikeSectionsCount: this.promoteExperienceLikeSections(failSafeSourceSections).length,
+            });
             await this.studioArtifactsService.recordResumeSuccess({
               userId,
               baselineId: studioArtifactContext.baselineId,
