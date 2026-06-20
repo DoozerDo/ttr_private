@@ -2874,13 +2874,20 @@ export class ResumeService {
 		                  'No valid structured experience groups (company + role title + bullets) were found. Reprocess the baseline resume or re-upload with clearer experience headers.',
 		                retryable: true,
 		                diagnostics: {
+		                  requestOneTapReceived: Boolean(request.oneTap),
+		                  verifiedUsableBaselineFileExistsAtGate:
+		                    verifiedUsableBaselineFileExists,
+		                  baselineFileUsableAtGate: baselineFileUsable,
+		                  baselineVerifiedAtGate: baselineVerified,
+		                  baselineId: baseline.id,
+		                  baselineVersionId: baselineVersion.id,
 		                  artifactReadiness: 'blocked',
 		                  authoritativeExtractionSucceeded: false,
 		                  authoritativeExperienceGroupCount: 0,
 		                  fallbackGenerationPrevented: true,
 		                  legacyFallbackAttemptBlocked: true,
 		                  generationTerminationStage: 'authoritative_extraction_gate',
-		                },
+		                } as any,
 		              }));
 		            }
 		            // Studio eligible lane: degrade to baseline-only later in the pipeline instead of hard-blocking.
@@ -3151,6 +3158,13 @@ export class ResumeService {
 	              'No valid structured experience groups (company + role title + bullets) were found. Reprocess the baseline resume or re-upload with clearer experience headers.',
 	            retryable: true,
 	            diagnostics: {
+	              requestOneTapReceived: Boolean(request.oneTap),
+	              verifiedUsableBaselineFileExistsAtGate:
+	                verifiedUsableBaselineFileExists,
+	              baselineFileUsableAtGate: baselineFileUsable,
+	              baselineVerifiedAtGate: baselineVerified,
+	              baselineId: baseline.id,
+	              baselineVersionId: baselineVersion.id,
 	              artifactReadiness: 'blocked',
 	              authoritativeExtractionSucceeded: false,
 	              authoritativeExperienceGroupCount: 0,
@@ -3162,7 +3176,7 @@ export class ResumeService {
 	                ? readinessDetailsAny.missingEvidenceReasons.map((r: any) => String(r ?? '')).filter(Boolean)
 	                : [],
 	              resumeV2UsableExperienceCount,
-	            },
+	            } as any,
 	          }));
 	          }
 	        }
