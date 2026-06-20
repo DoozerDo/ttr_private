@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Baseline } from '../baseline/baseline.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
+import { BaselineParsed } from '../baseline/baseline-parsed.entity';
 import { BaselineSection } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { ComplianceModule } from '../compliance/compliance.module';
@@ -29,6 +30,7 @@ import { WorkflowIdempotencyModule } from '../common/workflow-idempotency.module
     TypeOrmModule.forFeature([
       Baseline,
       BaselineSection,
+      BaselineParsed,
       BaselineVersion,
       BaselineBlockPolicy,
       Job,
