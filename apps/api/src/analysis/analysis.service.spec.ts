@@ -1714,6 +1714,17 @@ const sampleScoringV2: CxFitV2Result = {
       parsedRecords: [
         {
           ...(baseline.parsedRecords?.[0] as any),
+          id: 'parsed-null',
+          flagsJson: {
+            ...(baseline.parsedRecords?.[0] as any)?.flagsJson,
+            reviewState: {
+              verified: true,
+            },
+          },
+        },
+        {
+          ...(baseline.parsedRecords?.[0] as any),
+          id: 'parsed-version',
           flagsJson: {
             ...(baseline.parsedRecords?.[0] as any)?.flagsJson,
             reviewState: {
@@ -1788,7 +1799,7 @@ const sampleScoringV2: CxFitV2Result = {
       }),
     );
     expect(baselineParsedRepository.update).toHaveBeenCalledWith(
-      { id: 'parsed-1' },
+      { id: 'parsed-version' },
       expect.objectContaining({
         flagsJson: expect.objectContaining({
           reviewState: expect.objectContaining({

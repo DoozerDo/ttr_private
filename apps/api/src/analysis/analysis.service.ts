@@ -582,6 +582,15 @@ export class AnalysisService {
       where: { id: assessment.baselineId, userId },
       relations: ['parsedRecords'],
     });
+    const baselineVersionRecord = assessment.baselineVersion
+      ? await this.baselineVersionRepository.findOne({
+          where: {
+            baselineId: assessment.baselineId,
+            versionNumber: assessment.baselineVersion,
+          },
+        })
+      : null;
+    const generationBaselineVersionId = baselineVersionRecord?.id ?? null;
     const latestParsedRecord = baseline?.parsedRecords?.[0] ?? null;
     const persistedResumeV2Json = (latestParsedRecord as any)?.resumeV2Json ?? null;
     const baselineFileUsable = Boolean(
@@ -631,7 +640,7 @@ export class AnalysisService {
 
     const generationRequest = {
       baselineId: assessment.baselineId,
-      baselineVersionId: null,
+      baselineVersionId: generationBaselineVersionId,
       jobId: assessment.jobId,
       analysisId: assessment.id,
       oneTap: verifiedUsableBaselineFileExists,
@@ -640,11 +649,11 @@ export class AnalysisService {
       JSON.stringify({
         marker: 'ANALYSIS_DOWNSTREAM_BASELINE_VERIFICATION_HANDOFF',
         baselineId: assessment.baselineId,
-        baselineVersionId: null,
+        baselineVersionId: generationBaselineVersionId,
         latestParsedRecordId: latestParsedRecord?.id ?? null,
         latestParsedRecordBaselineId: latestParsedRecord?.baselineId ?? null,
         latestParsedRecordBaselineVersionId:
-          (latestParsedRecord as any)?.baselineVersionId ?? null,
+          generationBaselineVersionId,
         resumeV2Usable: baselineFileUsable,
         verifiedBeforeRepair: baselineVerified,
         repairAttempted: shouldRepairBaselineVerification,
