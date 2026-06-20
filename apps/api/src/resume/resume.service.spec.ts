@@ -4873,7 +4873,7 @@ describe('ResumeService contract', () => {
     baseline.sections = original;
   });
 
-	  it('allows baseline-only resume fallback for Studio generate intents even when oneTap is true (eligible score lane)', async () => {
+  it('allows baseline-only resume fallback for Studio generate intents even when oneTap is true (eligible score lane)', async () => {
 	    const { service, studioArtifactsService } = buildService();
 	    const original = baseline.sections;
 	    const originalScore = assessment.overallScore;
@@ -4918,6 +4918,69 @@ describe('ResumeService contract', () => {
 	    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
     assessment.overallScore = originalScore;
     baseline.sections = original;
+  });
+
+  it('does not throw top_level_fail_safe_minimal_blocked when verified ResumeV2 authority exists and legacy extraction is empty', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsedRecords = (baseline as any).parsedRecords;
+    const originalScore = assessment.overallScore;
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    assessment.overallScore = 83;
+
+    try {
+      baseline.sections = [];
+      (baseline as any).parsedRecords = [
+        {
+          id: 'parsed-verified',
+          baselineId: baseline.id,
+          baselineVersionId: baselineVersion.id,
+          createdAt: new Date('2026-02-01T00:00:00.000Z'),
+          resumeV2Json: {
+            heading: { name: 'Test', contactLine: 'Test' },
+            summary: 'Verified baseline summary.',
+            experience: [
+              {
+                company: 'Acme',
+                roleTitle: 'Engineer',
+                startDate: '2020-01',
+                endDate: '2021-01',
+                bullets: ['Delivered support improvements.'],
+              },
+            ],
+            education: [],
+          },
+          flagsJson: {
+            reviewState: {
+              verified: true,
+            },
+          },
+        },
+      ];
+
+      await expect(
+        service.generateResume(
+          'user-1',
+          {
+            ...baseRequest,
+            forceRegenerate: true,
+            oneTap: true,
+            analysisId: 'analysis-verified',
+          } as any,
+          { preflightOnly: false, skipReadinessGate: true, enforceOneTap: false },
+        ),
+      ).resolves.toMatchObject({
+        ok: true,
+        status: 'success',
+      });
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsedRecords;
+      assessment.overallScore = originalScore;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    }
   });
 
   // (covered above with persistence + preview assertions)

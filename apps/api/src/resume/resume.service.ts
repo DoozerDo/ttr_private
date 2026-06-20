@@ -5904,7 +5904,7 @@ export class ResumeService {
 	              (resolveBaselineSectionsForGeneration(baselineForFailSafe) as any) ?? (baselineForFailSafe.sections as any),
 	            ) as any;
 	            const expCount = Array.isArray(structured?.experience) ? structured.experience.length : 0;
-	            if (expCount === 0) {
+	            if (expCount === 0 && !hasPersistedResumeV2Authority) {
 	              throw new UnprocessableEntityException(buildArtifactFailurePayload({
 	                code: 'generation_blocked',
 	                category: 'generation_blocked',
