@@ -1699,6 +1699,25 @@ export class ResumeService {
     return Array.from(usedEvidenceIds);
   }
 
+  private toTextOnlyResumeDocument(document: NormalizedResumeDocument): NormalizedResumeDocument {
+    const textifyBullet = (bullet: unknown): string => {
+      if (typeof bullet === 'string') return bullet;
+      if (bullet && typeof bullet === 'object' && typeof (bullet as any).text === 'string') {
+        return (bullet as any).text;
+      }
+      return '';
+    };
+    return {
+      ...(document as any),
+      experience: Array.isArray(document.experience)
+        ? document.experience.map((entry) => ({
+            ...entry,
+            bullets: Array.isArray(entry?.bullets) ? entry.bullets.map(textifyBullet) : [],
+          }))
+        : [],
+    } as NormalizedResumeDocument;
+  }
+
   private assertResumeEvidenceBeforePersistence(input: {
     responseBody: Record<string, unknown>;
     resumeInputSections: BaselineSection[];
@@ -3076,7 +3095,7 @@ export class ResumeService {
           const normalized = normalizeNormalizedResumeDocument(
             persisted as NormalizedResumeDocument,
           );
-          const validation = validateNormalizedResumeDocument(normalized);
+          const validation = validateNormalizedResumeDocument(this.toTextOnlyResumeDocument(normalized));
           return validation.valid ? normalized : null;
         } catch {
           return null;
@@ -3102,9 +3121,10 @@ export class ResumeService {
             const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
             if (!persisted || typeof persisted !== 'object') return '';
             const normalized = normalizeNormalizedResumeDocument(persisted as any);
-            const validation = validateNormalizedResumeDocument(normalized as any);
+            const textOnly = this.toTextOnlyResumeDocument(normalized as any);
+            const validation = validateNormalizedResumeDocument(textOnly);
             if (!validation.valid) return '';
-            return buildResumePlainText(normalized as any);
+            return buildResumePlainText(textOnly);
           })()
         : (baseline.sections ?? []).map((section) => section.content ?? '').join('\n'),
     });
@@ -3345,9 +3365,10 @@ export class ResumeService {
             const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
             if (!persisted || typeof persisted !== 'object') return '';
             const normalized = normalizeNormalizedResumeDocument(persisted as any);
-            const validation = validateNormalizedResumeDocument(normalized as any);
+            const textOnly = this.toTextOnlyResumeDocument(normalized as any);
+            const validation = validateNormalizedResumeDocument(textOnly);
             if (!validation.valid) return '';
-            return buildResumePlainText(normalized as any);
+            return buildResumePlainText(textOnly);
           })()
         : allowedSections.map((section) => section.content ?? '').join('\n'),
     });
@@ -3388,7 +3409,7 @@ export class ResumeService {
         const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
         if (!persisted || typeof persisted !== 'object') return 0;
         const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
-        const validation = validateNormalizedResumeDocument(normalized);
+        const validation = validateNormalizedResumeDocument(this.toTextOnlyResumeDocument(normalized));
         if (!validation.valid) return 0;
         return Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
       } catch {
@@ -3487,7 +3508,7 @@ export class ResumeService {
 	            const normalized = normalizeNormalizedResumeDocument(persisted as any);
 	            // Heuristic only: do not require full normalized validation here, since extremely short-but-meaningful
 	            // bullets can be valid for persistence even if strict validation would fail.
-	            const text = buildResumePlainText(normalized as any);
+        const text = buildResumePlainText(this.toTextOnlyResumeDocument(normalized as any));
 	            if (String(text ?? '').trim()) return text;
 	            return '';
 	          } catch {
@@ -3772,7 +3793,9 @@ export class ResumeService {
           careerIdentity: cacheCareerIdentity,
         }) as any;
         const authoritativePreview = sanitizeResumePreviewForStudio(authoritative);
-        const authoritativeContent = trimIncompleteTrailingFragments(buildResumePlainText(authoritative as any));
+        const authoritativeContent = trimIncompleteTrailingFragments(
+          buildResumePlainText(this.toTextOnlyResumeDocument(authoritative as any)),
+        );
         if (!response.preview) (response as any).preview = {};
         (response.preview as any).resume = authoritativePreview;
         (response as any).content = authoritativeContent;
@@ -3971,7 +3994,7 @@ export class ResumeService {
           // ResumeV2 ingest safety: do not allow provenance / cross-company enforcement to silently
           // reduce a previously-usable persisted ResumeV2 into an empty/invalid structure that later
           // trips resume_structure_empty => unsupported_input.
-          const postProcessedValidation = validateNormalizedResumeDocument(normalized);
+          const postProcessedValidation = validateNormalizedResumeDocument(this.toTextOnlyResumeDocument(normalized));
           const postProcessedExperienceCount = Array.isArray((normalized as any)?.experience)
             ? (normalized as any).experience.length
             : 0;
@@ -4270,7 +4293,7 @@ export class ResumeService {
       const candidateExperienceCount = Array.isArray((candidateDocument as any)?.experience)
         ? (candidateDocument as any).experience.length
         : 0;
-      const candidateValidation = validateNormalizedResumeDocument(candidateDocument);
+      const candidateValidation = validateNormalizedResumeDocument(this.toTextOnlyResumeDocument(candidateDocument));
       if (candidateExperienceCount > 0 && candidateValidation.valid) {
         (normalizedDocument as any).experience = (candidateDocument as any).experience as any;
       } else {
@@ -4629,7 +4652,7 @@ export class ResumeService {
         experienceDiagnostics.anchorValidationPassed !== false,
     };
     const normalizedValidation = validateNormalizedResumeDocument(
-      normalizedDocument,
+      this.toTextOnlyResumeDocument(normalizedDocument),
     );
     if (!normalizedValidation.valid) {
       experienceDiagnostics = {
@@ -4726,7 +4749,9 @@ export class ResumeService {
               identity,
               { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
             );
-            const fallbackValidation = validateNormalizedResumeDocument(normalizedDocument);
+          const fallbackValidation = validateNormalizedResumeDocument(
+            this.toTextOnlyResumeDocument(normalizedDocument),
+          );
             const post = buildResumeUnsupportedDiagnostics(normalizedDocument as any);
             resumeFailureDiagnostics.afterFallback = {
               validationReason: fallbackValidation.valid ? null : String(reason),
@@ -5134,7 +5159,9 @@ export class ResumeService {
             careerIdentity: idempotencyCareerIdentity,
           }) as any;
           const authoritativePreview = sanitizeResumePreviewForStudio(authoritative);
-          const authoritativeContent = trimIncompleteTrailingFragments(buildResumePlainText(authoritative as any));
+          const authoritativeContent = trimIncompleteTrailingFragments(
+            buildResumePlainText(this.toTextOnlyResumeDocument(authoritative as any)),
+          );
 
           if (!response.preview) (response as any).preview = {};
           (response.preview as any).resume = authoritativePreview;
@@ -5525,7 +5552,9 @@ export class ResumeService {
       } as any;
     }
 
-    const persistedContent = trimIncompleteTrailingFragments(buildResumePlainText(normalizedDocument));
+    const persistedContent = trimIncompleteTrailingFragments(
+      buildResumePlainText(this.toTextOnlyResumeDocument(normalizedDocument)),
+    );
     if (!persistedContent || persistedContent.trim().length < 10) {
       throw new UnprocessableEntityException({
         error: {
@@ -5916,9 +5945,10 @@ export class ResumeService {
             const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
             if (!persisted || typeof persisted !== 'object') return '';
             const normalized = normalizeNormalizedResumeDocument(persisted as any);
-            const validation = validateNormalizedResumeDocument(normalized as any);
+            const textOnly = this.toTextOnlyResumeDocument(normalized as any);
+            const validation = validateNormalizedResumeDocument(textOnly);
             if (!validation.valid) return '';
-            return buildResumePlainText(normalized as any);
+            return buildResumePlainText(textOnly);
           } catch {
             return '';
           }
@@ -6242,7 +6272,7 @@ export class ResumeService {
             const persisted = this.getLatestPersistedResumeV2Json(baselineForFailSafe?.parsedRecords ?? null) ?? null;
             if (!persisted || typeof persisted !== 'object') return false;
             const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
-            return validateNormalizedResumeDocument(normalized).valid;
+            return validateNormalizedResumeDocument(this.toTextOnlyResumeDocument(normalized)).valid;
           } catch {
             return false;
           }
@@ -6335,7 +6365,7 @@ export class ResumeService {
           // Authority boundary: in ResumeV2 mode, interpreted evidence must be derived from the persisted ResumeV2 model
           // (BaselineParsed.resumeV2Json), never from baseline section concatenations.
           resumeText: isResumeV2
-            ? buildResumePlainText(normalizedDocument as any)
+            ? buildResumePlainText(this.toTextOnlyResumeDocument(normalizedDocument as any))
             : (baselineForFailSafe.sections ?? []).map((s: any) => s?.content ?? '').join('\n'),
         });
         const interpretedEligibilityForFailSafe = evaluateInterpretedEvidenceEligibility(
@@ -6354,7 +6384,7 @@ export class ResumeService {
             const persisted = persistedResumeV2ForFailSafe;
             if (!persisted || typeof persisted !== 'object') return false;
             const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
-            validateNormalizedResumeDocument(normalized);
+            validateNormalizedResumeDocument(this.toTextOnlyResumeDocument(normalized));
             return Array.isArray((normalized as any)?.experience) && (normalized as any).experience.length > 0;
           } catch {
             return false;
@@ -6654,13 +6684,13 @@ export class ResumeService {
         };
 
         const resumeArtifactInvalidDiagnostics = (() => {
-          const normalized = normalizedDocument ? normalizeNormalizedResumeDocument(normalizedDocument) : null;
+            const normalized = normalizedDocument ? normalizeNormalizedResumeDocument(normalizedDocument) : null;
           let validationExceptionName = '';
           let validationExceptionMessage = '';
           let valid = false;
           if (qualityGate.status === 'pass' && normalized) {
             try {
-              validateNormalizedResumeDocument(normalized);
+              validateNormalizedResumeDocument(this.toTextOnlyResumeDocument(normalized));
               valid = true;
             } catch (error) {
               validationExceptionName = error instanceof Error ? error.name : 'Error';
@@ -6692,7 +6722,7 @@ export class ResumeService {
           if (qualityGate.status !== 'pass' || !normalizedDocument) return false;
         try {
           const normalized = normalizeNormalizedResumeDocument(normalizedDocument);
-          validateNormalizedResumeDocument(normalized);
+          validateNormalizedResumeDocument(this.toTextOnlyResumeDocument(normalized));
           return true;
         } catch {
           return false;
@@ -6723,7 +6753,9 @@ export class ResumeService {
               inputsHash: studioArtifactContext.inputsHash,
               analysisId: studioArtifactContext.analysisId,
               responseBody: response as unknown as Record<string, unknown>,
-              content: normalizedDocument ? buildResumePlainText(normalizedDocument) : '',
+              content: normalizedDocument
+                ? buildResumePlainText(this.toTextOnlyResumeDocument(normalizedDocument))
+                : '',
               metadata: {
                 auditId: minimalAuditId,
                 baselineVersionHash: baselineVersionForFailSafe.hash ?? null,
@@ -7021,7 +7053,7 @@ export class ResumeService {
     });
     const polishedDocument = polished.document;
     const normalizedValidation = validateNormalizedResumeDocument(
-      polishedDocument,
+      this.toTextOnlyResumeDocument(polishedDocument),
     );
     if (!normalizedValidation.valid) {
       throw new UnprocessableEntityException({
@@ -7038,7 +7070,7 @@ export class ResumeService {
     let buffer: Buffer;
     let pdfText: string | undefined;
     if (format === 'pdf') {
-      pdfText = buildResumePlainText(polishedDocument);
+      pdfText = buildResumePlainText(this.toTextOnlyResumeDocument(polishedDocument));
       buffer = this.buildPdfBuffer(pdfText);
     } else {
       const model = await this.buildDocxModelFromGeneration({
