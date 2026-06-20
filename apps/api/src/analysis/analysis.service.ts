@@ -3541,6 +3541,12 @@ export class AnalysisService {
       const complianceFlags = (compliance.complianceFlags ?? []).map((flag) =>
         typeof flag === 'string' ? flag : flag.code,
       );
+      if (baselineVersionId !== undefined) {
+        this.assertUuidOrUndefined(
+          baselineVersionId,
+          'metadata.baselineVersionId',
+        );
+      }
 
       const assessment = this.fitAssessmentRepository.create({
         userId,
