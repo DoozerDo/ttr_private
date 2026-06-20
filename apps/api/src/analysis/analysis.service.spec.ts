@@ -402,6 +402,11 @@ const sampleScoringV2: CxFitV2Result = {
                 ],
               },
               createdAt: new Date(),
+              flagsJson: {
+                reviewState: {
+                  verified: true,
+                },
+              },
             },
           ],
         }),
@@ -1746,6 +1751,7 @@ const sampleScoringV2: CxFitV2Result = {
         baselineId: 'b-1',
         jobId: 'job-1',
         analysisId: 'fit-high',
+        oneTap: true,
       }),
     );
     expect(coverLettersServiceMock.generateCoverLetter).toHaveBeenCalledWith(
@@ -1754,6 +1760,7 @@ const sampleScoringV2: CxFitV2Result = {
         baselineId: 'b-1',
         jobId: 'job-1',
         analysisId: 'fit-high',
+        oneTap: true,
       }),
     );
   });

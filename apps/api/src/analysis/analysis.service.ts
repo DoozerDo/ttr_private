@@ -575,6 +575,22 @@ export class AnalysisService {
         jobId: assessment.jobId,
       },
     });
+    const baseline = await this.baselineRepository.findOne({
+      where: { id: assessment.baselineId, userId },
+      relations: ['parsedRecords'],
+    });
+    const latestParsedRecord = baseline?.parsedRecords?.[0] ?? null;
+    const baselineVerified = Boolean(
+      (latestParsedRecord as any)?.flagsJson?.reviewState?.verified,
+    );
+    const persistedResumeV2Json = (latestParsedRecord as any)?.resumeV2Json ?? null;
+    const baselineFileUsable = Boolean(
+      persistedResumeV2Json &&
+        typeof persistedResumeV2Json === 'object' &&
+        !Array.isArray(persistedResumeV2Json),
+    );
+    const verifiedUsableBaselineFileExists =
+      baselineFileUsable && baselineVerified;
     const resumeAlreadyExists =
       artifactRecord?.resumeStatus === StudioArtifactLifecycleStatus.COMPLETED &&
       (artifactRecord.resumeMetadata as any)?.analysisId === assessment.id;
@@ -591,6 +607,7 @@ export class AnalysisService {
       baselineVersionId: null,
       jobId: assessment.jobId,
       analysisId: assessment.id,
+      oneTap: verifiedUsableBaselineFileExists,
     };
 
     await Promise.all([
