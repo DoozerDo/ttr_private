@@ -1114,6 +1114,71 @@ describe("Studio auto-generation", () => {
 	    }, { timeout: 15000 });
 	  }, 15000);
 
+  it("treats hydrated resume artifacts as persisted for readiness and orchestration", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const fetchMock = installStrongFitFetches({
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "completed",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        assessmentScore: 84,
+        generationContractVersion: "studio-artifacts-v1",
+        resumeArtifactHydration: {
+          resumeArtifactId: "resume-hydrated-1",
+          resumeArtifactSource: "fresh_generation",
+          resumeArtifactUpdatedAt: "2026-06-20T23:49:04.879Z",
+        },
+        resume: {
+          status: "missing",
+          responseBody: null,
+          content: null,
+          usableCurrent: false,
+          inputsHash: true,
+          failureCode: null,
+          failureMessage: null,
+          confidence: "LOW",
+          failure: null,
+        },
+        coverLetter: {
+          status: "completed",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          },
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+      },
+    });
+
+    setFetchImplementation(fetchMock as any);
+    renderStudio();
+
+    await waitFor(() => {
+      const debug = screen.getByTestId("studio-orchestration-debug");
+      const raw = debug.querySelector("pre")?.textContent ?? "";
+      expect(raw).toContain("\"hasResumeArtifactPersisted\": true");
+      expect(raw).toContain("\"hasCoverLetterArtifactPersisted\": true");
+      expect(raw).toContain("\"hasAnyArtifactPersisted\": true");
+      expect(raw).not.toContain("\"persisted_resume_artifact_missing\"");
+      expect(raw).not.toContain("\"orchestrationDecision\": \"blocked\"");
+    }, { timeout: 15000 });
+  }, 15000);
+
   it("still auto-generates when verification confidence is limited", async () => {
     const fetchMock = installStrongFitFetches({ readinessStatus: "limited" });
 

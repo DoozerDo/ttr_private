@@ -357,8 +357,9 @@ const STUDIO_ARTIFACTS_READY_STATE: GenerationReadiness = {
 
 function buildStudioArtifactsReadiness(payload: BackendStudioArtifactsResponse | null | undefined): GenerationReadiness {
   const hasPersistedFitAssessment = typeof payload?.assessmentScore === "number" && Number.isFinite(payload.assessmentScore);
-  const hasPersistedResumeArtifact = getBackendArtifactStatus(payload?.resume) === "completed";
-  const hasPersistedCoverLetterArtifact = getBackendArtifactStatus(payload?.coverLetter) === "completed";
+  const persistedExistence = getArtifactExistence(payload ?? null);
+  const hasPersistedResumeArtifact = persistedExistence.hasResumeArtifactPersisted;
+  const hasPersistedCoverLetterArtifact = persistedExistence.hasCoverLetterArtifactPersisted;
 
   if (hasPersistedFitAssessment && hasPersistedResumeArtifact && hasPersistedCoverLetterArtifact) {
     return STUDIO_ARTIFACTS_READY_STATE;
