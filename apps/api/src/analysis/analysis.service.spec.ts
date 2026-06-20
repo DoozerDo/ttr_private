@@ -1605,6 +1605,35 @@ const sampleScoringV2: CxFitV2Result = {
     expect(fitScoringServiceMock.scoreCxFitV2Authenticated).toHaveBeenCalledTimes(1);
   });
 
+  it('scores the requested baseline/job pair even when the latest Resume V2 is unusable', async () => {
+    baselineRepository.findOne.mockResolvedValueOnce({
+      ...baseline,
+      parsedRecords: [
+        {
+          ...(baseline.parsedRecords?.[0] as any),
+          id: 'parsed-1',
+          createdAt: new Date('2026-03-01T00:00:00.000Z'),
+          resumeV2Json: {
+            heading: { name: 'Test User', contactLine: 'test@example.com' },
+            summary: '',
+            skills: [],
+            experience: [],
+          },
+        },
+      ],
+    });
+
+    const result = await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+    });
+
+    expect(result.status).toBe('ok');
+    expect(result.baselineId).toBe('b-1');
+    expect(result.jobId).toBe('job-1');
+    expect(fitScoringServiceMock.scoreCxFitV2Authenticated).toHaveBeenCalledTimes(1);
+  });
+
   it.skip('reloads persisted jobAnalysis and fitScore from the saved fit assessment', async () => {
     const persistedJobAnalysis = {
       jobText: 'persisted canonical job analysis',
