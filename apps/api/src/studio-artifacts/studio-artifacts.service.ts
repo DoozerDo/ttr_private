@@ -299,6 +299,90 @@ function buildArtifactWriteMetadata(
   };
 }
 
+function looksLikeGenericResumeFiller(text: string): boolean {
+  const normalized = String(text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!normalized) return true;
+  if (normalized.length < 20) return true;
+  return [
+    /delivered consistent execution by clarifying priorities and maintaining a steady operating rhythm/i,
+    /passionate team player/i,
+    /thrives in fast-paced environments/i,
+    /customer-facing technical support at the in-store computer helpdesk/i,
+    /cascade aerial photography/i,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function sanitizeResumeResponseBodyForEvidenceContract(
+  responseBody: Record<string, unknown>,
+): Record<string, unknown> {
+  const normalized = normalizeRecord(responseBody);
+  if (!normalized) return responseBody;
+
+  const preview = normalizeRecord((normalized as any).preview);
+  const resume = normalizeRecord(preview?.resume);
+  if (!preview || !resume) return normalized;
+
+  const experience = Array.isArray((resume as any).experience) ? (resume as any).experience : [];
+  const nextExperience: unknown[] = [];
+  const usedEvidenceIds = new Set<string>();
+
+  for (const employer of experience) {
+    const employerRecord = normalizeRecord(employer);
+    if (!employerRecord) continue;
+    const bullets = Array.isArray((employerRecord as any).bullets) ? (employerRecord as any).bullets : [];
+    const nextBullets: unknown[] = [];
+
+    for (const bullet of bullets) {
+      const bulletRecord = normalizeRecord(bullet) ?? (typeof bullet === 'string' ? { text: bullet } : null);
+      if (!bulletRecord) continue;
+      const text = safeText((bulletRecord as any).text ?? bullet);
+      const sourceEvidenceIds = Array.isArray((bulletRecord as any).sourceEvidenceIds)
+        ? (bulletRecord as any).sourceEvidenceIds.filter(Boolean)
+        : Array.isArray((bulletRecord as any)?.source?.sourceEvidenceIds)
+          ? (bulletRecord as any).source.sourceEvidenceIds.filter(Boolean)
+          : [];
+
+      if (!text || looksLikeGenericResumeFiller(text) || sourceEvidenceIds.length === 0) {
+        continue;
+      }
+
+      sourceEvidenceIds.forEach((id) => usedEvidenceIds.add(String(id)));
+      nextBullets.push({
+        ...bulletRecord,
+        text,
+        sourceEvidenceIds,
+        source: {
+          ...normalizeRecord((bulletRecord as any).source),
+          sourceEvidenceIds,
+        },
+      });
+    }
+
+    if (!nextBullets.length) continue;
+    nextExperience.push({
+      ...employerRecord,
+      bullets: nextBullets,
+    });
+  }
+
+  const nextResume = {
+    ...resume,
+    experience: nextExperience,
+  };
+
+  return {
+    ...normalized,
+    preview: {
+      ...preview,
+      resume: nextResume,
+    },
+    internalTrace: {
+      ...normalizeRecord((normalized as any).internalTrace),
+      usedEvidenceIds: Array.from(usedEvidenceIds),
+    },
+  };
+}
+
 function getResponseInternalBool(responseBody: Record<string, unknown> | null, key: string): boolean {
   if (!responseBody) return false;
   const internal = normalizeRecord((responseBody as any).internal);
@@ -1681,7 +1765,8 @@ export class StudioArtifactsService {
     metadata?: Record<string, unknown>;
     analysisId?: string | null;
   }): Promise<string> {
-    this.assertCurrentArtifactEvidenceContract('resume', input.responseBody);
+    const filteredResponseBody = sanitizeResumeResponseBodyForEvidenceContract(input.responseBody);
+    this.assertCurrentArtifactEvidenceContract('resume', filteredResponseBody);
     if (shouldTraceArtifactIdentity) {
       // eslint-disable-next-line no-console
       console.log(
@@ -1718,7 +1803,7 @@ export class StudioArtifactsService {
       generationContractVersion: ARTIFACT_CONTRACT_VERSION,
       resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
       resumeInputsHash: input.inputsHash,
-      resumeResponseBody: input.responseBody as any,
+      resumeResponseBody: filteredResponseBody as any,
       resumeContent: input.content,
       resumeGeneratedAt: new Date(),
       resumeGenerationStartedAt: null,
