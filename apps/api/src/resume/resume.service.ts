@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  InternalServerErrorException,
   Inject,
   Injectable,
   NotFoundException,
@@ -1584,6 +1585,79 @@ export class ResumeService {
       resume: preview,
       usedEvidenceIds: Array.from(usedEvidenceIds),
     };
+  }
+
+  private assertResumeEvidenceBeforePersistence(input: {
+    responseBody: Record<string, unknown>;
+    resumeInputSections: BaselineSection[];
+    allowedSections: BaselineSection[];
+    promotedExperienceLikeSectionsCount: number;
+  }): {
+    experienceCount: number;
+    totalBulletCount: number;
+    evidenceBackedBulletCount: number;
+    totalResumeUsedEvidenceIdsCount: number;
+    resumeInputSectionsCount: number;
+    resumeInputEvidenceUnitCount: number;
+    allowedSectionsCount: number;
+    promotedExperienceLikeSectionsCount: number;
+  } {
+    const preview = (input.responseBody as any)?.preview;
+    const resume = preview && typeof preview === 'object' ? (preview as any).resume ?? null : null;
+    const experience = Array.isArray((resume as any)?.experience) ? ((resume as any).experience as any[]) : [];
+    let totalBulletCount = 0;
+    let evidenceBackedBulletCount = 0;
+    for (const role of experience) {
+      const bullets = Array.isArray(role?.bullets) ? role.bullets : [];
+      totalBulletCount += bullets.length;
+      evidenceBackedBulletCount += bullets.filter((bullet: any) => {
+        const ids = Array.isArray(bullet?.sourceEvidenceIds)
+          ? bullet.sourceEvidenceIds.filter(Boolean)
+          : Array.isArray(bullet?.source?.sourceEvidenceIds)
+            ? bullet.source.sourceEvidenceIds.filter(Boolean)
+            : [];
+        return ids.length > 0;
+      }).length;
+    }
+
+    const resumeInputEvidenceUnitCount = input.resumeInputSections.flatMap((section) => {
+      const logicalUnits = ResumeDraftBullets.reconstructLogicalTextUnits(section.content ?? '');
+      return ResumeDraftBullets.extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits);
+    }).length;
+
+    const totalResumeUsedEvidenceIdsCount = Array.isArray((input.responseBody as any)?.internalTrace?.usedEvidenceIds)
+      ? (input.responseBody as any).internalTrace.usedEvidenceIds.filter(Boolean).length
+      : 0;
+
+    const counts = {
+      experienceCount: experience.length,
+      totalBulletCount,
+      evidenceBackedBulletCount,
+      totalResumeUsedEvidenceIdsCount,
+      resumeInputSectionsCount: input.resumeInputSections.length,
+      resumeInputEvidenceUnitCount,
+      allowedSectionsCount: input.allowedSections.length,
+      promotedExperienceLikeSectionsCount: input.promotedExperienceLikeSectionsCount,
+    };
+
+    if (totalResumeUsedEvidenceIdsCount === 0) {
+      this.logger.error(
+        JSON.stringify({
+          code: 'resume_v2_evidence_missing_before_persistence',
+          message: 'Resume V2 had zero evidence before Studio persistence.',
+          ...counts,
+        }),
+      );
+      throw new InternalServerErrorException({
+        error: {
+          code: 'resume_v2_evidence_missing_before_persistence',
+          message: 'Resume V2 had zero evidence before Studio persistence.',
+          counts,
+        },
+      });
+    }
+
+    return counts;
   }
 
   private getLatestPersistedResumeV2Json(parsedRecords: any[] | null | undefined): unknown | null {
@@ -5789,6 +5863,13 @@ export class ResumeService {
       hasContent: true,
       length: persistedContent.length,
       responseKeys: response && typeof response === 'object' ? Object.keys(response as any) : [],
+    });
+
+    this.assertResumeEvidenceBeforePersistence({
+      responseBody: response as unknown as Record<string, unknown>,
+      resumeInputSections,
+      allowedSections,
+      promotedExperienceLikeSectionsCount: this.promoteExperienceLikeSections(allowedSections).length,
     });
 
     let artifactId: string;

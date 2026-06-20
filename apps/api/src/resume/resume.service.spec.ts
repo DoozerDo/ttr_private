@@ -4509,6 +4509,71 @@ describe('ResumeService contract', () => {
     expect(result.usedEvidenceIds.length).toBe(1);
   });
 
+  it('throws resume_v2_evidence_missing_before_persistence before recordResumeSuccess when no evidence is present', () => {
+    const { service } = buildService();
+    const guard = (service as any).assertResumeEvidenceBeforePersistence.bind(service);
+    const responseBody = {
+      internalTrace: { usedEvidenceIds: [] },
+      preview: {
+        resume: {
+          heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+          summary: 'Supported summary.',
+          experience: [
+            {
+              company: 'Acme',
+              roleTitle: 'Operator',
+              bullets: [{ text: 'Improved service reliability.' }],
+            },
+          ],
+        },
+      },
+    };
+
+    expect(() =>
+      guard({
+        responseBody,
+        resumeInputSections: [
+          {
+            id: 'section-experience',
+            baselineId: 'baseline-1',
+            sectionType: BaselineSectionType.EXPERIENCE,
+            title: 'Experience',
+            content: '- Improved service reliability.',
+            includePolicy: BaselineIncludePolicy.ALWAYS,
+            order: 0,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          } as any,
+        ],
+        allowedSections: [
+          {
+            id: 'section-experience',
+            baselineId: 'baseline-1',
+            sectionType: BaselineSectionType.EXPERIENCE,
+            title: 'Experience',
+            content: '- Improved service reliability.',
+            includePolicy: BaselineIncludePolicy.ALWAYS,
+            order: 0,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          } as any,
+        ],
+        promotedExperienceLikeSectionsCount: 1,
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: 'resume_v2_evidence_missing_before_persistence',
+            counts: expect.objectContaining({
+              totalResumeUsedEvidenceIdsCount: 0,
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
   it('paired high-fit contract: generates both resume and cover letter from verified baseline evidence when Resume V2 is missing, omitting unsupported requirements and persisting both artifacts under the same context', async () => {
     const originalSections = baseline.sections;
     const originalParsed = baseline.parsedRecords;
