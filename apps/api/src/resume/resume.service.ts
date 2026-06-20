@@ -5187,11 +5187,66 @@ export class ResumeService {
     // Final safety: ensure the exact preview payload returned to Studio is sanitized.
     if (response?.preview?.resume) {
       response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
+      const previewExperienceBefore = Array.isArray(sanitizedPreviewDocument?.experience)
+        ? sanitizedPreviewDocument.experience
+        : [];
+      const previewBulletCountBefore = previewExperienceBefore.reduce(
+        (sum, entry: any) => sum + (Array.isArray(entry?.bullets) ? entry.bullets.length : 0),
+        0,
+      );
       const previewEvidence = this.attachResumePreviewEvidence(
         response.preview.resume as NormalizedResumeDocument,
         resumeTraceAudit.traceMap,
       );
       response.preview.resume = previewEvidence.resume as any;
+      const previewExperienceAfter = Array.isArray((response.preview.resume as any)?.experience)
+        ? (response.preview.resume as any).experience
+        : [];
+      const previewBulletCountAfter = previewExperienceAfter.reduce(
+        (sum: number, entry: any) => sum + (Array.isArray(entry?.bullets) ? entry.bullets.length : 0),
+        0,
+      );
+      const remainingBulletsWithoutSourceEvidenceIds = previewExperienceAfter.flatMap((entry: any) =>
+        (Array.isArray(entry?.bullets) ? entry.bullets : [])
+          .filter((bullet: any) => {
+            const ids = Array.isArray(bullet?.sourceEvidenceIds)
+              ? bullet.sourceEvidenceIds.filter(Boolean)
+              : Array.isArray(bullet?.source?.sourceEvidenceIds)
+                ? bullet.source.sourceEvidenceIds.filter(Boolean)
+                : [];
+            return ids.length === 0;
+          })
+          .map((bullet: any) => String(bullet?.text ?? '')),
+      );
+      // eslint-disable-next-line no-console
+      console.log('RESUME_EVIDENCE_ATTACHMENT_RESULT', {
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: job?.id ?? jobId ?? null,
+        analysisId: analysisId ?? null,
+        attachFunctionCalled: true,
+        previewExperienceCountBefore: previewExperienceBefore.length,
+        previewBulletCountBefore,
+        previewExperienceCountAfter: previewExperienceAfter.length,
+        previewBulletCountAfter,
+        usedEvidenceIdsCountAfter: previewEvidence.usedEvidenceIds.length,
+        unevidencedBulletsRemovedCount: Math.max(previewBulletCountBefore - previewBulletCountAfter, 0),
+        remainingBulletsWithoutSourceEvidenceIds,
+        remainingBulletsSample: previewExperienceAfter
+          .flatMap((entry: any) => Array.isArray(entry?.bullets) ? entry.bullets : [])
+          .slice(0, 5)
+          .map((bullet: any) => ({
+            text: String(bullet?.text ?? ''),
+            sourceEvidenceIds: Array.isArray(bullet?.sourceEvidenceIds)
+              ? bullet.sourceEvidenceIds
+              : Array.isArray(bullet?.source?.sourceEvidenceIds)
+                ? bullet.source.sourceEvidenceIds
+                : [],
+          })),
+        responseHasPreviewResume: Boolean((response as any)?.preview?.resume),
+        responseHasInternalTraceUsedEvidenceIds: Array.isArray((response as any)?.internalTrace?.usedEvidenceIds),
+        persistenceResponseBodyPathUsed: 'response.preview.resume',
+      });
       response.internalTrace = {
         ...(response.internalTrace ?? {}),
         usedEvidenceIds: previewEvidence.usedEvidenceIds.length
