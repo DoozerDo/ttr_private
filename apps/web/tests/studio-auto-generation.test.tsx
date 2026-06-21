@@ -1272,22 +1272,20 @@ describe("Studio auto-generation", () => {
         },
         resumeResult: {
           artifactType: "resume",
-          generationState: "generated_unusable",
-          qualityStatus: "failed",
-          exportReady: false,
-          exports: { docx: false, pdf: false },
+          status: "success",
+          generationStatus: "success",
+          generationState: "generated_usable",
+          qualityStatus: "pass",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
           preview: {
-            heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
-            summary: "Fallback resume should not count as renderable.",
-            experience: [{ company: "Example", roleTitle: "Role", bullets: ["x"] }],
+            resume: {
+              heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+              summary: "Fresh generated resume should become persisted authority.",
+              experience: [{ company: "Example", roleTitle: "Role", bullets: ["x"] }],
+            },
           },
-          internal: {
-            minimalFallback: true,
-            resumeGenerationMode: "top_level_fail_safe_minimal",
-            resumeFailSafeMinimalUsed: true,
-          },
-          auditId: "minimal:1776648116795",
-          actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+          actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: true },
         },
         resume: {
           status: "COMPLETED",
@@ -1478,6 +1476,106 @@ describe("Studio auto-generation", () => {
     }, { timeout: 15000 });
 
     expectCanonicalGeneratedArtifactArea();
+  }, 15000);
+
+  it("promotes a fresh generated resume into persisted authority when the persisted snapshot is stale", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const fetchMock = installStrongFitFetches({
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "missing",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        assessmentScore: 84,
+        generationContractVersion: "studio-artifacts-v1",
+        resumeArtifactHydration: {
+          resumeArtifactId: "resume-minimal-stale-1",
+          resumeArtifactSource: "fresh_generation",
+          resumeArtifactUpdatedAt: "2026-06-20T23:49:04.879Z",
+        },
+        resumeResult: {
+          artifactType: "resume",
+          status: "success",
+          generationStatus: "success",
+          generationState: "generated_usable",
+          qualityStatus: "pass",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: {
+            resume: {
+              heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+              summary: "Fresh generated resume should become persisted authority.",
+              experience: [{ company: "Example", roleTitle: "Role", bullets: ["x"] }],
+            },
+          },
+          actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: true },
+        },
+        resume: {
+          status: "COMPLETED",
+          artifactId: "resume-minimal-stale-1",
+          usableCurrent: false,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: false,
+            exports: { docx: false, pdf: false },
+            auditId: "minimal:1776648116795",
+            preview: {
+              resume: {
+                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                summary: "Fallback resume should not count as renderable.",
+                experience: [{ company: "Example", roleTitle: "Role", bullets: ["x"] }],
+              },
+            },
+            internal: {
+              minimalFallback: true,
+              resumeGenerationMode: "top_level_fail_safe_minimal",
+              resumeFailSafeMinimalUsed: true,
+            },
+          },
+          content: "Fallback resume should not count as renderable.",
+          confidence: "HIGH",
+          failure: null,
+        },
+        coverLetter: {
+          status: "COMPLETED",
+          artifactId: "cover-hydrated-1",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          },
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+      },
+    });
+
+    setFetchImplementation(fetchMock as any);
+    renderStudio();
+
+    await waitFor(() => {
+      const debug = screen.getByTestId("studio-orchestration-debug");
+      const raw = debug.querySelector("pre")?.textContent ?? "";
+      expect(raw).toContain("\"resumeArtifactSource\": \"fresh_generation\"");
+      expect(raw).toContain("\"hasResumeArtifactPersisted\": true");
+      expect(raw).toContain("\"hasAnyArtifactPersisted\": true");
+      expect(raw).not.toContain("\"hasResumeArtifactPersisted\": false");
+      expect(screen.queryByText("Something went wrong")).toBeNull();
+    }, { timeout: 15000 });
   }, 15000);
 
   it("keeps a persisted generated resume visible when quality is failed and the response is stale", async () => {

@@ -1565,6 +1565,38 @@ export default function StudioPage() {
   const hasCoverLetterArtifactPersisted = persistedExistence.hasCoverLetterArtifactPersisted;
   const hasAnyArtifactPersisted = hasResumeArtifactPersisted || hasCoverLetterArtifactPersisted;
 
+  useEffect(() => {
+    const hydratedResumeResponse = normalizeHydratedArtifactResponse(resumeState.response);
+    if (!hydratedResumeResponse) return;
+    if (hasResumeArtifactPersisted) return;
+    if (!studioArtifactsPayload?.resume?.artifactId) return;
+    if (!studioArtifactsPayload?.coverLetter) return;
+    if (isMinimalResumeArtifactPayload(hydratedResumeResponse)) return;
+
+    setStudioArtifactsPayload((current) => {
+      if (!current?.resume) return current;
+      if (isMinimalResumeArtifactPayload(current.resume.responseBody)) {
+        return {
+          ...current,
+          resume: {
+            ...current.resume,
+            responseBody: hydratedResumeResponse,
+          },
+        };
+      }
+      return current;
+    });
+    if (studioArtifactPairStatus === "missing") {
+      setStudioArtifactPairStatus("completed");
+    }
+  }, [
+    hasResumeArtifactPersisted,
+    resumeState.response,
+    studioArtifactPairStatus,
+    studioArtifactsPayload?.coverLetter,
+    studioArtifactsPayload?.resume?.artifactId,
+  ]);
+
   const isBackendArtifactStale = useCallback((record: unknown) => {
     const artifactRecord = record as { usableCurrent?: unknown; status?: unknown; inputsHash?: unknown } | null;
     if (!artifactRecord || artifactRecord.status !== "COMPLETED") return false;
@@ -2425,22 +2457,61 @@ export default function StudioPage() {
     const previouslyHydratedPayload = studioArtifactsPayloadRef.current;
     const previouslyHadArtifacts =
       Boolean(previouslyHydratedPayload?.resume) || Boolean(previouslyHydratedPayload?.coverLetter);
+    const payloadWithHydration = payload as BackendStudioArtifactsResponse & {
+      resumeArtifactHydration?: { resumeArtifactId?: unknown } | null;
+    };
+
+    const currentResumeStateResponse = normalizeHydratedArtifactResponse(resumeStateSnapshotRef.current.response);
+    const currentResumeStatePresenter = currentResumeStateResponse
+      ? presentResumeGeneration(currentResumeStateResponse)
+      : null;
+    const currentResumeStatePreview = readHydratedResumePreviewModel(currentResumeStateResponse);
+    const currentResumeStatePromotedResponse =
+      currentResumeStatePreview && currentResumeStatePresenter?.status === "success"
+        ? ({
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: { resume: currentResumeStatePreview },
+            actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: true },
+          } as const)
+        : currentResumeStateResponse;
+    const shouldPromoteCurrentResumeState =
+      currentResumeStatePresenter?.status === "success" &&
+      Boolean(currentResumeStateResponse) &&
+      Boolean(payload.resume?.artifactId || payloadWithHydration.resumeArtifactHydration?.resumeArtifactId) &&
+      (pairStatus === "missing" ||
+        pairStatus === "failed" ||
+        !payload.resume?.responseBody ||
+        isMinimalResumeArtifactPayload(payload.resume.responseBody));
+    const authorityPayload =
+      shouldPromoteCurrentResumeState && payload.resume
+        ? ({
+            ...payload,
+            resume: {
+              ...payload.resume,
+              responseBody: currentResumeStatePromotedResponse,
+            },
+          } as BackendStudioArtifactsResponse)
+        : payload;
 
     if (pairStatus === "missing" && (hasHydratedOrGeneratedResponse || previouslyHadArtifacts)) {
       if (
-        payload.resume?.responseBody &&
-        payload.coverLetter?.responseBody &&
-        !isMinimalResumeArtifactPayload(payload.resume.responseBody)
+        authorityPayload.resume?.responseBody &&
+        authorityPayload.coverLetter?.responseBody &&
+        !isMinimalResumeArtifactPayload(authorityPayload.resume.responseBody)
       ) {
         setStudioArtifactPairStatus("completed");
         suppressAutoGenerationRef.current = true;
+        setStudioArtifactsPayload(authorityPayload);
       }
       return;
     }
 
-    setStudioArtifactsPayload(payload);
-    const resumeRecord = payload.resume ?? null;
-    const coverRecord = payload.coverLetter ?? null;
+    setStudioArtifactsPayload(authorityPayload);
+    const resumeRecord = authorityPayload.resume ?? null;
+    const coverRecord = authorityPayload.coverLetter ?? null;
 
     const resumeArtifactCurrent =
       resumeRecord?.status === "COMPLETED" &&
