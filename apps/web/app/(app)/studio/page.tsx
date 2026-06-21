@@ -372,6 +372,27 @@ function buildStudioArtifactsReadiness(payload: BackendStudioArtifactsResponse |
   if (!hasPersistedCoverLetterArtifact) missingReasonCodes.push("persisted_cover_letter_artifact_missing");
 
   const summary = `Studio artifacts are missing: ${missingReasonCodes.join(", ")}.`;
+  const hasOnlyMissingPersistedArtifacts = hasPersistedFitAssessment && missingReasonCodes.length > 0;
+  if (hasOnlyMissingPersistedArtifacts) {
+    return {
+      status: "limited",
+      blocked: false,
+      reasonCodes: missingReasonCodes,
+      reasons: [{ code: "personalization_limitation", message: summary }],
+      badgeLabel: "LIMITED",
+      summary,
+      verificationIssues: missingReasonCodes.map((code) => ({
+        code: "missing_baseline_evidence",
+        severity: "warn",
+        claim: null,
+        source: "targeting_context",
+        explanation: summary,
+        sourceContext: null,
+        recommendedAction: "Generate the missing persisted Studio artifact.",
+      })),
+    };
+  }
+
   return {
     status: "blocked",
     blocked: true,

@@ -353,6 +353,13 @@ function readPostBodies(fetchMock: ReturnType<typeof vi.fn>, suffix: string): Ar
     });
 }
 
+function readOrchestrationDebugSnapshot(): Record<string, any> {
+  const debug = screen.getByTestId("studio-orchestration-debug");
+  const raw = debug.querySelector("pre")?.textContent ?? "";
+  expect(raw).toBeTruthy();
+  return JSON.parse(raw) as Record<string, any>;
+}
+
 describe("Studio auto-generation", () => {
   beforeEach(() => {
     try {
@@ -995,14 +1002,13 @@ describe("Studio auto-generation", () => {
     renderStudio();
 
     await waitFor(() => {
-      const debug = screen.getByTestId("studio-orchestration-debug");
-      const raw = debug.querySelector("pre")?.textContent ?? "";
-      expect(raw).toContain("\"orchestrationDecision\": \"should_auto_generate\"");
-      expect(raw).toContain("\"needsAutoGeneration\": true");
+      const snapshot = readOrchestrationDebugSnapshot();
+      expect(snapshot.orchestrationDecision).toBe("should_auto_generate");
+      expect(snapshot.needsAutoGeneration).toBe(true);
     }, { timeout: 15000 });
   }, 15000);
 
-	  it("auto-generates the missing resume when cover letter is already persisted (partial artifact state must not block)", async () => {
+	  it("auto-generates the partial artifact state when cover letter is already persisted", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",
       jobId: "job-1",
@@ -1242,7 +1248,7 @@ describe("Studio auto-generation", () => {
     expect(screen.queryByText("Something went wrong")).toBeNull();
   }, 15000);
 
-  it("treats minimal resume artifacts as stale history and requires resume regeneration", async () => {
+  it("treats missing resume and minimal resume artifacts as stale history and requires resume regeneration", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",
       jobId: "job-1",
@@ -1334,15 +1340,19 @@ describe("Studio auto-generation", () => {
     renderStudio();
 
     await waitFor(() => {
-      const debug = screen.getByTestId("studio-orchestration-debug");
-      const raw = debug.querySelector("pre")?.textContent ?? "";
-      expect(raw).toContain("\"hasResumeArtifactPersisted\": false");
-      expect(raw).toContain("\"hasCoverLetterArtifactPersisted\": true");
-      expect(raw).toContain("\"missingResumeOutput\": true");
-      expect(raw).toContain("\"needsAutoGeneration\": true");
-      expect(raw).toContain("\"orchestrationDecision\": \"blocked\"");
-      expect(raw).not.toContain("\"orchestrationDecision\": \"hydrate_existing_artifacts\"");
-      expect(raw).toContain("\"studioArtifactPairStatus\": \"missing\"");
+      const snapshot = readOrchestrationDebugSnapshot();
+      expect(snapshot.hasResumeArtifactPersisted).toBe(false);
+      expect(snapshot.hasCoverLetterArtifactPersisted).toBe(true);
+      expect(snapshot.needsAutoGeneration).toBe(true);
+      expect(snapshot.qualifiedForStudioOrchestration).toBe(true);
+      expect(snapshot.studioReadinessBlocksGeneration).toBe(false);
+      expect(snapshot.blockerEvaluationTrace?.usedForNeedsAutoGeneration?.inputs?.missingResumeOutput).toBe(true);
+      expect(snapshot.blockerEvaluationTrace?.usedForGenerateGuard?.result).toBe(true);
+      expect(snapshot.blockerEvaluationTrace?.usedForAutoStartGuard?.result).toBe(true);
+      expect(snapshot.orchestrationDecision).toBe("should_auto_generate");
+      expect(snapshot.orchestrationDecision).not.toBe("blocked");
+      expect(snapshot.orchestrationDecision).not.toBe("hydrate_existing_artifacts");
+      expect(snapshot.studioArtifactPairStatus).toBe("missing");
     }, { timeout: 15000 });
 
     expect(screen.queryByText("Something went wrong")).toBeNull();
