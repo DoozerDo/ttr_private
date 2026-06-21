@@ -5280,7 +5280,7 @@ describe('ResumeService contract', () => {
     baseline.sections = original;
   });
 
-  it('does not throw insufficient_extracted_text when verified ResumeV2 authority exists and the legacy text source is empty', async () => {
+  it('allows ResumeV2 authoritative generation to bypass baseline_file_unavailable when the latest parsed record is not verified but a usable ResumeV2 authority exists', async () => {
     const { service, studioArtifactsService } = buildService();
     const originalSections = baseline.sections;
     const originalParsedRecords = (baseline as any).parsedRecords;
@@ -5288,6 +5288,9 @@ describe('ResumeService contract', () => {
     const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
     assessment.overallScore = 83;
+    const assertResumeEvidenceBeforePersistenceSpy = jest
+      .spyOn(service as any, 'assertResumeEvidenceBeforePersistence')
+      .mockImplementation(() => undefined);
     const resumeV2Authority = {
       heading: { name: 'Test', contactLine: 'Test' },
       summary: 'Verified baseline summary.',
@@ -5326,6 +5329,17 @@ describe('ResumeService contract', () => {
       baseline.sections = [];
       (baseline as any).parsedRecords = [
         {
+          id: 'parsed-latest-unverified',
+          baselineId: baseline.id,
+          baselineVersionId: baselineVersion.id,
+          createdAt: new Date('2026-03-01T00:00:00.000Z'),
+          flagsJson: {
+            reviewState: {
+              verified: false,
+            },
+          },
+        },
+        {
           id: 'parsed-verified',
           baselineId: baseline.id,
           baselineVersionId: baselineVersion.id,
@@ -5339,28 +5353,68 @@ describe('ResumeService contract', () => {
         },
       ];
 
-      try {
-        await service.generateResume(
+      const result = await service.generateResume(
+        'user-1',
+        {
+          ...baseRequest,
+          forceRegenerate: true,
+          oneTap: false,
+          analysisId: 'analysis-verified',
+        } as any,
+        { preflightOnly: false, skipReadinessGate: true, enforceOneTap: false },
+      );
+
+      expect(result).toMatchObject({
+        ok: true,
+        status: 'success',
+      });
+      expect((result as any).auditId ?? (result as any).audit_id ?? null).not.toMatch(/^minimal:/);
+      expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+      expect(studioArtifactsService.recordResumeFailure).not.toHaveBeenCalled();
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsedRecords;
+      assessment.overallScore = originalScore;
+      assertResumeEvidenceBeforePersistenceSpy.mockRestore();
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    }
+  });
+
+  it('still throws baseline_file_unavailable for a legacy path without ResumeV2 authority', async () => {
+    const { service, studioArtifactsService } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsedRecords = (baseline as any).parsedRecords;
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+
+    try {
+      baseline.sections = [baseSection];
+      (baseline as any).parsedRecords = [];
+
+      await expect(
+        service.generateResume(
           'user-1',
           {
             ...baseRequest,
             forceRegenerate: true,
             oneTap: false,
-            analysisId: 'analysis-verified',
           } as any,
           { preflightOnly: false, skipReadinessGate: true, enforceOneTap: false },
-        );
-      } catch (error) {
-        const response = (error as UnprocessableEntityException).getResponse() as any;
-        expect(response?.code ?? response?.error?.code ?? null).not.toBe('insufficient_extracted_text');
-        expect(studioArtifactsService.recordResumeFailure).toHaveBeenCalled();
-        return;
-      }
-      expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+        ),
+      ).rejects.toMatchObject({
+        status: 422,
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: 'baseline_file_unavailable',
+            message: 'Resume generation requires a verified usable Baseline File.',
+          }),
+        }),
+      });
+      expect(studioArtifactsService.recordResumeSuccess).not.toHaveBeenCalled();
     } finally {
       baseline.sections = originalSections;
       (baseline as any).parsedRecords = originalParsedRecords;
-      assessment.overallScore = originalScore;
       if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
       else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     }

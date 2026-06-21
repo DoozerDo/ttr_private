@@ -3270,7 +3270,8 @@ export class ResumeService {
       order: { order: 'ASC' },
     });
 
-    if (!baselineFileUsable || !baselineVerified) {
+    const hasResumeV2AuthorityForGeneration = Boolean(isResumeV2 && persistedResumeV2ForAuthority);
+    if ((!baselineFileUsable || !baselineVerified) && !hasResumeV2AuthorityForGeneration) {
       throw new UnprocessableEntityException({
         error: {
           code: 'baseline_file_unavailable',
@@ -3279,6 +3280,7 @@ export class ResumeService {
             baselineFileUsable,
             baselineVerified,
             generationAuthority: 'fallback',
+            hasResumeV2AuthorityForGeneration,
           },
         },
       });
