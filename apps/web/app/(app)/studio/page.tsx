@@ -720,11 +720,25 @@ function normalizeHydratedArtifactResponse(value: unknown): unknown | null {
 function readHydratedResumePreviewModel(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
+  const directModel = readResumeModel(record);
+  if (directModel) return directModel as Record<string, unknown>;
+
   const preview = record.preview;
   if (preview && typeof preview === "object") {
     const nestedResume = (preview as Record<string, unknown>).resume;
     if (nestedResume && typeof nestedResume === "object") return nestedResume as Record<string, unknown>;
+    const previewModel = readResumeModel(preview);
+    if (previewModel) return previewModel as Record<string, unknown>;
   }
+
+  const resume = record.resume;
+  if (resume && typeof resume === "object") {
+    const nestedResume = (resume as Record<string, unknown>).resume;
+    if (nestedResume && typeof nestedResume === "object") return nestedResume as Record<string, unknown>;
+    const resumeModel = readResumeModel(resume);
+    if (resumeModel) return resumeModel as Record<string, unknown>;
+  }
+
   return null;
 }
 
@@ -738,19 +752,20 @@ function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unkno
   const responseResumeResult = responseRecord?.resumeResult && typeof responseRecord.resumeResult === "object"
     ? (responseRecord.resumeResult as Record<string, unknown>)
     : null;
-  const responsePreview = responseRecord ? readHydratedResumePreviewModel(responseRecord) : null;
-  const responseResumeResultPreview = responseResumeResult ? readHydratedResumePreviewModel(responseResumeResult.preview) : null;
   const fallbackResumeResult = resumeResult && typeof resumeResult === "object" ? (resumeResult as Record<string, unknown>) : null;
-  const fallbackPreview = fallbackResumeResult ? readHydratedResumePreviewModel(fallbackResumeResult.preview) : null;
+  const bridgedPreview =
+    readHydratedResumePreviewModel(responseRecord) ??
+    readHydratedResumePreviewModel(responseResumeResult) ??
+    readHydratedResumePreviewModel(fallbackResumeResult);
 
   if (!responseRecord) {
     if (!fallbackResumeResult) return null;
-    if (fallbackPreview) {
+    if (bridgedPreview) {
       return {
-        preview: { resume: fallbackPreview },
+        preview: { resume: bridgedPreview },
         resumeResult: {
           ...fallbackResumeResult,
-          preview: { ...(fallbackPreview as Record<string, unknown>), resume: fallbackPreview },
+          preview: { ...(bridgedPreview as Record<string, unknown>), resume: bridgedPreview },
           exportReady: true,
           exports: { docx: true, pdf: true },
           actions: {
@@ -765,16 +780,16 @@ function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unkno
     return { resumeResult: fallbackResumeResult };
   }
 
-  if (responseResumeResult && responseResumeResultPreview) {
+  if (responseResumeResult && bridgedPreview) {
     const responseExports = responseRecord.exports && typeof responseRecord.exports === "object"
       ? (responseRecord.exports as Record<string, unknown>)
       : null;
     return {
       ...responseRecord,
-      preview: { resume: responseResumeResultPreview },
+      preview: { resume: bridgedPreview },
       resumeResult: {
         ...responseResumeResult,
-        preview: { ...(responseResumeResultPreview as Record<string, unknown>), resume: responseResumeResultPreview },
+        preview: { ...(bridgedPreview as Record<string, unknown>), resume: bridgedPreview },
         exportReady: true,
         exports: {
           docx: true,
@@ -791,7 +806,6 @@ function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unkno
     };
   }
 
-  const bridgedPreview = responsePreview ?? fallbackPreview;
   if (bridgedPreview) {
     const responseExports = responseRecord?.exports && typeof responseRecord.exports === "object"
       ? (responseRecord.exports as Record<string, unknown>)

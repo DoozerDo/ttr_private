@@ -1264,6 +1264,16 @@ describe("Studio auto-generation", () => {
           resumeArtifactSource: "fresh_generation",
           resumeArtifactUpdatedAt: "2026-06-20T23:49:04.879Z",
         },
+        resumeResult: {
+          artifactType: "resume",
+          generationState: "generated_needs_correction",
+          qualityStatus: "failed",
+          preview: null,
+          correctionReasons: [],
+          exportReady: false,
+          exports: { docx: false, pdf: false },
+          actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+        },
         resume: {
           status: "COMPLETED",
           artifactId: "resume-hydrated-1",
@@ -1275,21 +1285,19 @@ describe("Studio auto-generation", () => {
             exportReady: true,
             exports: { docx: true, pdf: true },
             preview: {
-              resume: {
-                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
-                summary: "Support leader focused on scalable operations.",
-                experience: [
-                  {
-                    company: "Cat Daddy Games",
-                    roleTitle: "Senior Producer",
-                    location: "Los Angeles, CA",
-                    dateRange: "2020 - Present",
-                    bullets: ["Led support operations programs."],
-                  },
-                ],
-                education: [{ degree: "BA", institution: "State University", location: "Remote" }],
-                competencies: ["Customer strategy", "Operational leadership"],
-              },
+              heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+              summary: "Support leader focused on scalable operations.",
+              experience: [
+                {
+                  company: "Cat Daddy Games",
+                  roleTitle: "Senior Producer",
+                  location: "Los Angeles, CA",
+                  dateRange: "2020 - Present",
+                  bullets: ["Led support operations programs."],
+                },
+              ],
+              education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+              competencies: ["Customer strategy", "Operational leadership"],
             },
           },
           content: "Resume",
@@ -1326,6 +1334,7 @@ describe("Studio auto-generation", () => {
       expect(snapshot.resumeState?.response).not.toBeNull();
       expect(snapshot.resumeState?.response?.preview?.resume).toBeDefined();
       expect(snapshot.resumeState?.response?.resumeResult?.preview?.resume).toBeDefined();
+      expect(snapshot.resumeState?.response?.resumeResult?.preview).not.toBeNull();
       expect(raw).toContain("\"hasResumeArtifactPersisted\": true");
       expect(raw).toContain("\"hasAnyArtifactPersisted\": true");
       expect(raw).toContain("\"studioArtifactPairStatus\": \"completed\"");
