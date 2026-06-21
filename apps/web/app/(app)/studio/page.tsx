@@ -2388,17 +2388,34 @@ export default function StudioPage() {
       Boolean((coverRecord as any)?.inputsHash) === true &&
       (coverRecord as any)?.usableCurrent === false;
 
+    const resumeResponse = normalizeHydratedArtifactResponse(resumeRecord?.responseBody ?? null);
+    const coverResponse = normalizeHydratedArtifactResponse(coverRecord?.responseBody ?? null);
+
+    // Phase 1: prefer canonical artifact results when present, but keep legacy responseBody alongside it.
+    const resumeResult = payload.resumeResult ?? null;
+    const coverLetterResult = payload.coverLetterResult ?? null;
+    const resumeResponseWithResult = bridgeHydratedResumeResponse(resumeResponse, resumeResult);
+    const coverResponseWithResult =
+      coverLetterResult
+        ? (coverResponse && typeof coverResponse === "object"
+            ? ({ ...(coverResponse as Record<string, unknown>), coverLetterResult } as unknown)
+            : ({ coverLetterResult } as unknown))
+        : coverResponse;
+
     // Strict legacy hydration: only hydrate when the backend record is completed *and current*.
     // If a completed artifact is stale (hash mismatch after composition ruleset changes), do not
     // show it as usable output; force regeneration instead.
     if (resumeArtifactCurrent && resumeRecord?.responseBody) {
-          setResumeState((current) => ({
-            ...current,
-            response: resumeRecord.responseBody,
-            error: isResumeStaleAdvisory(current.error) ? current.error : null,
-            tierGateError: null,
-            artifactFailure: null,
-          }));
+      setResumeState((current) => ({
+        ...current,
+        response:
+          resumeResponseWithResult && typeof resumeResponseWithResult === "object"
+            ? ({ ...(resumeResponseWithResult as Record<string, unknown>) } as unknown)
+            : resumeResponseWithResult ?? resumeRecord.responseBody,
+        error: isResumeStaleAdvisory(current.error) ? current.error : null,
+        tierGateError: null,
+        artifactFailure: null,
+      }));
       setHasGeneratedOnce(true);
       studioArtifactPresentationStateRef.current = "hydrated";
     } else if (resumeArtifactStale) {
@@ -2434,20 +2451,6 @@ export default function StudioPage() {
         artifactFailure: null,
       }));
     }
-
-    const resumeResponse = normalizeHydratedArtifactResponse(resumeRecord?.responseBody ?? null);
-    const coverResponse = normalizeHydratedArtifactResponse(coverRecord?.responseBody ?? null);
-
-    // Phase 1: prefer canonical artifact results when present, but keep legacy responseBody alongside it.
-    const resumeResult = payload.resumeResult ?? null;
-    const coverLetterResult = payload.coverLetterResult ?? null;
-    const resumeResponseWithResult = bridgeHydratedResumeResponse(resumeResponse, resumeResult);
-    const coverResponseWithResult =
-      coverLetterResult
-        ? (coverResponse && typeof coverResponse === "object"
-            ? ({ ...(coverResponse as Record<string, unknown>), coverLetterResult } as unknown)
-            : ({ coverLetterResult } as unknown))
-        : coverResponse;
 
     const resumeFailure = buildFailureFromBackendRecord("resume", resumeRecord);
     const coverFailure = buildFailureFromBackendRecord("cover_letter", coverRecord);
@@ -3827,7 +3830,7 @@ export default function StudioPage() {
     };
   }, [resumeQuality.issues, resumeResult?.correctionReasons]);
   const showResumeDownloadActions =
-    resumePresenter.status === "blocked" || artifactContract.resumeExportAvailable;
+    Boolean(hasResumeArtifact || resumeState.response || resumePresenter.status === "blocked" || artifactContract.resumeExportAvailable);
   const isResumeDownloadLocked = !isPro;
   // Studio is execution-only. Baseline eligibility is the only gating authority.
   // Template readiness / evidence readiness must not block generation or export in Studio.

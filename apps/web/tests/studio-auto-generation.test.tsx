@@ -1435,6 +1435,13 @@ describe("Studio auto-generation", () => {
       expect(screen.queryByText(/Resume not generated yet/i)).toBeNull();
       expect(screen.getByTestId("studio-resume-export")).toBeInTheDocument();
       expect(screen.getAllByText(/out of date due to recent generator improvements/i).length).toBeGreaterThan(0);
+      const debug = screen.getByTestId("studio-orchestration-debug");
+      const raw = debug.querySelector("pre")?.textContent ?? "";
+      expect(raw).toContain("\"resumeResult\"");
+      expect(raw).toContain("\"preview\": {");
+      expect(raw).toContain("\"exportReady\": true");
+      expect(raw).toContain("\"docx\": true");
+      expect(raw).toContain("\"pdf\": true");
       expect(screen.getByTestId("studio-materials-completeness")).toHaveTextContent(
         "Complete set: Resume + cover letter",
       );
@@ -1608,9 +1615,26 @@ describe("Studio auto-generation", () => {
             generationStatus: "success",
             exportReady: true,
             qualityGate: { status: "pass", reasons: [] },
-            preview: { resume: { heading: { name: "Alex" }, experience: [{ company: "Co", roleTitle: "Role", bullets: ["Did work."] }] } },
+            preview: {
+              resume: {
+                heading: { name: "Alex" },
+                summary:
+                  "Support leader with experience improving customer operations, coaching teams, and turning ambiguous requests into consistent service.",
+                experience: [
+                  {
+                    company: "Co",
+                    roleTitle: "Role",
+                    bullets: [
+                      "Improved response quality by coaching frontline support on clearer triage and follow-through.",
+                      "Partnered with product and operations to remove recurring customer friction across workflows.",
+                    ],
+                  },
+                ],
+              },
+            },
           },
-          content: "Resume",
+          content:
+            "Support leader with experience improving customer operations, coaching teams, and turning ambiguous requests into consistent service.\n\nImproved response quality by coaching frontline support on clearer triage and follow-through.\n\nPartnered with product and operations to remove recurring customer friction across workflows.",
           confidence: "HIGH",
           failure: null,
         },
@@ -1623,9 +1647,19 @@ describe("Studio auto-generation", () => {
             generationStatus: "success",
             exportReady: true,
             qualityGate: { status: "pass", reasons: [] },
-            preview: { coverLetter: { paragraphs: ["Hello"] } },
+            preview: {
+              coverLetter: {
+                paragraphs: [
+                  "Dear Acme hiring team, I am excited to apply for the Director of Support role and bring a track record of building dependable customer experiences.",
+                  "My background includes leading support operations, improving response quality, and helping teams deliver clear, compassionate service at scale.",
+                  "I would welcome the chance to contribute that experience to Acme and support the customers and teams around this role.",
+                  "Thank you for your time and consideration.",
+                ],
+              },
+            },
           },
-          content: "Hello",
+          content:
+            "Dear Acme hiring team, I am excited to apply for the Director of Support role and bring a track record of building dependable customer experiences.\n\nMy background includes leading support operations, improving response quality, and helping teams deliver clear, compassionate service at scale.\n\nI would welcome the chance to contribute that experience to Acme and support the customers and teams around this role.\n\nThank you for your time and consideration.",
           confidence: "HIGH",
           failure: null,
         },
