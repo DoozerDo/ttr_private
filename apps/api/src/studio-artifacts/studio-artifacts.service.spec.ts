@@ -860,13 +860,13 @@ describe('StudioArtifactsService (unit): artifact record hydration metadata', ()
 
     const hydrated = service.buildArtifactRecord(record, 'resume', 'hash-1');
     expect(hydrated.inputsHashMatches).toBe(true);
-    expect(hydrated.artifactCurrent).toBe(true);
-    expect(hydrated.usableCurrent).toBe(true);
+    expect(hydrated.artifactCurrent).toBe(false);
+    expect(hydrated.usableCurrent).toBe(false);
   });
 });
 
 describe('StudioArtifactsService (unit): readState suppresses rejected resume artifacts', () => {
-  it('keeps a minimal resume artifact renderable when persisted preview.resume exists', async () => {
+  it('keeps a minimal resume artifact as diagnostic history without making it current', async () => {
     const studioArtifactRepository = {
       findOne: jest.fn().mockResolvedValue({
         id: 'artifact-1',
@@ -892,16 +892,22 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
         resumeGeneratedAt: new Date('2026-05-31T00:01:00.000Z'),
         resumeFailedAt: null,
         resumeMetadata: { auditId: 'minimal:1780277132821' },
-        coverLetterStatus: StudioArtifactLifecycleStatus.MISSING,
-        coverLetterInputsHash: null,
-        coverLetterResponseBody: null,
-        coverLetterContent: null,
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterInputsHash: 'hash-1',
+        coverLetterResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: { coverLetter: { paragraphs: ['Hello from cover'] } },
+        },
+        coverLetterContent: 'Hello from cover',
         coverLetterFailureCode: null,
         coverLetterFailureMessage: null,
         coverLetterGenerationStartedAt: null,
-        coverLetterGeneratedAt: null,
+        coverLetterGeneratedAt: new Date('2026-05-31T00:01:00.000Z'),
         coverLetterFailedAt: null,
-        coverLetterMetadata: {},
+        coverLetterMetadata: { auditId: 'cover-audit-1' },
       } as any),
     } as any;
 
@@ -940,6 +946,8 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
       { generateResume: jest.fn() } as any,
       { generateCoverLetter: jest.fn() } as any,
     );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('hash-1');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('hash-1');
 
     const state = await service.readState({
       userId: 'u-1',
@@ -949,7 +957,13 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
       analysisId: 'analysis-1',
     });
 
+    expect(state.status).toBe(StudioArtifactLifecycleStatus.MISSING);
     expect(state.resume).toBeTruthy();
+    expect(state.resume?.artifactCurrent).toBe(false);
+    expect(state.resume?.usableCurrent).toBe(false);
+    expect(state.coverLetter).toBeTruthy();
+    expect(state.coverLetter?.artifactCurrent).toBe(true);
+    expect(state.coverLetter?.usableCurrent).toBe(true);
     expect((state.resumeResult as any)?.preview).toBeTruthy();
     expect((state.resumeResult as any)?.preview?.heading?.name).toBe('Alex');
     expect((state.resumeResult as any)?.generationState).toBe('generated_needs_correction');
@@ -957,6 +971,7 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
     expect((state.resumeResult as any)?.exportReady).toBe(false);
     expect(state.resume?.responseBody).toBeTruthy();
     expect(state.resume?.content).toBe('x'.repeat(318));
+    expect((state.coverLetterResult as any)?.preview?.paragraphs?.[0]).toBe('Hello from cover');
   });
 
   it('surfaces a diagnostic when a minimal resume artifact has no usable persisted preview model', async () => {

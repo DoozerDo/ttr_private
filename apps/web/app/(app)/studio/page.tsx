@@ -925,10 +925,13 @@ function getBackendArtifactStatus(record: BackendStudioArtifactRecord | null | u
   const hydratedArtifactId = trimString(record?.artifactId);
   if (status === "completed") {
     // Some upstream records report `completed` even when no response body is available.
-    // Studio can only treat an artifact as completed when the payload needed to render it exists.
+    // Studio can only treat an artifact as completed when the payload needed to render it exists
+    // and the backend has marked it current.
     const responseBody = (record as unknown as { responseBody?: unknown } | null)?.responseBody;
     const content = (record as unknown as { content?: unknown } | null)?.content;
     const hasContent = typeof content === "string" && content.trim().length > 0;
+    const usableCurrent = (record as unknown as { usableCurrent?: unknown } | null)?.usableCurrent;
+    if (usableCurrent === false) return "missing" as const;
     return responseBody == null && !hasContent && !hydratedArtifactId ? ("missing" as const) : ("completed" as const);
   }
   if (status === "in_progress") return "in_progress" as const;
@@ -1548,10 +1551,6 @@ export default function StudioPage() {
     return artifactRecord.usableCurrent === false;
   }, []);
 
-  const resumePersistedArtifactStale = useMemo(
-    () => isBackendArtifactStale(studioArtifactsPayload?.resume as unknown),
-    [isBackendArtifactStale, studioArtifactsPayload?.resume],
-  );
   const coverPersistedArtifactStale = useMemo(
     () => isBackendArtifactStale(studioArtifactsPayload?.coverLetter as unknown),
     [isBackendArtifactStale, studioArtifactsPayload?.coverLetter],
@@ -1559,7 +1558,7 @@ export default function StudioPage() {
 
   // Artifact existence authority: only from /api/studio/artifacts (persisted payload).
   // Keep legacy variable names as aliases so downstream UI branches do not accidentally switch back to UI-state checks.
-  // Persisted resume proof remains visible for display/orchestration even if the backend record is stale.
+  // Minimal resume artifacts are filtered out upstream so they cannot satisfy current/renderable readiness.
   const hasResumeArtifact = hasResumeArtifactPersisted;
   const hasCoverLetterArtifact = hasCoverLetterArtifactPersisted && !coverPersistedArtifactStale;
   const hasAuthoritativeArtifacts = hasResumeArtifact || hasCoverLetterArtifact;
@@ -4022,8 +4021,7 @@ export default function StudioPage() {
   const displayContract = artifactContract.displayContract;
   const hasCanonicalResumeArtifact = displayContract.resumePreviewRenderable;
   const hasCanonicalCoverLetterArtifact = displayContract.coverLetterPreviewRenderable;
-  const uiHasRenderableResume =
-    displayContract.resumePreviewRenderable || hasResumeArtifactPersisted || resumePersistedArtifactStale;
+  const uiHasRenderableResume = displayContract.resumePreviewRenderable || hasResumeArtifactPersisted;
   const uiHasRenderableCoverLetter = displayContract.coverLetterPreviewRenderable;
   const uiHasRenderablePair = displayContract.generationComplete;
   const hasCanonicalReloadedArtifactPair = displayContract.generationComplete;
@@ -5295,7 +5293,6 @@ export default function StudioPage() {
   const missingResumeOutput = !uiHasRenderableResume;
   const missingCoverOutput = !uiHasRenderableCoverLetter;
   const needsAutoGeneration =
-    eligibleForAutoGeneration &&
     (missingResumeOutput || missingCoverOutput) &&
     studioArtifactsHydrated &&
     !autoGenerationInFlight &&

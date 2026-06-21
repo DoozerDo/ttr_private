@@ -2187,7 +2187,8 @@ export class StudioArtifactsService {
     const generationRunId =
       metadata && typeof metadata === 'object' ? (metadata as any)?.auditId ?? null : null;
     const interpretedEvidenceAudit = extractInterpretedEvidenceAuditFromResponseBody(rawResponseBody);
-    const artifactCurrent = inputsHashMatches;
+    const minimalArtifact = artifact === 'resume' ? detectMinimalResumeArtifact(rawResponseBody).minimal : false;
+    const artifactCurrent = inputsHashMatches && !minimalArtifact;
     const usableCurrent =
       status === StudioArtifactLifecycleStatus.COMPLETED && Boolean(rawResponseBody) && artifactCurrent;
 
@@ -2197,15 +2198,16 @@ export class StudioArtifactsService {
       const storedPresent = Boolean(inputsHash && inputsHash.trim());
       const expectedPresent = Boolean(expectedInputsHash && expectedInputsHash.trim());
       // eslint-disable-next-line no-console
-      console.info('[studio-artifacts][reuse_decision]', {
-        artifact,
-        status,
-        storedInputsHashPresent: storedPresent,
-        expectedInputsHashPresent: expectedPresent,
-        inputsHashMatches,
-        artifactCurrent,
-      });
-    }
+        console.info('[studio-artifacts][reuse_decision]', {
+          artifact,
+          status,
+          storedInputsHashPresent: storedPresent,
+          expectedInputsHashPresent: expectedPresent,
+          inputsHashMatches,
+          minimalArtifact,
+          artifactCurrent,
+        });
+      }
 
     return {
       artifactId: String((record as any)?.id ?? ''),
@@ -2243,8 +2245,10 @@ export class StudioArtifactsService {
     const resumeCurrent = Boolean(resumeRecord?.artifactCurrent);
     const coverCurrent = Boolean(coverRecord?.artifactCurrent);
     if (
-      (resumeCurrent && resumeRecord?.status === StudioArtifactLifecycleStatus.COMPLETED) ||
-      (coverCurrent && coverRecord?.status === StudioArtifactLifecycleStatus.COMPLETED)
+      resumeCurrent &&
+      coverCurrent &&
+      resumeRecord?.status === StudioArtifactLifecycleStatus.COMPLETED &&
+      coverRecord?.status === StudioArtifactLifecycleStatus.COMPLETED
     ) {
       return StudioArtifactLifecycleStatus.COMPLETED;
     }

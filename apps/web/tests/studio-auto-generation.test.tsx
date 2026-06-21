@@ -1125,7 +1125,7 @@ describe("Studio auto-generation", () => {
     const fetchMock = installStrongFitFetches({
       readinessStatus: "ready",
       studioArtifactsPayload: {
-        status: "completed",
+        status: "missing",
         baselineId: "base-1",
         jobId: "job-1",
         baselineVersionId: "base-version-1",
@@ -1239,6 +1239,112 @@ describe("Studio auto-generation", () => {
     }, { timeout: 15000 });
 
     expectCanonicalGeneratedArtifactArea();
+    expect(screen.queryByText("Something went wrong")).toBeNull();
+  }, 15000);
+
+  it("treats minimal resume artifacts as stale history and requires resume regeneration", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const fetchMock = installStrongFitFetches({
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "completed",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        assessmentScore: 84,
+        generationContractVersion: "studio-artifacts-v1",
+        resumeArtifactHydration: {
+          resumeArtifactId: "resume-minimal-1",
+          resumeArtifactSource: "fresh_generation",
+          resumeArtifactUpdatedAt: "2026-06-20T23:49:04.879Z",
+        },
+        resumeResult: {
+          artifactType: "resume",
+          generationState: "generated_unusable",
+          qualityStatus: "failed",
+          exportReady: false,
+          exports: { docx: false, pdf: false },
+          preview: {
+            heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+            summary: "Fallback resume should not count as renderable.",
+            experience: [{ company: "Example", roleTitle: "Role", bullets: ["x"] }],
+          },
+          internal: {
+            minimalFallback: true,
+            resumeGenerationMode: "top_level_fail_safe_minimal",
+            resumeFailSafeMinimalUsed: true,
+          },
+          auditId: "minimal:1776648116795",
+          actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+        },
+        resume: {
+          status: "COMPLETED",
+          artifactId: "resume-minimal-1",
+          usableCurrent: false,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: false,
+            exports: { docx: false, pdf: false },
+            auditId: "minimal:1776648116795",
+            preview: {
+              resume: {
+                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                summary: "Fallback resume should not count as renderable.",
+                experience: [{ company: "Example", roleTitle: "Role", bullets: ["x"] }],
+              },
+            },
+            internal: {
+              minimalFallback: true,
+              resumeGenerationMode: "top_level_fail_safe_minimal",
+              resumeFailSafeMinimalUsed: true,
+            },
+          },
+          content: "Fallback resume should not count as renderable.",
+          confidence: "HIGH",
+          failure: null,
+        },
+        coverLetter: {
+          status: "COMPLETED",
+          artifactId: "cover-hydrated-1",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          },
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+      },
+    });
+
+    setFetchImplementation(fetchMock as any);
+    renderStudio();
+
+    await waitFor(() => {
+      const debug = screen.getByTestId("studio-orchestration-debug");
+      const raw = debug.querySelector("pre")?.textContent ?? "";
+      expect(raw).toContain("\"hasResumeArtifactPersisted\": false");
+      expect(raw).toContain("\"hasCoverLetterArtifactPersisted\": true");
+      expect(raw).toContain("\"missingResumeOutput\": true");
+      expect(raw).toContain("\"needsAutoGeneration\": true");
+      expect(raw).toContain("\"orchestrationDecision\": \"blocked\"");
+      expect(raw).not.toContain("\"orchestrationDecision\": \"hydrate_existing_artifacts\"");
+      expect(raw).toContain("\"studioArtifactPairStatus\": \"missing\"");
+    }, { timeout: 15000 });
+
     expect(screen.queryByText("Something went wrong")).toBeNull();
   }, 15000);
 

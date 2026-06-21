@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveDocumentReadinessState } from "@shared/documentReadinessState";
 import { buildStudioArtifactContract } from "@/src/lib/studio/artifactContract";
+import { getArtifactExistence } from "@/src/lib/studio/artifactAuthority";
 
 describe("DocumentReadinessState (Studio canonical)", () => {
   const artifact = (overrides: any) => ({
@@ -147,5 +148,67 @@ describe("Studio artifact contract resume source", () => {
     expect(contract.resumePreviewRenderable).toBe(false);
     expect(contract.hasResumeArtifact).toBe(false);
     expect(contract.shouldAutoGenerateStart).toBe(true);
+  });
+
+  it("does not treat minimal resume artifacts as persisted output readiness", () => {
+    const minimalExistence = getArtifactExistence({
+      resume: {
+        status: "COMPLETED",
+        artifactId: "resume-minimal-1",
+        responseBody: {
+          status: "success",
+          generationStatus: "success",
+          auditId: "minimal:1776648116795",
+          internal: {
+            minimalFallback: true,
+            resumeGenerationMode: "top_level_fail_safe_minimal",
+            resumeFailSafeMinimalUsed: true,
+          },
+          preview: { resume: { heading: { name: "Alex" }, experience: [] } },
+        },
+        content: "fallback content",
+      },
+      coverLetter: {
+        status: "COMPLETED",
+        artifactId: "cover-1",
+        responseBody: {
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          preview: { coverLetter: { paragraphs: ["Hello"] } },
+        },
+        content: "Hello",
+      },
+    });
+
+    const hydratedExistence = getArtifactExistence({
+      resume: {
+        status: "COMPLETED",
+        artifactId: "resume-current-1",
+        responseBody: {
+          status: "success",
+          generationStatus: "success",
+          auditId: "audit-1",
+          preview: { resume: { heading: { name: "Alex" }, experience: [{ company: "Acme", roleTitle: "Lead" }] } },
+        },
+        content: "current resume",
+      },
+      coverLetter: {
+        status: "COMPLETED",
+        artifactId: "cover-2",
+        responseBody: {
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          preview: { coverLetter: { paragraphs: ["Hello"] } },
+        },
+        content: "Hello",
+      },
+    });
+
+    expect(minimalExistence.hasResumeArtifactPersisted).toBe(false);
+    expect(minimalExistence.hasCoverLetterArtifactPersisted).toBe(true);
+    expect(hydratedExistence.hasResumeArtifactPersisted).toBe(true);
+    expect(hydratedExistence.hasCoverLetterArtifactPersisted).toBe(true);
   });
 });
