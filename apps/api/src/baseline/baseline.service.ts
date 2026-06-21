@@ -2299,8 +2299,15 @@ export class BaselineService {
 
   async buildSectionsFromFile(file: Express.Multer.File): Promise<BaselineFileParseResult> {
     const ingestion = await this.baselineIngestionService.ingest(file);
+    const sections = this.buildSections(
+      ingestion.rawText,
+      ingestion.parsedSections,
+    );
     const insufficientDetails = getInsufficientExtractedTextDetails(ingestion.rawText);
-    if (insufficientDetails) {
+    const hasUsableStructuredContent = sections.slice(1).some((section) =>
+      this.sanitizeSectionContent(section.content ?? '').length > 0,
+    );
+    if (insufficientDetails && !hasUsableStructuredContent) {
       const payload = {
         errorCode: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
         code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
@@ -2314,10 +2321,6 @@ export class BaselineService {
       };
       throw new UnprocessableEntityException(payload);
     }
-    const sections = this.buildSections(
-      ingestion.rawText,
-      ingestion.parsedSections,
-    );
 
     return {
       sections,

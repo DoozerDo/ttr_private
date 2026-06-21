@@ -1462,6 +1462,58 @@ describe('BaselineService - reparse ingestion source', () => {
     expect(sanitized).not.toContain('\u0000');
   });
 
+  it('allows short raw uploads when structured sections are usable', async () => {
+    ingestionService.ingest.mockResolvedValue({
+      rawText: 'short text',
+      parsedSections: [
+        {
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: 'Acme | Engineer\n- Shipped features',
+          includePolicy: BaselineIncludePolicy.OPTIONAL,
+          order: 0,
+        },
+      ],
+      canonical: canonicalBaseline,
+      sourceFormat: 'docx',
+    });
+
+    const result = await service.buildSectionsFromFile({
+      originalname: 'resume.pdf',
+      mimetype: 'application/pdf',
+      path: '/tmp/resume.pdf',
+    } as Express.Multer.File);
+
+    expect(result.sections.length).toBeGreaterThan(1);
+    expect(result.sections[1]).toMatchObject({
+      sectionType: BaselineSectionType.EXPERIENCE,
+      content: expect.stringContaining('Acme | Engineer'),
+    });
+  });
+
+  it('still rejects empty or unreadable uploads with insufficient_extracted_text', async () => {
+    ingestionService.ingest.mockResolvedValue({
+      rawText: '',
+      parsedSections: [],
+      canonical: canonicalBaseline,
+      sourceFormat: 'docx',
+    });
+
+    await expect(
+      service.buildSectionsFromFile({
+        originalname: 'resume.pdf',
+        mimetype: 'application/pdf',
+        path: '/tmp/resume.pdf',
+      } as Express.Multer.File),
+    ).rejects.toMatchObject({
+      status: 422,
+      response: expect.objectContaining({
+        code: 'insufficient_extracted_text',
+        message: 'We could not extract enough text from that resume.',
+      }),
+    });
+  });
+
   it('re-ingests from storagePath file before falling back to raw section text', async () => {
     const canonical = { ...canonicalBaseline };
     ingestionService.ingest.mockResolvedValue({
