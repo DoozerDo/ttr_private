@@ -6,7 +6,7 @@ function nowIso() {
 
 function log(message, extra) {
   const payload = { timestamp: nowIso(), message, ...(extra ? { ...extra } : {}) };
-  console.log(JSON.stringify(payload));
+  process.stderr.write(`${JSON.stringify(payload)}\n`);
 }
 
 function normalizeBaseUrl({ key, rawValue }) {
