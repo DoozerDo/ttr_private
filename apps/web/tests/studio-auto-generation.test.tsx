@@ -1454,6 +1454,144 @@ describe("Studio auto-generation", () => {
     expect(screen.queryByText("Something went wrong")).toBeNull();
   }, 15000);
 
+  it("treats a hydrated successful artifact pair as completed even when backend records are failed", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+            scoring_v2: { score: 90 },
+            verification_coverage: { totalClaims: 2, verifiedClaims: 2, inferredClaims: 0, unverifiedClaims: 0 },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "completed",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            assessmentScore: 90,
+            generationContractVersion: "studio-artifacts-v1",
+            resumeResult: {
+              artifactType: "resume",
+              status: "success",
+              generationStatus: "success",
+              generationState: "generated_usable",
+              qualityStatus: "pass",
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              preview: {
+                resume: {
+                  heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                  summary: "Support leader focused on scalable operations.",
+                  experience: [{ company: "Cat Daddy Games", roleTitle: "Senior Producer", bullets: ["Led support operations programs."] }],
+                },
+              },
+            },
+            coverLetterResult: {
+              artifactType: "cover_letter",
+              status: "success",
+              generationStatus: "success",
+              generationState: "generated_usable",
+              qualityStatus: "pass",
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              preview: { paragraphs: ["Dear Hiring Team at Acme,", "I’m writing to apply."] },
+            },
+            resume: {
+              status: "FAILED",
+              artifactId: "resume-current-1",
+              usableCurrent: true,
+              inputsHash: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  resume: {
+                    heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                    summary: "Support leader focused on scalable operations.",
+                    experience: [{ company: "Cat Daddy Games", roleTitle: "Senior Producer", bullets: ["Led support operations programs."] }],
+                  },
+                },
+              },
+              content: "resume",
+            },
+            coverLetter: {
+              status: "FAILED",
+              artifactId: "cover-current-1",
+              usableCurrent: true,
+              inputsHash: true,
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: { coverLetter: { paragraphs: ["Dear Hiring Team at Acme,", "I’m writing to apply."] } },
+              },
+              content: "cover",
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/baselines/base-1")) {
+        return Promise.resolve(createResponse({ id: "base-1", originalFilename: "Resume.pdf", sections: [] }));
+      }
+      if (url.includes("/api/baselines")) {
+        return Promise.resolve(createResponse([{ id: "base-1", originalFilename: "Resume.pdf", status: "ACTIVE", isActive: true }]));
+      }
+      if (url.includes("/api/jobs")) {
+        return Promise.resolve(createResponse([{ id: "job-1", company: "Acme", title: "Director of Support" }]));
+      }
+      if (url.includes("/api/analytics/event")) {
+        return Promise.resolve(createResponse({ ok: true }));
+      }
+      if (init?.method === "POST") {
+        return Promise.resolve(createResponse({ ok: true }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock as any);
+    renderStudio();
+
+    await waitFor(() => {
+      const snapshot = readOrchestrationDebugSnapshot();
+      expect(snapshot.studioArtifactPairStatus).toBe("completed");
+      expect(snapshot.hasResumeArtifactPersisted).toBe(true);
+      expect(snapshot.hasCoverLetterArtifactPersisted).toBe(true);
+      expect(snapshot.hasAnyArtifactPersisted).toBe(true);
+      expect(snapshot.needsAutoGeneration).toBe(false);
+      expect(snapshot.orchestrationDecision).toBe("hydrate_existing_artifacts");
+      expect(snapshot.orchestrationDecision).not.toBe("should_auto_generate");
+      expect(snapshot.orchestrationDecision).not.toBe("blocked");
+    }, { timeout: 15000 });
+  }, 15000);
+
   it("keeps a hydrated resume visible when a stale backend refresh arrives", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",

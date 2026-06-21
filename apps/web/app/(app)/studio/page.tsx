@@ -944,11 +944,20 @@ function readArtifactTextFallback(payload: unknown): string {
 function getBackendArtifactStatus(record: BackendStudioArtifactRecord | null | undefined) {
   const status = trimString(record?.status).toLowerCase();
   const hydratedArtifactId = trimString(record?.artifactId);
+  const responseBody = (record as unknown as { responseBody?: unknown } | null)?.responseBody;
+  const isSuccessfulHydratedResponse = (() => {
+    if (!responseBody || typeof responseBody !== "object") return false;
+    const body = responseBody as Record<string, unknown>;
+    return (
+      trimString(body.status).toLowerCase() === "success" &&
+      trimString(body.generationStatus).toLowerCase() === "success" &&
+      body.exportReady === true
+    );
+  })();
   if (status === "completed") {
     // Some upstream records report `completed` even when no response body is available.
     // Studio can only treat an artifact as completed when the payload needed to render it exists
     // and the backend has marked it current.
-    const responseBody = (record as unknown as { responseBody?: unknown } | null)?.responseBody;
     const content = (record as unknown as { content?: unknown } | null)?.content;
     const hasContent = typeof content === "string" && content.trim().length > 0;
     const usableCurrent = (record as unknown as { usableCurrent?: unknown } | null)?.usableCurrent;
@@ -956,8 +965,9 @@ function getBackendArtifactStatus(record: BackendStudioArtifactRecord | null | u
     return responseBody == null && !hasContent && !hydratedArtifactId ? ("missing" as const) : ("completed" as const);
   }
   if (status === "in_progress") return "in_progress" as const;
-  if (status === "failed") return "failed" as const;
+  if (status === "failed") return isSuccessfulHydratedResponse ? ("completed" as const) : ("failed" as const);
   if (hydratedArtifactId) return "completed" as const;
+  if (isSuccessfulHydratedResponse) return "completed" as const;
   return "missing" as const;
 }
 
