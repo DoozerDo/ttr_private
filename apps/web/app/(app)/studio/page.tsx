@@ -728,6 +728,10 @@ function readHydratedResumePreviewModel(value: unknown): Record<string, unknown>
   return null;
 }
 
+function hasHydratedResumePreview(value: unknown): boolean {
+  return Boolean(readHydratedResumePreviewModel(value));
+}
+
 function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unknown | null): unknown | null {
   const normalizedResponse = normalizeHydratedArtifactResponse(responseBody);
   const responseRecord = normalizedResponse && typeof normalizedResponse === "object" ? (normalizedResponse as Record<string, unknown>) : null;
@@ -2401,6 +2405,9 @@ export default function StudioPage() {
             ? ({ ...(coverResponse as Record<string, unknown>), coverLetterResult } as unknown)
             : ({ coverLetterResult } as unknown))
         : coverResponse;
+    const resumeHydratedResponseWithPreview = hasHydratedResumePreview(resumeResponseWithResult)
+      ? resumeResponseWithResult
+      : null;
 
     // Strict legacy hydration: only hydrate when the backend record is completed *and current*.
     // If a completed artifact is stale (hash mismatch after composition ruleset changes), do not
@@ -2409,9 +2416,10 @@ export default function StudioPage() {
       setResumeState((current) => ({
         ...current,
         response:
-          resumeResponseWithResult && typeof resumeResponseWithResult === "object"
-            ? ({ ...(resumeResponseWithResult as Record<string, unknown>) } as unknown)
-            : resumeResponseWithResult ?? resumeRecord.responseBody,
+          resumeHydratedResponseWithPreview ??
+          (hasHydratedResumePreview(current.response) ? current.response : null) ??
+          (hasHydratedResumePreview(resumeResponseRef.current) ? resumeResponseRef.current : null) ??
+          (hasHydratedResumePreview(resumeResponse) ? resumeResponse : null),
         error: isResumeStaleAdvisory(current.error) ? current.error : null,
         tierGateError: null,
         artifactFailure: null,
@@ -2458,10 +2466,7 @@ export default function StudioPage() {
     if (resumeResponseWithResult && !resumeArtifactStale) {
       setResumeState((current) => ({
         ...current,
-        response:
-          resumeResponseWithResult && typeof resumeResponseWithResult === "object"
-            ? ({ ...(resumeResponseWithResult as Record<string, unknown>) } as unknown)
-            : resumeResponseWithResult,
+        response: resumeHydratedResponseWithPreview ?? (hasHydratedResumePreview(resumeResponse) ? resumeResponse : null),
         error: null,
         tierGateError: null,
         artifactFailure: null,
@@ -2479,9 +2484,10 @@ export default function StudioPage() {
       setResumeState((current) => ({
         ...current,
         response:
-          resumeResponseWithResult && typeof resumeResponseWithResult === "object"
-            ? ({ ...(resumeResponseWithResult as Record<string, unknown>) } as unknown)
-            : resumeResponseWithResult,
+          resumeHydratedResponseWithPreview ??
+          (hasHydratedResumePreview(current.response) ? current.response : null) ??
+          (hasHydratedResumePreview(resumeResponseRef.current) ? resumeResponseRef.current : null) ??
+          (hasHydratedResumePreview(resumeResponse) ? resumeResponse : null),
         error:
           current.error ??
           "Your resume draft is out of date due to recent generator improvements. Please regenerate to refresh it.",
@@ -2846,6 +2852,9 @@ export default function StudioPage() {
       const resumeResult = normalizedBackendPayload ? normalizedBackendPayload.resumeResult ?? null : null;
       const coverLetterResult = normalizedBackendPayload ? normalizedBackendPayload.coverLetterResult ?? null : null;
       const resumeResponseWithResult = bridgeHydratedResumeResponse(resumeResponse, resumeResult);
+      const resumeResponseWithPreview = hasHydratedResumePreview(resumeResponseWithResult)
+        ? resumeResponseWithResult
+        : null;
       const coverResponseWithResult =
         coverLetterResult
           ? (coverResponse && typeof coverResponse === "object"
@@ -2867,10 +2876,7 @@ export default function StudioPage() {
       if (resumeResponseWithResult && resumeResponseIsUsableSuccess) {
         setResumeState((current) => ({
           ...current,
-          response:
-            resumeResponseWithResult && typeof resumeResponseWithResult === "object"
-              ? ({ ...(resumeResponseWithResult as Record<string, unknown>) } as unknown)
-              : resumeResponseWithResult,
+          response: resumeResponseWithPreview ?? (hasHydratedResumePreview(resumeResponse) ? resumeResponse : null),
           error: isResumeStaleAdvisory(current.error) ? current.error : null,
           tierGateError: null,
           artifactFailure: null,
@@ -2887,10 +2893,7 @@ export default function StudioPage() {
       } else if (resumeResponseWithResult) {
         setResumeState((current) => ({
           ...current,
-          response:
-            resumeResponseWithResult && typeof resumeResponseWithResult === "object"
-              ? ({ ...(resumeResponseWithResult as Record<string, unknown>) } as unknown)
-              : resumeResponseWithResult,
+          response: resumeResponseWithPreview ?? (hasHydratedResumePreview(resumeResponse) ? resumeResponse : null),
           error: null,
           tierGateError: null,
           artifactFailure: null,
