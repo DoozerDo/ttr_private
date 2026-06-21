@@ -46,6 +46,79 @@ function shouldKeepStructuredExperienceEntry(input: {
   return true;
 }
 
+function normalizeExperienceHeaderSeparatorText(value: string): string {
+  return trimToText(value)
+    .replace(/Ã¢â‚¬â€œ|Ã¢â‚¬â€”|â€“|â€”|[—–]/g, ' - ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isLikelyExperienceEntryTitle(value: string): boolean {
+  const text = normalizeExperienceHeaderSeparatorText(value);
+  if (!text) return false;
+  if (/^(?:experience|professional experience|work experience|summary|skills|education|projects?)$/i.test(text)) {
+    return false;
+  }
+  if (text.includes('|')) return true;
+  if (/\s-\s/.test(text)) return true;
+  if (/\bat\b/i.test(text)) return true;
+  return false;
+}
+
+function shouldPromoteSectionTitleToExperienceContent(section: Record<string, unknown>): boolean {
+  const title = trimToText(section?.title);
+  if (!isLikelyExperienceEntryTitle(title)) return false;
+  const normalizedTitle = normalizeExperienceHeaderSeparatorText(title);
+
+  const content = typeof section?.content === 'string' ? section.content : '';
+  const firstContentLine = content
+    .split(/\r?\n/)
+    .map((line) => trimToText(line))
+    .find(Boolean) ?? '';
+  if (!firstContentLine) return true;
+  if (normalizeExperienceHeaderSeparatorText(firstContentLine) === normalizedTitle) return false;
+  return (
+    /^[-•*]\s+/.test(firstContentLine) ||
+    /\b(?:19|20)\d{2}\b/.test(firstContentLine) ||
+    /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|present|current)\b/i.test(
+      firstContentLine,
+    ) ||
+    /^(?:led|built|owned|managed|maintained|supported|developed|improved|reduced|increased|partnered|collaborated|architected|automated|migrated|designed|created)\b/i.test(
+      firstContentLine,
+    )
+  );
+}
+
+function coerceResumeV2NormalizedDocument(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw;
+  const normalized = raw as Record<string, unknown>;
+  if (!Array.isArray(normalized.experience)) return normalized;
+
+  return {
+    ...normalized,
+    experience: normalized.experience.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+      const experienceEntry = entry as Record<string, unknown>;
+      const bullets = Array.isArray(experienceEntry.bullets)
+        ? experienceEntry.bullets
+            .map((bullet) => {
+              if (typeof bullet === 'string') return bullet;
+              if (!bullet || typeof bullet !== 'object' || Array.isArray(bullet)) {
+                return trimToText(bullet);
+              }
+              const candidate = bullet as Record<string, unknown>;
+              return trimToText(candidate.text ?? candidate.value ?? candidate.content ?? '');
+            })
+            .filter(Boolean)
+        : experienceEntry.bullets;
+      return {
+        ...experienceEntry,
+        bullets,
+      };
+    }),
+  };
+}
+
 function classifyStructuredExperienceKeepDrop(input: {
   company: string;
   roleTitle: string;
@@ -295,7 +368,20 @@ export function buildValidatedResumeV2FromParsedBaseline(
   const structuredExperienceBlocks = (() => {
     if (!Array.isArray(baselineSections) || baselineSections.length === 0) return null;
     try {
-      const structured = extractStructuredBaselineFromSections(baselineSections as any);
+      const structuredBaselineSections = baselineSections.map((section) => {
+        if (!shouldPromoteSectionTitleToExperienceContent(section as any)) {
+          return section;
+        }
+        const title = normalizeExperienceHeaderSeparatorText(String(section?.title ?? ''));
+        const content = typeof section?.content === 'string' ? section.content.trim() : '';
+        return {
+          ...section,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          content: content ? `${title}\n${content}` : title,
+        };
+      });
+
+      const structured = extractStructuredBaselineFromSections(structuredBaselineSections as any);
       const experience = Array.isArray((structured as any)?.experience) ? ((structured as any).experience as any[]) : [];
       if (experience.length === 0) return null;
       const blocks = experience
@@ -618,7 +704,9 @@ export function buildValidatedResumeV2FromParsedBaseline(
     baselineSections: sections as any,
     identity: { name: fullName ?? 'Candidate', contactLine: location ?? '', links: [] },
   });
-  const normalized = normalizeNormalizedResumeDocument(result.normalized as NormalizedResumeDocument);
+  const normalized = normalizeNormalizedResumeDocument(
+    coerceResumeV2NormalizedDocument(result.normalized as NormalizedResumeDocument) as NormalizedResumeDocument,
+  );
 
   if (shouldLog) {
     try {

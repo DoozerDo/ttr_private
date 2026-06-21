@@ -634,6 +634,54 @@ const ingestionResult = {
     expect(validation.valid).toBe(true);
   });
 
+  it('preserves structured experience when the header lives in the section title during upload persistence', async () => {
+    const baselineForTest = { ...baseline, id: '00000000-0000-0000-0000-000000000000' };
+    const manager = {
+      create: jest.fn((_entity: any, value: any) => value),
+      save: jest.fn(async (value: any) => value),
+    } as any;
+
+    const ingestion = {
+      rawText: 'Test Resume',
+      parsedSections: [
+        {
+          sectionType: BaselineSectionType.OTHER,
+          title: 'Senior Manager, Customer Operations - SentinelOne',
+          content: [
+            'Remote Dec 2022 - Aug 2025',
+            '- Led incident triage and escalation management across support operations.',
+            '- Built support playbooks and operating reviews to reduce escalations.',
+          ].join('\n'),
+        },
+      ],
+      canonical: {
+        identity: { full_name: 'Title Person', location: 'Title City', current_title: null, current_company: null, summary: null },
+        summary: null,
+        experience: [],
+        education: [],
+        skills: [],
+        people_leadership: { direct_reports: null, managers_led: null, global_teams: null },
+        operational_ownership: { functions_owned: [], process_design: null, process_scaling: null },
+        tooling_and_platforms: { tools: [], ownership_level: 'unknown' },
+        cross_functional_partnership: { product: null, engineering: null, sales_cs: null, executive: null },
+        customer_advocacy: { executive_escalations: null, voice_of_customer: null, post_incident_rca: null },
+        scale_and_scope: { customer_segment: 'unknown', geo_scope: 'unknown', org_stage: 'unknown' },
+        metrics_and_outcomes: { metrics_present: false, metrics: [] },
+        skills_and_tools: { tools: [], methodologies: [], domains: [] },
+        system_generated_read_only: { missing_fields: [], ambiguity_flags: [], low_confidence_extractions: [] },
+      } as any,
+      sourceFormat: 'docx' as const,
+    };
+
+    await (service as any).persistParsedBaseline(manager, baselineForTest, ingestion);
+
+    const created = manager.create.mock.calls[0][1];
+    expect(Array.isArray(created.resumeV2Json?.experience)).toBe(true);
+    expect(created.resumeV2Json.experience.length).toBeGreaterThan(0);
+    expect(String(created.resumeV2Json.experience[0]?.company ?? '')).toBe('SentinelOne');
+    expect(validateNormalizedResumeDocument(created.resumeV2Json).valid).toBe(true);
+  });
+
   it('surfaces a structured error payload when ResumeV2 build fails during baseline ingestion', async () => {
     const baselineForTest = { ...baseline, id: '00000000-0000-0000-0000-000000000000' };
     const manager = {
