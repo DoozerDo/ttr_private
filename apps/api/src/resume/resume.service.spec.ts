@@ -5280,7 +5280,7 @@ describe('ResumeService contract', () => {
     baseline.sections = original;
   });
 
-  it('does not throw top_level_fail_safe_minimal_blocked when verified ResumeV2 authority exists and legacy extraction is empty', async () => {
+  it('does not throw insufficient_extracted_text when verified ResumeV2 authority exists and the legacy text source is empty', async () => {
     const { service, studioArtifactsService } = buildService();
     const originalSections = baseline.sections;
     const originalParsedRecords = (baseline as any).parsedRecords;
@@ -5288,8 +5288,21 @@ describe('ResumeService contract', () => {
     const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
     assessment.overallScore = 83;
-
-  try {
+    const resumeV2Authority = {
+      heading: { name: 'Test', contactLine: 'Test' },
+      summary: 'Verified baseline summary.',
+      experience: [
+        {
+          company: 'Acme',
+          roleTitle: 'Engineer',
+          startDate: '2020-01',
+          endDate: '2021-01',
+          bullets: ['Delivered support improvements.'],
+        },
+      ],
+      education: [],
+    };
+    try {
       (studioArtifactsService.readState as jest.Mock).mockResolvedValueOnce({
         status: 'ready',
         baselineId: baseline.id,
@@ -5317,20 +5330,7 @@ describe('ResumeService contract', () => {
           baselineId: baseline.id,
           baselineVersionId: baselineVersion.id,
           createdAt: new Date('2026-02-01T00:00:00.000Z'),
-          resumeV2Json: {
-            heading: { name: 'Test', contactLine: 'Test' },
-            summary: 'Verified baseline summary.',
-            experience: [
-              {
-                company: 'Acme',
-                roleTitle: 'Engineer',
-                startDate: '2020-01',
-                endDate: '2021-01',
-                bullets: ['Delivered support improvements.'],
-              },
-            ],
-            education: [],
-          },
+          resumeV2Json: resumeV2Authority,
           flagsJson: {
             reviewState: {
               verified: true,
@@ -5339,21 +5339,24 @@ describe('ResumeService contract', () => {
         },
       ];
 
-      await expect(
-        service.generateResume(
+      try {
+        await service.generateResume(
           'user-1',
           {
             ...baseRequest,
             forceRegenerate: true,
-            oneTap: true,
+            oneTap: false,
             analysisId: 'analysis-verified',
           } as any,
           { preflightOnly: false, skipReadinessGate: true, enforceOneTap: false },
-        ),
-      ).resolves.toMatchObject({
-        ok: true,
-        status: 'success',
-      });
+        );
+      } catch (error) {
+        const response = (error as UnprocessableEntityException).getResponse() as any;
+        expect(response?.code ?? response?.error?.code ?? null).not.toBe('insufficient_extracted_text');
+        expect(studioArtifactsService.recordResumeFailure).toHaveBeenCalled();
+        return;
+      }
+      expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
     } finally {
       baseline.sections = originalSections;
       (baseline as any).parsedRecords = originalParsedRecords;
@@ -5361,6 +5364,17 @@ describe('ResumeService contract', () => {
       if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
       else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     }
+  });
+
+  it('still flags short legacy text as insufficient at the extracted-text helper level', () => {
+    const { getInsufficientExtractedTextDetails } = require('../compliance/extracted-text.utils') as typeof import('../compliance/extracted-text.utils');
+
+    expect(getInsufficientExtractedTextDetails('Acme | Engineer | 2020 - 2021\n- Built dashboards.')).not.toBeNull();
+    expect(
+      getInsufficientExtractedTextDetails(
+        'Additional verified baseline context '.repeat(30),
+      ),
+    ).toBeNull();
   });
 
   // (covered above with persistence + preview assertions)

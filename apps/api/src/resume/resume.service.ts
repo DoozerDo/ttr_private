@@ -3531,7 +3531,7 @@ export class ResumeService {
 	    const insufficientBaselineDetails =
 	      getInsufficientExtractedTextDetails(effectiveBaselineText);
 	    let forcedMinimalSections: ResumeDraftSection[] | null = null;
-	    if (insufficientBaselineDetails) {
+	    if (insufficientBaselineDetails && !persistedResumeV2AuthorityWithExperience) {
       const normalizedBaselineText = String(baselineText ?? '').trim();
       const normalizedEffectiveBaselineText = String(effectiveBaselineText ?? '').trim();
 	      if (!normalizedEffectiveBaselineText) {
