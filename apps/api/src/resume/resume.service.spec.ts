@@ -2963,6 +2963,23 @@ describe('ResumeService contract', () => {
         evidenceExists: true,
       }),
     ).resolves.toBe(false);
+
+    await expect(
+      (service as any).canExportResumeArtifact({
+        normalizedDocument: {
+          heading: { name: 'Jordan Lee', contactLine: 'jordan@example.com' },
+          summary: 'Role-targeted summary.',
+          experience: [],
+          education: [],
+          certifications: [],
+        },
+        usedStructuredBaselineTemplate: true,
+        qualityGate: { status: 'pass', reasons: [] },
+        jobTitle: 'Program Manager',
+        jobDescription: 'Lead customer operations programs.',
+        evidenceExists: false,
+      }),
+    ).resolves.toBe(false);
   });
 
   it('applies preview sanitization on idempotency reuse responses before returning to client', async () => {
@@ -4255,6 +4272,28 @@ describe('ResumeService contract', () => {
 
   it('fail-soft returns a minimal baseline-derived preflight resume when draft build throws', async () => {
     const originalContent = baseline.sections?.[0]?.content ?? '';
+    const originalParsed = baseline.parsedRecords;
+    baseline.parsedRecords = [
+      {
+        id: 'parsed-verified',
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        createdAt: new Date('2026-02-01T00:00:00.000Z'),
+        resumeV2Json: {
+          heading: { name: 'Alex Candidate', contactLine: 'Test City' },
+          summary: 'Support leader with verified impact.',
+          experience: [
+            { company: 'Acme', roleTitle: 'Director of Support', bullets: ['Improved p95 by 25%'] },
+          ],
+          education: [],
+        },
+        flagsJson: {
+          reviewState: {
+            verified: true,
+          },
+        },
+      },
+    ] as any;
     baseline.sections = [
       {
         ...baseSection,
@@ -4288,6 +4327,7 @@ describe('ResumeService contract', () => {
     });
 
     draftSpy.mockRestore();
+    baseline.parsedRecords = originalParsed;
     baseline.sections = [{ ...baseSection, content: originalContent }];
   });
 

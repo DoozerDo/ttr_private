@@ -996,7 +996,7 @@ describe('CoverLettersService contract', () => {
         audit: { id: 'audit-1', baselineVersionHash: 'hash-1' },
       },
     });
-    workflowIdempotencyService.reserve = jest.fn().mockResolvedValueOnce({
+    workflowIdempotencyService.reserve = jest.fn().mockResolvedValue({
       status: 'existing_completed',
       runId: 'run-1',
       responseBody: {
@@ -1037,6 +1037,108 @@ describe('CoverLettersService contract', () => {
     expect(result.id).toBe('cover-existing');
     expect(result.idempotency?.reused).toBe(true);
     expect(coverRepo.save).not.toHaveBeenCalled();
+    buildDraftSpy.mockRestore();
+    assessment.overallScore = originalScore;
+  });
+
+  it('re-gates cached fallback cover letter responses before returning them', async () => {
+    const { service, workflowIdempotencyService } = buildService();
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 70;
+    const buildDraftSpy = jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({
+      baseline,
+      baselineVersion,
+      job,
+      analysisAssessment: assessment,
+      generationAuthority: 'fallback',
+      baselineFileUsable: false,
+      allowedBlocks: [],
+      templateReadiness: {
+        canGenerateResume: true,
+        canGenerateCoverLetter: true,
+        hardBlockReasons: [],
+        warnings: [],
+        stats: { totalExperience: 1, validExperience: 1, invalidExperience: 0 },
+      },
+      jobContext: {
+        id: 'job-1',
+        title: 'Program Manager',
+        company: 'Example Co',
+        responsibilities: [],
+        requirements: [],
+      },
+      jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
+      closingTemplateKey: 'default',
+      generationInputsHash: 'hash',
+      generation: {
+        document: {
+          senderHeading: { name: 'Jordan Lee' },
+          salutation: 'Dear Hiring Team,',
+          opening: 'Opening.',
+          bodyParagraphs: ['Body one.'],
+          closingParagraph: 'Closing.',
+          signoff: 'Sincerely,',
+          signatureName: 'Jordan Lee',
+        },
+        content: 'Dear Hiring Team,\n\nOpening.\n\nBody one.\n\nClosing.\n\nSincerely,\n\nJordan Lee',
+        wordCount: 260,
+        greeting: 'Dear Hiring Team,',
+        paragraphs: ['Opening.', 'Body one.'],
+        closingParagraphs: ['Closing.'],
+        paragraphEvidence: [],
+      },
+      complianceResult: {
+        normalizedContent: 'This cached fallback draft passes the existing quality gate.',
+        complianceFlags: [],
+        blocked: false,
+        audit: { id: 'audit-fallback', baselineVersionHash: 'hash-1' },
+      },
+      qualityGate: { status: 'pass', reasons: [] },
+      firstPassQualityGate: { status: 'pass', reasons: [] },
+      qualityRepairAttempted: false,
+    });
+    workflowIdempotencyService.reserve = jest.fn().mockResolvedValue({
+      status: 'existing_completed',
+      runId: 'run-1',
+      responseBody: {
+        status: 'success',
+        generationStatus: 'success',
+        exportReady: true,
+        id: 'cover-existing-fallback',
+        userId: 'user-1',
+        baselineId: 'baseline-1',
+        jobId: 'job-1',
+        content: 'cached',
+        generatorType: 'template',
+        generatorVersion: 'v1',
+        closingTemplateKey: 'default',
+        generationInputsHash: 'hash',
+        generationAuthority: 'fallback',
+        baselineFileUsable: false,
+        preview: { coverLetter: { salutation: 'Dear Hiring Team,' } },
+        compliance_flags: [],
+        audit_id: 'audit-fallback',
+        auditId: 'audit-fallback',
+        baseline_version_hash: 'hash-1',
+        exports: { docx: true, pdf: true },
+        display: { title: '', description: '', reasons: [], cta: { label: '', href: '' } },
+        safeDisplay: { title: '', description: '', reasons: [], cta: { label: '', href: '' } },
+        traceMap: {},
+        debugTrace: { passed: true, failures: [], traceCoverage: 100, unusedEvidence: [], selectedEvidence: [] },
+        internal: {
+          auditId: 'audit-fallback',
+          baselineVersionHash: 'hash-1',
+          complianceFlags: [],
+        },
+      },
+    }) as any;
+
+    const result = await service.generateCoverLetter('user-1', request as any);
+
+    expect(result.generationAuthority).toBe('fallback');
+    expect(result.baselineFileUsable).toBe(false);
+    expect(result.exportReady).toBe(false);
+    expect(result.exports).toEqual({ docx: false, pdf: false });
     buildDraftSpy.mockRestore();
     assessment.overallScore = originalScore;
   });

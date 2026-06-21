@@ -5308,6 +5308,24 @@ export class ResumeService {
           }
         }
 
+        const cachedResponseUsesCanonicalAuthority =
+          Boolean((response as any)?.internal?.generationMode === 'structured_baseline_template') ||
+          Boolean((response as any)?.internal?.templateVersion === 'structured-baseline-v1');
+        const cachedExportReady = await this.canExportResumeArtifact({
+          normalizedDocument: ((response as any)?.preview?.resume ?? {}) as NormalizedResumeDocument,
+          usedStructuredBaselineTemplate: cachedResponseUsesCanonicalAuthority,
+          qualityGate: (response as any)?.qualityGate ?? { status: 'needs_refinement', reasons: [] },
+          jobTitle: job?.title ?? null,
+          jobDescription: job?.rawDescription ?? null,
+          evidenceExists:
+            Array.isArray((response as any)?.preview?.resume?.experience) &&
+            (response as any).preview.resume.experience.length > 0,
+        });
+        response.exportReady = cachedExportReady;
+        response.exports = cachedExportReady
+          ? ({ docx: true, pdf: true } as DocumentGenerationExports)
+          : ({ docx: false, pdf: false } as DocumentGenerationExports);
+
         try {
           this.seedCanonicalEvidenceIntoGuardedResumePreview({
             responseBody: response as unknown as Record<string, unknown>,

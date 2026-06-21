@@ -696,12 +696,18 @@ export class CoverLettersService {
       } catch {
         // Keep the reused response usable, but canonical persistence must exist for Studio reloads.
       }
+      const cachedExportReady =
+        draft.generationAuthority === 'baseline_file' &&
+        draft.qualityGate.status === 'pass' &&
+        (await this.canRenderCoverLetterTemplate(draft));
       return {
         ...(effectiveReservation.responseBody as CoverLetterGenerationResponse),
         generationAuthority: draft.generationAuthority,
         baselineVerified: draft.baselineFileUsable ? Boolean((draft.baseline as any).parsedRecords?.[0]?.flagsJson?.reviewState?.verified) : false,
         baselineFileUsable: draft.baselineFileUsable,
         baselineFileVersionHash: draft.baselineFileVersionHash,
+        exportReady: cachedExportReady,
+        exports: cachedExportReady ? { docx: true, pdf: true } : { docx: false, pdf: false },
         idempotency: {
           status: effectiveReservation.status,
           runId: effectiveReservation.runId,
