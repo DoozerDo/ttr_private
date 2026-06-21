@@ -1805,6 +1805,52 @@ export class ResumeService {
     return (candidates[candidates.length - 1] as any).resumeV2Json ?? null;
   }
 
+  private resolveResumeV2Authority(
+    parsedRecords: any[] | null | undefined,
+  ): {
+    usable: boolean;
+    normalized: NormalizedResumeDocument | null;
+    usableExperienceCount: number;
+    persisted: unknown | null;
+  } {
+    try {
+      const persisted = this.getLatestPersistedResumeV2Json(parsedRecords) ?? null;
+      if (!persisted || typeof persisted !== 'object') {
+        return {
+          usable: false,
+          normalized: null,
+          usableExperienceCount: 0,
+          persisted: null,
+        };
+      }
+      const usability = evaluateResumeV2Usability(persisted);
+      if (!usability.usable) {
+        return {
+          usable: false,
+          normalized: null,
+          usableExperienceCount: 0,
+          persisted,
+        };
+      }
+      const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
+      return {
+        usable: true,
+        normalized,
+        usableExperienceCount: Array.isArray((normalized as any)?.experience)
+          ? (normalized as any).experience.length
+          : 0,
+        persisted,
+      };
+    } catch {
+      return {
+        usable: false,
+        normalized: null,
+        usableExperienceCount: 0,
+        persisted: null,
+      };
+    }
+  }
+
   private buildMinimalResumeSections(baselineSections: BaselineSection[]): ResumeDraftSection[] {
     const sections: ResumeDraftSection[] = baselineSections
       .filter((section) => typeof section.content === 'string' && section.content.trim().length > 0)
@@ -2916,6 +2962,17 @@ export class ResumeService {
 	      process.env.STRUCTURED_BASELINE_EXTRACTION_DEBUG === 'true';
 	    let lastResumeGenerationCheckpoint: string | null = null;
 	    let topLevelFailSafeEntryTraceForResponse: Record<string, unknown> | null = null;
+    let resumeV2AuthorityResolution: {
+      usable: boolean;
+      normalized: NormalizedResumeDocument | null;
+      usableExperienceCount: number;
+      persisted: unknown | null;
+    } = {
+      usable: false,
+      normalized: null,
+      usableExperienceCount: 0,
+      persisted: null,
+    };
 	    try {
       isResumeV2 = process.env[RESUME_GENERATION_V2_FEATURE_FLAG] === 'true';
       const shouldEnforceOneTap = options?.enforceOneTap ?? true;
@@ -3008,19 +3065,6 @@ export class ResumeService {
         throw new NotFoundException('Baseline not found');
       }
 
-      // Production parity: when a usable persisted ResumeV2 authority exists, prefer the ResumeV2 lane even if the
-      // feature flag is off. Readiness can approve baselines based on ResumeV2 while legacy structured extraction
-      // remains empty; generation must not fail later due to that legacy lane.
-      if (!isResumeV2) {
-        try {
-          const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
-          const usability = evaluateResumeV2Usability(persisted);
-          if (usability.usable) isResumeV2 = true;
-        } catch {
-          // ignore; retain legacy lane selection
-        }
-      }
-
 	    const baselineVersion = baselineVersionId
       ? await this.baselineVersionRepository.findOne({
           where: { id: baselineVersionId, baselineId: baseline.id },
@@ -3087,6 +3131,11 @@ export class ResumeService {
       const baselineVerified = Boolean(
         (latestParsedRecord as any)?.flagsJson?.reviewState?.verified,
       );
+      resumeV2AuthorityResolution = this.resolveResumeV2Authority(baseline.parsedRecords);
+      if (isResumeV2 && !resumeV2AuthorityResolution.usable) {
+        assertUsableResumeV2(resumeV2AuthorityResolution.persisted);
+      }
+      isResumeV2 = resumeV2AuthorityResolution.usable;
       const persistedResumeV2ForAuthority = (() => {
         try {
           const persisted =
@@ -3137,7 +3186,7 @@ export class ResumeService {
         return tools.length > 0 || metrics.length > 0;
       });
 
-		    if (!options?.skipReadinessGate && !isVerifiedOnlyRequest) {
+		    if (!options?.skipReadinessGate && !isVerifiedOnlyRequest && !isResumeV2) {
 		      const readiness = await this.getGenerationReadiness(userId, request, {
 		        skipReadinessGate: true,
 		      });
@@ -3270,7 +3319,7 @@ export class ResumeService {
       order: { order: 'ASC' },
     });
 
-    const hasResumeV2AuthorityForGeneration = Boolean(isResumeV2 && persistedResumeV2ForAuthority);
+    const hasResumeV2AuthorityForGeneration = Boolean(isResumeV2);
     if ((!baselineFileUsable || !baselineVerified) && !hasResumeV2AuthorityForGeneration) {
       throw new UnprocessableEntityException({
         error: {
@@ -3285,10 +3334,12 @@ export class ResumeService {
         },
       });
     }
-    const resumeV2AuthoritySections = this.buildResumeV2AuthoritySectionsFromNormalizedDocument(
-      persistedResumeV2ForAuthority as NormalizedResumeDocument,
-      baseline.id,
-    );
+    const resumeV2AuthoritySections = isResumeV2
+      ? this.buildResumeV2AuthoritySectionsFromNormalizedDocument(
+          resumeV2AuthorityResolution.normalized as NormalizedResumeDocument,
+          baseline.id,
+        )
+      : [];
     const primaryGenerationSections = resumeV2AuthoritySections as any;
     const sectionsWithPolicies = this.applyPoliciesToSections(
       primaryGenerationSections as any,
@@ -3405,40 +3456,11 @@ export class ResumeService {
       map.forEach((value, key) => interpretedEvidenceIdToItem.set(key, value));
     }
 
-    const resumeV2UsableExperienceCount = (() => {
-      if (!isResumeV2) return 0;
-      try {
-        const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
-        if (!persisted || typeof persisted !== 'object') return 0;
-        const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
-        const validation = validateNormalizedResumeDocument(this.toTextOnlyResumeDocument(normalized));
-        if (!validation.valid) return 0;
-        return Array.isArray((normalized as any)?.experience) ? (normalized as any).experience.length : 0;
-      } catch {
-        return 0;
-      }
-    })();
-    const persistedResumeV2AuthorityWithExperience = (() => {
-      try {
-        if (!verifiedUsableBaselineFileExists || !persistedResumeV2ForAuthority) return null;
-        const experience = Array.isArray((persistedResumeV2ForAuthority as any)?.experience)
-          ? ((persistedResumeV2ForAuthority as any).experience as unknown[])
-          : [];
-        return experience.length > 0 ? persistedResumeV2ForAuthority : null;
-      } catch {
-        return null;
-      }
-    })();
-    const hasPersistedResumeV2AuthorityForGeneration = (() => {
-      try {
-        const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
-        if (!persisted || typeof persisted !== 'object') return false;
-        const usability = evaluateResumeV2Usability(persisted);
-        return Boolean(usability.usable);
-      } catch {
-        return false;
-      }
-    })();
+    const resumeV2UsableExperienceCount = isResumeV2 ? resumeV2AuthorityResolution.usableExperienceCount : 0;
+    const persistedResumeV2AuthorityWithExperience = isResumeV2
+      ? persistedResumeV2ForAuthority
+      : null;
+    const hasPersistedResumeV2AuthorityForGeneration = isResumeV2;
 
 	    // When template readiness is missing or structured extraction yields zero experience headers,
 	    // degrade to a baseline-only resume draft instead of hard-blocking qualified Studio workflows.
@@ -3448,6 +3470,7 @@ export class ResumeService {
 	    } | null = null;
 
 	    if (
+	      !isResumeV2 &&
 	      enforceTemplateReadiness &&
 	      !templateReadinessForBaseline.canGenerateResume &&
 	      !hasMeaningfulInterpretedEvidence &&
@@ -3572,7 +3595,7 @@ export class ResumeService {
 	        // If evidence is usable-but-imperfect (e.g., sparse text / lightly structured bullets),
 	        // proceed with generation and let Fit Review + quality gates surface refinements.
 	        if (!templateReadinessForBaseline.canGenerateResume && resumeV2UsableExperienceCount === 0) {
-	          if (this.isStudioEligibleGenerationLane(request, options, jobId, analysisId, effectiveAssessment ?? null)) {
+	          if (!isResumeV2 && this.isStudioEligibleGenerationLane(request, options, jobId, analysisId, effectiveAssessment ?? null)) {
 	            templateReadinessDegradedToBaselineOnly = {
 	              reason: 'baseline_template_not_ready',
 	              details: {
@@ -3872,12 +3895,7 @@ export class ResumeService {
     let usedMinimalFallback = Boolean(forcedMinimalSections);
     let sections: ResumeDraftSection[] = forcedMinimalSections ?? [];
     if (isResumeV2) {
-      if (persistedResumeV2AuthorityWithExperience) {
-        sections = resumeV2AuthoritySections as ResumeDraftSection[];
-      } else {
-        usedMinimalFallback = true;
-        sections = this.buildMinimalResumeSections(resumeInputSections);
-      }
+	      sections = resumeV2AuthoritySections as ResumeDraftSection[];
     } else if (!forcedMinimalSections) {
       try {
         sections = this.sanitizeDraftSections(ResumeDraftBullets.buildResumeDraftSections(resumeInputSections, {
@@ -4182,7 +4200,7 @@ export class ResumeService {
               // ignore
             }
           }
-	          if (this.isStudioEligibleGenerationLane(request, options, jobId, analysisId, effectiveAssessment ?? null)) {
+	          if (!isResumeV2 && this.isStudioEligibleGenerationLane(request, options, jobId, analysisId, effectiveAssessment ?? null)) {
 	            // Studio eligible lane: degrade to baseline-only resume draft and mark as non-blocking limitation.
 	            structuredBaselineExtractionMissingReasons = (structured.missingEvidenceReasons ?? []).slice(0, 12);
 	            structuredBaselineTemplateDegradedToBaselineOnly = {
@@ -5427,6 +5445,7 @@ export class ResumeService {
 	    // (e.g. minimal fallback due to weak extraction), preserve the non-blocking "zero_experience_headers"
 	    // limitation if the baseline sections contain no valid company|role headers.
 		    if (
+		      !isResumeV2 &&
 		      Boolean(request.oneTap) &&
 		      Boolean(options?.enforceOneTap) &&
 		      Boolean(options?.skipReadinessGate) &&
@@ -6239,11 +6258,7 @@ export class ResumeService {
           responseBody?.error?.message ?? responseBody?.message ?? (error instanceof Error ? error.message : String(error));
 
 	        // ResumeV2 contract: do not persist failure artifacts for structured/validation failures here.
-	        // Let the unified failure handling below either:
-	        // - fail-safe degrade to a minimal baseline-only resume (Studio eligible lanes), or
-	        // - preserve fail-closed behavior (non-Studio/oneTap) via the existing top-level guardrails.
-	        //
-	        // Only persist a ResumeV2 failure artifact for non-HTTP/untyped failures.
+	        // Any ResumeV2-lane error should fail closed rather than drop into minimal fail-safe persistence.
 	        if (!(error instanceof UnprocessableEntityException)) {
 	        this.logger.error('[resume-generation][v2] failed', {
 	          userId,
@@ -6277,9 +6292,9 @@ export class ResumeService {
         } catch {
           // ignore persistence failures for failure artifacts
         }
+        }
 
 	        throw error;
-	        }
 	      }
 
 	      if (error instanceof UnprocessableEntityException) {
@@ -6362,16 +6377,7 @@ export class ResumeService {
 	            (section) => (section.content ?? '').trim().length > 0,
 	          );
 
-        const hasPersistedResumeV2Authority = (() => {
-          try {
-            const persisted = this.getLatestPersistedResumeV2Json(baselineForFailSafe?.parsedRecords ?? null) ?? null;
-            if (!persisted || typeof persisted !== 'object') return false;
-            const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
-            return validateNormalizedResumeDocument(this.toTextOnlyResumeDocument(normalized)).valid;
-          } catch {
-            return false;
-          }
-        })();
+        const hasPersistedResumeV2Authority = resumeV2AuthorityResolution.usable;
         const failSafeGenerationMode = hasPersistedResumeV2Authority
           ? 'resume_v2_authoritative'
           : 'top_level_fail_safe_minimal';
