@@ -211,4 +211,35 @@ describe("Studio artifact contract resume source", () => {
     expect(hydratedExistence.hasResumeArtifactPersisted).toBe(true);
     expect(hydratedExistence.hasCoverLetterArtifactPersisted).toBe(true);
   });
+
+  it("treats a hydrated success resume as persisted even when a stale minimal audit id remains", () => {
+    const hydratedSuccessExistence = getArtifactExistence({
+      resume: {
+        status: "COMPLETED",
+        artifactId: "resume-current-2",
+        responseBody: {
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          auditId: "minimal:1782045224649",
+          preview: { resume: { heading: { name: "Alex" }, experience: [{ company: "Acme", roleTitle: "Lead" }] } },
+        },
+        content: "current resume",
+      },
+      coverLetter: {
+        status: "COMPLETED",
+        artifactId: "cover-3",
+        responseBody: {
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          preview: { coverLetter: { paragraphs: ["Hello"] } },
+        },
+        content: "Hello",
+      },
+    });
+
+    expect(hydratedSuccessExistence.hasResumeArtifactPersisted).toBe(true);
+    expect(hydratedSuccessExistence.hasCoverLetterArtifactPersisted).toBe(true);
+  });
 });

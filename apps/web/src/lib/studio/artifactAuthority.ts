@@ -72,12 +72,23 @@ function isMinimalResumeArtifact(resume: StudioArtifactsRecordLike): boolean {
   );
 }
 
+function isSuccessfulHydratedResumeArtifact(resume: StudioArtifactsRecordLike): boolean {
+  const responseBody = toRecord(resume?.responseBody);
+  if (!responseBody) return false;
+
+  const status = String(responseBody.status ?? "").trim().toLowerCase();
+  const generationStatus = String(responseBody.generationStatus ?? "").trim().toLowerCase();
+  const exportReady = responseBody.exportReady === true;
+
+  return status === "success" && generationStatus === "success" && exportReady;
+}
+
 export function getArtifactExistence(normalizedArtifacts: StudioArtifactsPayloadLike): PersistedArtifactExistence {
   const resume = normalizedArtifacts?.resume ?? null;
   const coverLetter = normalizedArtifacts?.coverLetter ?? null;
 
   const hasRenderableResumeArtifact =
-    !isMinimalResumeArtifact(resume) &&
+    (!isMinimalResumeArtifact(resume) || isSuccessfulHydratedResumeArtifact(resume)) &&
     (hasNonEmptyPayload(resume?.responseBody) || hasNonEmptyText(resume?.content) || hasHydratedResumeArtifact(normalizedArtifacts));
   const hasResumeArtifactPersisted =
     hasRenderableResumeArtifact;

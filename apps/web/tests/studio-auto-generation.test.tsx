@@ -1356,6 +1356,104 @@ describe("Studio auto-generation", () => {
     expect(screen.queryByText("Something went wrong")).toBeNull();
   }, 15000);
 
+  it("treats a hydrated success resume as persisted even when a stale minimal audit id remains", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const fetchMock = installStrongFitFetches({
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "completed",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        assessmentScore: 84,
+        generationContractVersion: "studio-artifacts-v1",
+        resumeArtifactHydration: {
+          resumeArtifactId: "resume-current-1",
+          resumeArtifactSource: "fresh_generation",
+          resumeArtifactUpdatedAt: "2026-06-20T23:49:04.879Z",
+        },
+        resumeResult: {
+          artifactType: "resume",
+          status: "success",
+          generationStatus: "success",
+          generationState: "generated_usable",
+          qualityStatus: "pass",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: {
+            resume: {
+              heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+              summary: "Fresh generated resume should remain persisted authority.",
+              experience: [{ company: "Example", roleTitle: "Role", bullets: ["x"] }],
+            },
+          },
+          actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: true },
+        },
+        resume: {
+          status: "COMPLETED",
+          artifactId: "resume-current-1",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            auditId: "minimal:1782045224649",
+            preview: {
+              resume: {
+                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                summary: "Fresh generated resume should remain persisted authority.",
+                experience: [{ company: "Example", roleTitle: "Role", bullets: ["x"] }],
+              },
+            },
+          },
+          content: "Fresh generated resume should remain persisted authority.",
+          confidence: "HIGH",
+          failure: null,
+        },
+        coverLetter: {
+          status: "COMPLETED",
+          artifactId: "cover-hydrated-1",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          },
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+      },
+    });
+
+    setFetchImplementation(fetchMock as any);
+    renderStudio();
+
+    await waitFor(() => {
+      const snapshot = readOrchestrationDebugSnapshot();
+      expect(snapshot.hasResumeArtifactPersisted).toBe(true);
+      expect(snapshot.hasAnyArtifactPersisted).toBe(true);
+      expect(snapshot.needsAutoGeneration).toBe(false);
+      expect(snapshot.blockerEvaluationTrace?.usedForNeedsAutoGeneration?.inputs?.missingResumeOutput).toBe(false);
+      expect(snapshot.orchestrationDecision).toBe("hydrate_existing_artifacts");
+      expect(snapshot.orchestrationDecision).not.toBe("should_auto_generate");
+      expect(snapshot.orchestrationDecision).not.toBe("blocked");
+    }, { timeout: 15000 });
+
+    expect(screen.queryByText("Something went wrong")).toBeNull();
+  }, 15000);
+
   it("keeps a hydrated resume visible when a stale backend refresh arrives", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",
