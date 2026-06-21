@@ -2700,7 +2700,7 @@ describe('ResumeService contract', () => {
     }
   });
 
-	  it('generation degrades to baseline-only draft when authoritative extraction returns zero roles (non-blocking)', async () => {
+  it('blocks zero_experience_headers when authoritative extraction returns zero roles and no usable ResumeV2 authority exists', async () => {
 	    const { service, studioArtifactsService } = buildService();
 	    const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
 	    process.env.DOCGEN_DIAGNOSTICS = 'true';
@@ -2710,7 +2710,43 @@ describe('ResumeService contract', () => {
 	    const originalParsed = baseline.parsedRecords;
 
 	    try {
-	        baseline.parsedRecords = []; // ensure ResumeV2 is not usable
+	        baseline.parsedRecords = [
+	          {
+	            id: 'parsed-empty',
+	            baselineId: baseline.id,
+	            baselineVersionId: baselineVersion.id,
+	            createdAt: new Date(),
+	            resumeV2Json: {
+	              heading: { name: 'Test User', contactLine: 'test@example.com' },
+	              experience: [],
+	            },
+	            flagsJson: {
+	              reviewState: {
+	                verified: true,
+	              },
+	            },
+	          } as any,
+	        ] as any; // ensure ResumeV2 exists but is not usable
+	        (studioArtifactsService.readState as jest.Mock).mockResolvedValueOnce({
+	          status: 'ready',
+	          baselineId: baseline.id,
+	          jobId: job.id,
+	          baselineVersionId: baselineVersion.id,
+	          baselineVersionHash: baselineVersion.hash,
+	          jobFingerprint: 'job-fingerprint-1',
+	          generationContractVersion: 'studio-artifacts-v1',
+	          assessmentScore: assessment.overallScore,
+	          resume: {
+	            status: 'COMPLETED',
+	            artifactCurrent: true,
+	            usableCurrent: true,
+	          },
+	          coverLetter: {
+	            status: 'COMPLETED',
+	            artifactCurrent: true,
+	            usableCurrent: true,
+	          },
+	        } as any);
 	        baseline.sections = [
         {
           ...baseSection,
@@ -2727,28 +2763,39 @@ describe('ResumeService contract', () => {
 	        ] as any;
 	        expect(extractStructuredBaselineFromSections(baseline.sections as any).experience.length).toBe(0);
 
-	      const result = await service.generateResume('user-1', {
-	        baselineId: baseline.id,
-	        baselineVersionId: baselineVersion.id,
-	        jobId: job.id,
-	        analysisId: assessment.id,
-	        oneTap: false,
-	        forceRegenerate: true,
-	      } as any);
-	      expect(result.status).toBe('success');
-	      expect(result.blocked).toBe(false);
-	      expect(result.preview?.resume).toBeTruthy();
-	      expect(JSON.stringify(result.preview?.resume ?? {})).not.toContain('We couldnâ€™t generate');
-	      const limitation = (result as any)?.internal?.tailoringLimitations?.structuredBaselineTemplate ?? null;
-	      expect(limitation).toEqual(
-	        expect.objectContaining({
-	          reason: 'zero_experience_headers',
-	          missingEvidenceReasons: expect.any(Array),
-	        }),
-	      );
-	      // Verified-only fallback emits an empty traceMap by design (no drafted bullet anchoring).
-	      expect(result.traceMap).toEqual({});
-	      expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+      await expect(
+        service.generateResume('user-1', {
+          baselineId: baseline.id,
+          baselineVersionId: baselineVersion.id,
+          jobId: job.id,
+          analysisId: assessment.id,
+          oneTap: false,
+          forceRegenerate: true,
+        } as any),
+      ).rejects.toMatchObject({
+        status: 422,
+        response: expect.objectContaining({
+          code: 'generation_blocked',
+          category: 'generation_blocked',
+          diagnostics: expect.objectContaining({
+            requestOneTapReceived: false,
+            verifiedUsableBaselineFileExistsAtGate: false,
+	          baselineFileUsableAtGate: true,
+	          baselineVerifiedAtGate: true,
+            baselineId: baseline.id,
+            baselineVersionId: baselineVersion.id,
+            artifactReadiness: 'blocked',
+            authoritativeExtractionSucceeded: false,
+            authoritativeExperienceGroupCount: 0,
+            fallbackGenerationPrevented: true,
+            legacyFallbackAttemptBlocked: true,
+            generationTerminationStage: 'authoritative_extraction_gate',
+            resumeV2UsableExperienceCount: 0,
+            failureReasons: expect.arrayContaining(['zero_experience_headers']),
+          }),
+        }),
+      });
+      expect(studioArtifactsService.recordResumeSuccess).not.toHaveBeenCalled();
 	    } finally {
 	      baseline.sections = originalSections;
 	      baseline.parsedRecords = originalParsed;
@@ -5234,7 +5281,7 @@ describe('ResumeService contract', () => {
   });
 
   it('does not throw top_level_fail_safe_minimal_blocked when verified ResumeV2 authority exists and legacy extraction is empty', async () => {
-    const { service } = buildService();
+    const { service, studioArtifactsService } = buildService();
     const originalSections = baseline.sections;
     const originalParsedRecords = (baseline as any).parsedRecords;
     const originalScore = assessment.overallScore;
@@ -5242,7 +5289,27 @@ describe('ResumeService contract', () => {
     process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
     assessment.overallScore = 83;
 
-    try {
+  try {
+      (studioArtifactsService.readState as jest.Mock).mockResolvedValueOnce({
+        status: 'ready',
+        baselineId: baseline.id,
+        jobId: job.id,
+        baselineVersionId: baselineVersion.id,
+        baselineVersionHash: baselineVersion.hash,
+        jobFingerprint: 'job-fingerprint-1',
+        generationContractVersion: 'studio-artifacts-v1',
+        assessmentScore: assessment.overallScore,
+        resume: {
+          status: 'COMPLETED',
+          artifactCurrent: true,
+          usableCurrent: true,
+        },
+        coverLetter: {
+          status: 'COMPLETED',
+          artifactCurrent: true,
+          usableCurrent: true,
+        },
+      } as any);
       baseline.sections = [];
       (baseline as any).parsedRecords = [
         {
@@ -5639,5 +5706,3 @@ describe('ResumeService contract', () => {
     }
   });
 });
-
-
