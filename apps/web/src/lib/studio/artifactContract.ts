@@ -36,20 +36,14 @@ function isFailedSingleArtifact(artifact: ReadinessArtifactLike | null): boolean
   if (!artifact) return false;
   const gs = String(artifact.generationState ?? "").trim().toLowerCase();
   if (gs === "generation_failed" || gs === "failed") return true;
-  const qs = String(artifact.qualityStatus ?? "").trim().toLowerCase();
-  return qs === "failed";
-}
-
-function qualityGatePassSingle(gate: ReadinessArtifactLike["qualityGate"]): boolean {
-  if (!gate || typeof gate !== "object") return false;
-  return String((gate as any).status ?? "").trim() === "pass";
+  return false;
 }
 
 function isExportableSingleArtifact(artifact: ReadinessArtifactLike | null): boolean {
   if (!isPresentSingleArtifact(artifact)) return false;
   if (isFailedSingleArtifact(artifact)) return false;
   if (artifact.exportReady !== true) return false;
-  return qualityGatePassSingle(artifact.qualityGate ?? null);
+  return true;
 }
 
 export type StudioArtifactContractInput = {

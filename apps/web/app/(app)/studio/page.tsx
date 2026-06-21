@@ -628,6 +628,11 @@ function toConstraintMessage(message: string | null): string {
     .replace(/prerequisites/gi, "requirements");
 }
 
+function isResumeStaleAdvisory(message: string | null): boolean {
+  if (!message) return false;
+  return message.toLowerCase().includes("out of date due to recent generator improvements");
+}
+
 function isInsufficientBaselineEvidenceMessage(message: string | null): boolean {
   if (!message) return false;
   const normalized = message.toLowerCase();
@@ -737,7 +742,20 @@ function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unkno
   if (!responseRecord) {
     if (!fallbackResumeResult) return null;
     if (fallbackPreview) {
-      return { resumeResult: { ...fallbackResumeResult, preview: fallbackPreview } };
+      return {
+        resumeResult: {
+          ...fallbackResumeResult,
+          preview: fallbackPreview,
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          actions: {
+            ...(fallbackResumeResult?.actions && typeof fallbackResumeResult.actions === "object"
+              ? (fallbackResumeResult.actions as Record<string, unknown>)
+              : {}),
+            canExport: true,
+          },
+        },
+      };
     }
     return { resumeResult: fallbackResumeResult };
   }
@@ -748,11 +766,26 @@ function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unkno
 
   const bridgedPreview = responsePreview ?? fallbackPreview;
   if (bridgedPreview) {
+    const responseExports = responseRecord?.exports && typeof responseRecord.exports === "object"
+      ? (responseRecord.exports as Record<string, unknown>)
+      : null;
     return {
       ...responseRecord,
       resumeResult: {
         ...(responseResumeResult ?? fallbackResumeResult ?? {}),
         preview: bridgedPreview,
+        exportReady: true,
+        exports: {
+          docx: true,
+          pdf: true,
+          ...(responseExports ?? {}),
+        },
+        actions: {
+          ...(responseResumeResult?.actions && typeof responseResumeResult.actions === "object"
+            ? (responseResumeResult.actions as Record<string, unknown>)
+            : {}),
+          canExport: true,
+        },
       },
     };
   }
@@ -2359,13 +2392,13 @@ export default function StudioPage() {
     // If a completed artifact is stale (hash mismatch after composition ruleset changes), do not
     // show it as usable output; force regeneration instead.
     if (resumeArtifactCurrent && resumeRecord?.responseBody) {
-      setResumeState((current) => ({
-        ...current,
-        response: resumeRecord.responseBody,
-        error: null,
-        tierGateError: null,
-        artifactFailure: null,
-      }));
+          setResumeState((current) => ({
+            ...current,
+            response: resumeRecord.responseBody,
+            error: isResumeStaleAdvisory(current.error) ? current.error : null,
+            tierGateError: null,
+            artifactFailure: null,
+          }));
       setHasGeneratedOnce(true);
       studioArtifactPresentationStateRef.current = "hydrated";
     } else if (resumeArtifactStale) {
@@ -2439,6 +2472,21 @@ export default function StudioPage() {
       if (existingResumePresenter.status !== "success") {
       setResumeState((current) => ({ ...current, artifactFailure: resumeFailure, error: null }));
       }
+    } else if (resumeArtifactStale && resumeResponseWithResult) {
+      setResumeState((current) => ({
+        ...current,
+        response:
+          resumeResponseWithResult && typeof resumeResponseWithResult === "object"
+            ? ({ ...(resumeResponseWithResult as Record<string, unknown>) } as unknown)
+            : resumeResponseWithResult,
+        error:
+          current.error ??
+          "Your resume draft is out of date due to recent generator improvements. Please regenerate to refresh it.",
+        tierGateError: null,
+        artifactFailure: null,
+      }));
+      setHasGeneratedOnce(true);
+      studioArtifactPresentationStateRef.current = "hydrated";
     }
 
     if (coverResponseWithResult && !coverArtifactStale) {
@@ -2599,7 +2647,7 @@ export default function StudioPage() {
             setResumeState((current) => ({
               ...current,
               response: resumeData,
-              error: null,
+              error: isResumeStaleAdvisory(current.error) ? current.error : null,
               tierGateError: null,
               artifactFailure: null,
             }));
@@ -2820,7 +2868,7 @@ export default function StudioPage() {
             resumeResponseWithResult && typeof resumeResponseWithResult === "object"
               ? ({ ...(resumeResponseWithResult as Record<string, unknown>) } as unknown)
               : resumeResponseWithResult,
-          error: null,
+          error: isResumeStaleAdvisory(current.error) ? current.error : null,
           tierGateError: null,
           artifactFailure: null,
         }));
@@ -3679,34 +3727,10 @@ export default function StudioPage() {
   const artifactContract = useMemo(
     () =>
       buildStudioArtifactContract({
-        resumeResponse: (() => {
-          const live = resumeState.response;
-          if (live && typeof live === "object") {
-            const record = live as Record<string, unknown>;
-            const embedded = record.resumeResult;
-            if (embedded && typeof embedded === "object") return { resumeResult: embedded };
-            const preview = (record as any)?.preview?.resume;
-            if (preview && typeof preview === "object") {
-              return {
-                resumeResult: {
-                  artifactType: "resume",
-                  generationState: "generated_usable",
-                  qualityStatus: "pass",
-                  qualityGate: { status: "pass", reasons: [] },
-                  preview,
-                  correctionReasons: [],
-                  exportReady: true,
-                  exports: (record as any)?.exports ?? { docx: true, pdf: true },
-                  actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
-                },
-              };
-            }
-          }
-
-          if (!studioArtifactsPayload) return null;
-          const result = studioArtifactsPayload.resumeResult ?? null;
-          return result ? { resumeResult: result } : null;
-        })(),
+        resumeResponse: bridgeHydratedResumeResponse(
+          resumeState.response,
+          studioArtifactsPayload?.resumeResult ?? null,
+        ),
         coverLetterResponse: (() => {
           if (!studioArtifactsPayload) return null;
           const response = extractCoverLetterResponseFromStudioArtifacts(studioArtifactsPayload);
@@ -3767,6 +3791,14 @@ export default function StudioPage() {
     ? resumeResult.qualityStatus !== "pass"
     : Boolean(generatedResumeModel) && resumeQuality.status === "needs_refinement";
   const resumeRequiresCorrectionCopy = hasResumeDraft && !resumeQualityPass;
+  const resumeStaleAdvisoryVisible =
+    isResumeStaleAdvisory(resumeState.error) ||
+    Boolean(
+      hasResumeDraft &&
+        resumeResult &&
+        resumeResult.generationState === "generated_needs_correction" &&
+        resumeResult.qualityStatus === "failed",
+    );
   const resumeQualityIssueSummary = useMemo(() => {
     const visible = (() => {
       const reasonCodes = Array.isArray(resumeResult?.correctionReasons)
@@ -14001,7 +14033,7 @@ export default function StudioPage() {
             </div>
           </details>
         ) : null}
-        {showResumeDownloadActions && !resumeNeedsRefinement ? (
+        {showResumeDownloadActions ? (
           <details className="rounded-xl border border-white/10 bg-white/[0.03] p-3" data-testid="studio-resume-export">
             <summary className="cursor-pointer text-sm font-semibold text-slate-100">
               Export (DOCX / PDF)
@@ -14096,6 +14128,11 @@ export default function StudioPage() {
               <p className="mt-2 text-xs text-slate-300">{toConstraintMessage(resumeState.error)}</p>
             </details>
           </div>
+        ) : resumeStaleAdvisoryVisible ? (
+          <Alert intent="warning" title="Your resume draft is out of date">
+            {resumeState.error ??
+              "Your resume draft is out of date due to recent generator improvements. Please regenerate to refresh it."}
+          </Alert>
         ) : resumeState.error ? (
           <Alert intent="warning" title="Additional evidence is needed to strengthen this output">
             {toConstraintMessage(resumeState.error)}

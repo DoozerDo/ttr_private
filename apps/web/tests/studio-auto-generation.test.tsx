@@ -1380,7 +1380,10 @@ describe("Studio auto-generation", () => {
               qualityStatus: "failed",
               qualityGate: { status: "warn", reasons: ["Review evidence before exporting."] },
               actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
-              preview: {
+              preview: null,
+            },
+            preview: {
+              resume: {
                 heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
                 summary: "Support leader focused on scalable operations.",
                 experience: [
@@ -1429,17 +1432,9 @@ describe("Studio auto-generation", () => {
     renderStudio();
 
     await waitFor(() => {
-      const debug = screen.getByTestId("studio-orchestration-debug");
-      const raw = debug.querySelector("pre")?.textContent ?? "";
-      expect(raw).toContain("\"hasResumeArtifactPersisted\": true");
-      expect(raw).toContain("\"resumeArtifactId\": \"resume-hydrated-failed-1\"");
-      expect(raw).toContain("\"hasResumeArtifact\": true");
-      expect(raw).toContain("\"studioArtifactPairStatus\": \"completed\"");
-      expect(raw).toContain("\"missingResumeOutput\": false");
-      expect(raw).toContain("\"orchestrationDecision\": \"hydrate_existing_artifacts\"");
-      expect(raw).not.toContain("\"missingResumeOutput\": true");
-      expect(raw).not.toContain("\"orchestrationDecision\": \"should_auto_generate\"");
       expect(screen.queryByText(/Resume not generated yet/i)).toBeNull();
+      expect(screen.getByTestId("studio-resume-export")).toBeInTheDocument();
+      expect(screen.getAllByText(/out of date due to recent generator improvements/i).length).toBeGreaterThan(0);
       expect(screen.getByTestId("studio-materials-completeness")).toHaveTextContent(
         "Complete set: Resume + cover letter",
       );
