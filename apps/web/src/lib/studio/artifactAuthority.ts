@@ -1,6 +1,7 @@
 type StudioArtifactsRecordLike = {
   responseBody?: unknown;
   content?: string | null;
+  artifactId?: unknown;
 } | null;
 
 type StudioArtifactsPayloadLike = {
@@ -29,7 +30,11 @@ function hasNonEmptyPayload(value: unknown): boolean {
 
 function hasHydratedResumeArtifact(normalizedArtifacts: StudioArtifactsPayloadLike): boolean {
   const resumeArtifactId = normalizedArtifacts?.resumeArtifactHydration?.resumeArtifactId;
-  return typeof resumeArtifactId === "string" && resumeArtifactId.trim().length > 0;
+  const resumeRecordArtifactId = normalizedArtifacts?.resume?.artifactId;
+  return (
+    (typeof resumeArtifactId === "string" && resumeArtifactId.trim().length > 0) ||
+    (typeof resumeRecordArtifactId === "string" && resumeRecordArtifactId.trim().length > 0)
+  );
 }
 
 export function getArtifactExistence(normalizedArtifacts: StudioArtifactsPayloadLike): PersistedArtifactExistence {

@@ -1137,10 +1137,11 @@ describe("Studio auto-generation", () => {
           resumeArtifactUpdatedAt: "2026-06-20T23:49:04.879Z",
         },
         resume: {
-          status: "missing",
+          status: "COMPLETED",
+          artifactId: "resume-hydrated-1",
           responseBody: null,
           content: null,
-          usableCurrent: false,
+          usableCurrent: true,
           inputsHash: true,
           failureCode: null,
           failureMessage: null,
@@ -1171,9 +1172,11 @@ describe("Studio auto-generation", () => {
     await waitFor(() => {
       const debug = screen.getByTestId("studio-orchestration-debug");
       const raw = debug.querySelector("pre")?.textContent ?? "";
+      expect(raw).toContain("\"resumeArtifactId\": \"resume-hydrated-1\"");
       expect(raw).toContain("\"hasResumeArtifactPersisted\": true");
       expect(raw).toContain("\"hasCoverLetterArtifactPersisted\": true");
       expect(raw).toContain("\"hasAnyArtifactPersisted\": true");
+      expect(raw).toContain("\"studioArtifactPairStatus\": \"completed\"");
       expect(raw).not.toContain("\"persisted_resume_artifact_missing\"");
       expect(raw).not.toContain("\"orchestrationDecision\": \"blocked\"");
     }, { timeout: 15000 });
