@@ -373,4 +373,185 @@ describe("Studio truth alignment", () => {
     expect(screen.queryByText(/We are generating your application draft now/i)).toBeNull();
     expect(screen.queryByText(/Generation blocked/i)).toBeNull();
   });
+
+  it("prefers a successful cover-letter response body over a stale failed persisted result", async () => {
+    removeStudioArtifactSnapshot();
+    vi.spyOn(generationProductReadiness, "buildGenerationProductReadiness").mockReturnValue({
+      generation_readiness: { canGenerate: true, canExport: false, reasonsBlocked: [] },
+      state: "ALLOWED",
+      confidence: "LOW",
+      needsVerification: false,
+      tier: "generation_allowed",
+      canOpenStudio: true,
+      generationMode: "verified",
+    });
+
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]);
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return createResponse({
+          assessmentId: "analysis-1",
+          scoring_v2: { score: 90 },
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          company: "Acme",
+          title: "Director of Support",
+          verification_coverage: { totalClaims: 2, verifiedClaims: 2, inferredClaims: 0, unverifiedClaims: 0 },
+        });
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return createResponse({ status: "ready", reasons: [], compliance_flags: [] });
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return createResponse({ status: "ready", reasons: [], compliance_flags: [] });
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return createResponse({
+          status: "completed",
+          baselineId: "base-1",
+          jobId: "job-1",
+          baselineVersionId: "base-version-1",
+          assessmentScore: 90,
+          generationContractVersion: "studio-artifacts-v1",
+          resumeResult: {
+            artifactType: "resume",
+            status: "success",
+            generationStatus: "success",
+            generationState: "generated_usable",
+            qualityStatus: "pass",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: {
+              resume: {
+                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                summary: "Support leader focused on scalable operations.",
+                experience: [
+                  {
+                    company: "Cat Daddy Games",
+                    roleTitle: "Senior Producer",
+                    bullets: ["Led support operations programs."],
+                  },
+                ],
+              },
+            },
+          },
+          coverLetterResult: {
+            artifactType: "cover_letter",
+            generationState: "generated_needs_correction",
+            qualityStatus: "failed",
+            preview: {
+              paragraphs: [
+                "Dear Hiring Team at Acme,",
+                "I am excited to apply for the Director of Support role at Acme because I have led customer operations, built measurable service improvements, and partnered with engineering and product teams to reduce customer pain. My background includes scaling support programs, coaching managers, and turning ambiguous operational problems into clear plans that improve response times, retention, and team confidence. I would bring that same steady execution to this role, with a focus on pragmatic systems, strong communication, and outcomes that matter to customers and the business.",
+              ],
+            },
+            correctionReasons: [{ code: "needs_correction", message: "needs_correction", severity: "warning" }],
+            exportReady: false,
+            exports: { docx: false, pdf: false },
+            actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+          },
+          resume: {
+            status: "COMPLETED",
+            artifactId: "resume-good-1",
+            usableCurrent: true,
+            inputsHash: true,
+            responseBody: {
+              status: "success",
+              generationStatus: "success",
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              preview: {
+                resume: {
+                  heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                  summary: "Support leader focused on scalable operations.",
+                  experience: [
+                    {
+                      company: "Cat Daddy Games",
+                      roleTitle: "Senior Producer",
+                      bullets: ["Led support operations programs."],
+                    },
+                  ],
+                },
+              },
+            },
+            content: "Resume",
+            failureCode: null,
+            failureMessage: null,
+            completedAt: new Date().toISOString(),
+            failedAt: null,
+            metadata: { auditId: "resume-audit-1" },
+          },
+          coverLetter: {
+            status: "FAILED",
+            artifactId: "cover-good-1",
+            usableCurrent: true,
+            inputsHash: true,
+            responseBody: {
+              status: "success",
+              generationStatus: "success",
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              preview: {
+                coverLetter: {
+                  paragraphs: [
+                    "Dear Hiring Team at Acme,",
+                    "I am excited to apply for the Director of Support role at Acme because I have led customer operations, built measurable service improvements, and partnered with engineering and product teams to reduce customer pain. My background includes scaling support programs, coaching managers, and turning ambiguous operational problems into clear plans that improve response times, retention, and team confidence. I would bring that same steady execution to this role, with a focus on pragmatic systems, strong communication, and outcomes that matter to customers and the business.",
+                  ],
+                },
+              },
+            },
+            content: "Dear Hiring Team at Acme, ...",
+            failureCode: "stale_failed_cover_letter",
+            failureMessage: "stale failure record should not win over successful response body",
+            completedAt: new Date().toISOString(),
+            failedAt: null,
+            metadata: { auditId: "cover-audit-1" },
+          },
+        });
+      }
+      if (url.includes("/api/baselines/base-1")) {
+        return createResponse({ id: "base-1", originalFilename: "Resume.pdf", sections: [] });
+      }
+      if (url.includes("/api/baselines")) {
+        return createResponse([{ id: "base-1", originalFilename: "Resume.pdf", status: "ACTIVE", isActive: true }]);
+      }
+      if (url.includes("/api/jobs")) {
+        return createResponse([{ id: "job-1", company: "Acme", title: "Director of Support" }]);
+      }
+      if (url.includes("/api/analytics/event")) {
+        return createResponse({ ok: true });
+      }
+      if (init?.method === "POST") {
+        return createResponse({ ok: true });
+      }
+      return createResponse({});
+    });
+
+    renderStudio();
+
+    await waitFor(() => {
+      const debug = screen.getByTestId("studio-orchestration-debug");
+      const raw = debug.querySelector("pre")?.textContent ?? "";
+      expect(raw).toContain("\"studioArtifactPairStatus\": \"completed\"");
+      expect(raw).toContain("\"hasCoverLetterArtifactPersisted\": true");
+      expect(raw).toContain("\"hasAnyArtifactPersisted\": true");
+      expect(raw).not.toContain("\"studioArtifactPairStatus\": \"failed\"");
+    }, { timeout: 15000 });
+
+    expect(screen.getByTestId("studio-cover-ready-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-cover-correction-panel")).toBeNull();
+    expect(screen.queryByText(/Cover letter generated successfully/i)).toBeInTheDocument();
+  }, 15000);
 });

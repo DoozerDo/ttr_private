@@ -2537,11 +2537,7 @@ export default function StudioPage() {
     const coverLetterResult = payload.coverLetterResult ?? null;
     const resumeResponseWithResult = bridgeHydratedResumeResponse(resumeResponse, resumeResult);
     const coverResponseWithResult =
-      coverLetterResult
-        ? (coverResponse && typeof coverResponse === "object"
-            ? ({ ...(coverResponse as Record<string, unknown>), coverLetterResult } as unknown)
-            : ({ coverLetterResult } as unknown))
-        : coverResponse;
+      coverResponse ?? (coverLetterResult ? ({ coverLetterResult } as unknown) : null);
     const resumeHydratedResponseWithPreview = hasHydratedResumePreview(resumeResponseWithResult)
       ? resumeResponseWithResult
       : null;
@@ -2994,11 +2990,7 @@ export default function StudioPage() {
           ? "Persisted resume artifact exists, but Studio could not hydrate a usable resume preview."
           : null;
       const coverResponseWithResult =
-        coverLetterResult
-          ? (coverResponse && typeof coverResponse === "object"
-              ? ({ ...(coverResponse as Record<string, unknown>), coverLetterResult } as unknown)
-              : ({ coverLetterResult } as unknown))
-          : coverResponse;
+        coverResponse ?? (coverLetterResult ? ({ coverLetterResult } as unknown) : null);
       const resumeFailure = normalizedBackendPayload
         ? buildFailureFromBackendRecord("resume", normalizedBackendPayload.resume)
         : null;
@@ -3009,6 +3001,10 @@ export default function StudioPage() {
         ? presentResumeGeneration(resumeResponseWithResult)
         : null;
       const resumeResponseIsUsableSuccess = resumePresenterFromResult?.status === "success";
+      const coverPresenterFromResult = coverResponseWithResult
+        ? presentCoverLetterGeneration(coverResponseWithResult)
+        : null;
+      const coverResponseIsUsableSuccess = coverPresenterFromResult?.status === "success";
 
       // Ownership contract: a usable success response must win over any stale persisted failure codes.
       if (resumeResponseWithResult && resumeResponseIsUsableSuccess) {
@@ -3039,7 +3035,20 @@ export default function StudioPage() {
         setHasGeneratedOnce(true);
         studioArtifactPresentationStateRef.current = "hydrated";
       }
-      if (coverFailure) {
+      if (coverResponseWithResult && coverResponseIsUsableSuccess) {
+        setCoverState((current) => ({
+          ...current,
+          response:
+            coverResponseWithResult && typeof coverResponseWithResult === "object"
+              ? ({ ...(coverResponseWithResult as Record<string, unknown>) } as unknown)
+              : coverResponseWithResult,
+          error: null,
+          tierGateError: null,
+          artifactFailure: null,
+        }));
+        setHasGeneratedOnce(true);
+        studioArtifactPresentationStateRef.current = "hydrated";
+      } else if (coverFailure) {
         setCoverState((current) => ({
           ...current,
           artifactFailure: coverFailure,
@@ -3061,15 +3070,17 @@ export default function StudioPage() {
         studioArtifactPresentationStateRef.current = "hydrated";
       }
       const pairStatus =
-        "status" in payload
-          ? getBackendPairStatus(payload as BackendStudioArtifactsResponse)
-          : ((resumeResponse || coverResponse)
-              ? (resumeResponse && coverResponse)
-                ? "completed"
-                : "missing"
-              : (resumeFailure || coverFailure)
-                ? "failed"
-                : "missing");
+        resumeResponseIsUsableSuccess && coverResponseIsUsableSuccess
+          ? "completed"
+          : "status" in payload
+            ? getBackendPairStatus(payload as BackendStudioArtifactsResponse)
+            : ((resumeResponse || coverResponse)
+                ? (resumeResponse && coverResponse)
+                  ? "completed"
+                  : "missing"
+                : (resumeFailure || coverFailure)
+                  ? "failed"
+                  : "missing");
       const hasExistingPresenterResponses =
         Boolean(resumeResponseRef.current) || Boolean(coverResponseRef.current);
       if (pairStatus === "missing" && resumeResponse && coverResponse && !isMinimalResumeArtifactPayload(resumeResponse)) {
@@ -3884,14 +3895,9 @@ export default function StudioPage() {
           studioArtifactsPayload?.resumeResult ?? null,
         ),
         coverLetterResponse: (() => {
+          if (coverState.response) return coverState.response;
           if (!studioArtifactsPayload) return null;
-          const response = extractCoverLetterResponseFromStudioArtifacts(studioArtifactsPayload);
-          const result = studioArtifactsPayload.coverLetterResult ?? null;
-          if (!result) return response;
-          if (response && typeof response === "object") {
-            return { ...(response as Record<string, unknown>), coverLetterResult: result };
-          }
-          return { coverLetterResult: result };
+          return extractCoverLetterResponseFromStudioArtifacts(studioArtifactsPayload);
         })(),
         canExportDocuments,
         isPro,
@@ -3899,7 +3905,7 @@ export default function StudioPage() {
         jobTitle: selectedJob?.title ?? null,
         companyName: selectedJob?.company ?? null,
       }),
-    [canExportDocuments, isPro, resumeState.response, selectedJob?.company, selectedJob?.title, studioArtifactsPayload],
+    [canExportDocuments, coverState.response, isPro, resumeState.response, selectedJob?.company, selectedJob?.title, studioArtifactsPayload],
   );
   const resumePresenter = artifactContract.presenters.resume;
   useEffect(() => {
