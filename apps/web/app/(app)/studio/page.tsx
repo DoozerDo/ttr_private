@@ -1426,8 +1426,8 @@ export default function StudioPage() {
 
   // Artifact existence authority: only from /api/studio/artifacts (persisted payload).
   // Keep legacy variable names as aliases so downstream UI branches do not accidentally switch back to UI-state checks.
-  // Stale artifacts (hash mismatch after composition ruleset changes) must not be treated as usable existing artifacts.
-  const hasResumeArtifact = hasResumeArtifactPersisted && !resumePersistedArtifactStale;
+  // Persisted resume proof remains visible for display/orchestration even if the backend record is stale.
+  const hasResumeArtifact = hasResumeArtifactPersisted;
   const hasCoverLetterArtifact = hasCoverLetterArtifactPersisted && !coverPersistedArtifactStale;
   const hasAuthoritativeArtifacts = hasResumeArtifact || hasCoverLetterArtifact;
   // (renderability is computed later via `hasRenderableResumeContent` / `hasRenderableCoverLetterContent`)
@@ -2311,9 +2311,10 @@ export default function StudioPage() {
       setHasGeneratedOnce(true);
       studioArtifactPresentationStateRef.current = "hydrated";
     } else if (resumeArtifactStale) {
+      const hydratedResumeResponse = normalizeHydratedArtifactResponse(resumeRecord?.responseBody ?? null);
       setResumeState((current) => ({
         ...current,
-        response: null,
+        response: current.response ?? resumeResponseRef.current ?? hydratedResumeResponse ?? null,
         error:
           current.error ??
           "Your resume draft is out of date due to recent generator improvements. Please regenerate to refresh it.",
@@ -3854,21 +3855,13 @@ export default function StudioPage() {
     }
     return canonicalResumePreviewPayload;
   }, [canonicalResumePreviewPayload, effectiveResumeModel, hasSavedResumeEdits, isResumeEditMode]);
-  const resumeBackendArtifactStale = useMemo(() => {
-    const record = studioArtifactsPayload?.resume as any;
-    if (!record || record.status !== "COMPLETED") return false;
-    if (!record.inputsHash) return false;
-    return record.usableCurrent === false;
-  }, [studioArtifactsPayload?.resume]);
   const hasRenderableResumeContent = useMemo(() => {
     if (resumeHardRenderBlocked.blocked) return false;
-    if (resumeBackendArtifactStale) return false;
     if (resumePresenter.status === "success" && resumeState.response) return true;
     if (resumePreviewPayloadForRender) return true;
     return typeof resumePreviewText === "string" && resumePreviewText.trim().length > 0;
   }, [
     resumeHardRenderBlocked.blocked,
-    resumeBackendArtifactStale,
     resumePresenter.status,
     resumePreviewPayloadForRender,
     resumePreviewText,
@@ -3904,7 +3897,8 @@ export default function StudioPage() {
   const displayContract = artifactContract.displayContract;
   const hasCanonicalResumeArtifact = displayContract.resumePreviewRenderable;
   const hasCanonicalCoverLetterArtifact = displayContract.coverLetterPreviewRenderable;
-  const uiHasRenderableResume = displayContract.resumePreviewRenderable;
+  const uiHasRenderableResume =
+    displayContract.resumePreviewRenderable || hasResumeArtifactPersisted || resumePersistedArtifactStale;
   const uiHasRenderableCoverLetter = displayContract.coverLetterPreviewRenderable;
   const uiHasRenderablePair = displayContract.generationComplete;
   const hasCanonicalReloadedArtifactPair = displayContract.generationComplete;

@@ -1229,6 +1229,104 @@ describe("Studio auto-generation", () => {
     expect(screen.queryByText("Something went wrong")).toBeNull();
   }, 15000);
 
+  it("keeps a hydrated resume visible when a stale backend refresh arrives", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const fetchMock = installStrongFitFetches({
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "completed",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        assessmentScore: 84,
+        generationContractVersion: "studio-artifacts-v1",
+        resumeArtifactHydration: {
+          resumeArtifactId: "resume-hydrated-1",
+          resumeArtifactSource: "fresh_generation",
+          resumeArtifactUpdatedAt: "2026-06-20T23:49:04.879Z",
+        },
+        resume: {
+          status: "COMPLETED",
+          usableCurrent: false,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: {
+              resume: {
+                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                summary: "Support leader focused on scalable operations.",
+                experience: [
+                  {
+                    company: "Cat Daddy Games",
+                    roleTitle: "Senior Producer",
+                    location: "Los Angeles, CA",
+                    dateRange: "2020 - Present",
+                    bullets: ["Led support operations programs."],
+                  },
+                ],
+                education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                competencies: ["Customer strategy", "Operational leadership"],
+              },
+            },
+          },
+          content: "Resume",
+          confidence: "HIGH",
+          failure: null,
+        },
+        coverLetter: {
+          status: "COMPLETED",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          },
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+      },
+    });
+
+    setFetchImplementation(fetchMock as any);
+    renderStudio();
+
+    await waitFor(() => {
+      const debug = screen.getByTestId("studio-orchestration-debug");
+      const raw = debug.querySelector("pre")?.textContent ?? "";
+      expect(raw).toContain("\"hasResumeArtifactPersisted\": true");
+      expect(raw).toContain("\"hasAnyArtifactPersisted\": true");
+      expect(raw).toContain("\"studioArtifactPairStatus\": \"completed\"");
+      expect(raw).toContain("\"missingResumeOutput\": false");
+      expect(raw).toContain("\"orchestrationDecision\": \"hydrate_existing_artifacts\"");
+      expect(raw).not.toContain("\"missingResumeOutput\": true");
+      expect(raw).not.toContain("\"orchestrationDecision\": \"should_auto_generate\"");
+      expect(raw).not.toContain("\"needsAutoGeneration\": true");
+      expect(screen.queryByText(/Resume not generated yet/i)).toBeNull();
+      const resumePanel = screen.getByTestId("studio-instant-resume-panel");
+      const resumePanelScope = within(resumePanel);
+      expect(resumePanel).toBeInTheDocument();
+      expect(resumePanelScope.getByText("Alex Candidate")).toBeInTheDocument();
+      expect(resumePanelScope.getByText("Support leader focused on scalable operations.")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-cover-letter-preview-body")).toBeInTheDocument();
+      expect(screen.queryByText("Something went wrong")).toBeNull();
+    }, { timeout: 15000 });
+
+    expectCanonicalGeneratedArtifactArea();
+  }, 15000);
+
   it("still auto-generates when verification confidence is limited", async () => {
     const fetchMock = installStrongFitFetches({ readinessStatus: "limited" });
 
