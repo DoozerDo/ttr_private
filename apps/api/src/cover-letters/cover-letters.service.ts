@@ -698,6 +698,7 @@ export class CoverLettersService {
       }
       const cachedExportReady =
         draft.generationAuthority === 'baseline_file' &&
+        draft.baselineFileUsable === true &&
         draft.qualityGate.status === 'pass' &&
         (await this.canRenderCoverLetterTemplate(draft));
       return {
