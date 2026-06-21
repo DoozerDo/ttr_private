@@ -2427,6 +2427,14 @@ export default function StudioPage() {
       Boolean(previouslyHydratedPayload?.resume) || Boolean(previouslyHydratedPayload?.coverLetter);
 
     if (pairStatus === "missing" && (hasHydratedOrGeneratedResponse || previouslyHadArtifacts)) {
+      if (
+        payload.resume?.responseBody &&
+        payload.coverLetter?.responseBody &&
+        !isMinimalResumeArtifactPayload(payload.resume.responseBody)
+      ) {
+        setStudioArtifactPairStatus("completed");
+        suppressAutoGenerationRef.current = true;
+      }
       return;
     }
 
@@ -2993,12 +3001,20 @@ export default function StudioPage() {
                 : "missing");
       const hasExistingPresenterResponses =
         Boolean(resumeResponseRef.current) || Boolean(coverResponseRef.current);
-      if (pairStatus !== "missing" || !hasExistingPresenterResponses) {
+      if (pairStatus === "missing" && resumeResponse && coverResponse && !isMinimalResumeArtifactPayload(resumeResponse)) {
+        setStudioArtifactPairStatus("completed");
+      } else if (pairStatus !== "missing" || !hasExistingPresenterResponses) {
         setStudioArtifactPairStatus(pairStatus);
       }
       // If hydration confirms artifacts are missing (or only failed with no usable persisted artifacts),
       // allow auto-generation to proceed afterwards. Only suppress while artifacts are in-flight or completed.
-      suppressAutoGenerationRef.current = pairStatus === "in_progress" || pairStatus === "completed";
+      suppressAutoGenerationRef.current =
+        pairStatus === "in_progress" ||
+        pairStatus === "completed" ||
+        (pairStatus === "missing" &&
+          Boolean(resumeResponse) &&
+          Boolean(coverResponse) &&
+          !isMinimalResumeArtifactPayload(resumeResponse));
     };
 
     void (async () => {
