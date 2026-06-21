@@ -28,7 +28,7 @@ export type LanguageStylePassInput = {
   plan: DocumentStrategyPlan;
   roleLabel?: string | null;
   resumeSummary?: string | null;
-  resumeBullets?: string[] | null;
+  resumeBullets?: unknown[] | null;
   coverOpening?: string | null;
   coverParagraphs?: string[] | null;
   feedback?: CalibrationFeedback | null;
@@ -92,6 +92,15 @@ const REDUNDANT_MODIFIERS = [
 
 function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function toText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return typeof record.text === "string" ? record.text : "";
+  }
+  return "";
 }
 
 function cleanPunctuation(value: string): string {
@@ -187,10 +196,10 @@ function polishSummary(summary: string, input: LanguageStylePassInput, pass: Lan
   return sentences.map((sentence) => sentenceCase(stripGenericPhrases(sentence))).join(" ");
 }
 
-function polishBullets(bullets: string[], input: LanguageStylePassInput, pass: LanguageStylePass): string[] {
+function polishBullets(bullets: unknown[], input: LanguageStylePassInput, pass: LanguageStylePass): string[] {
   const seenOpenings = new Set<string>();
   return bullets.map((bullet, index) => {
-    const original = normalizeText(bullet);
+    const original = normalizeText(toText(bullet));
     const cleaned = stripGenericPhrases(original);
     const lowered = cleaned.toLowerCase();
 
@@ -280,7 +289,7 @@ export function buildLanguageStylePass(input: LanguageStylePassInput): LanguageS
     pass.issues.push(buildIssue("generic_phrase", "high", "resume.summary"));
   }
 
-  const resumeBullets = (input.resumeBullets ?? []).map(normalizeText).filter(Boolean);
+  const resumeBullets = (input.resumeBullets ?? []).map((value) => normalizeText(toText(value))).filter(Boolean);
   if (resumeBullets.length && repeatedOpenings(resumeBullets.flatMap(splitSentences))) {
     pass.issues.push(buildIssue("repetition_pattern", "medium", "resume.experience"));
   }

@@ -114,7 +114,12 @@ const EXPERIENCE_HEADER_DANGLING_SUFFIXES = new Set(
 );
 
 function trimToText(value: unknown): string {
-  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (typeof value === "string") return value.replace(/\s+/g, " ").trim();
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (typeof record.text === "string") return record.text.replace(/\s+/g, " ").trim();
+  }
+  return "";
 }
 
 function normalizeForTrailingCheck(value: string): string {

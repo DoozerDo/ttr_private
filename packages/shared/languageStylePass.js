@@ -45,6 +45,15 @@ const REDUNDANT_MODIFIERS = [
 function normalizeText(value) {
     return value.replace(/\s+/g, " ").trim();
 }
+function toText(value) {
+    if (typeof value === "string")
+        return value;
+    if (value && typeof value === "object") {
+        const record = value;
+        return typeof record.text === "string" ? record.text : "";
+    }
+    return "";
+}
 function cleanPunctuation(value) {
     return value
         .replace(/\s+([,.;:!?])/g, "$1")
@@ -130,7 +139,7 @@ function polishSummary(summary, input, pass) {
 function polishBullets(bullets, input, pass) {
     const seenOpenings = new Set();
     return bullets.map((bullet, index) => {
-        const original = normalizeText(bullet);
+        const original = normalizeText(toText(bullet));
         const cleaned = stripGenericPhrases(original);
         const lowered = cleaned.toLowerCase();
         if (countGenericMatches(original) > 0) {
@@ -203,7 +212,7 @@ function buildLanguageStylePass(input) {
             /^\s*(i am|i'm|results-driven|proven track record|dynamic leader)\b/i.test(resumeSummary))) {
         pass.issues.push(buildIssue("generic_phrase", "high", "resume.summary"));
     }
-    const resumeBullets = (input.resumeBullets ?? []).map(normalizeText).filter(Boolean);
+    const resumeBullets = (input.resumeBullets ?? []).map((value) => normalizeText(toText(value))).filter(Boolean);
     if (resumeBullets.length && repeatedOpenings(resumeBullets.flatMap(splitSentences))) {
         pass.issues.push(buildIssue("repetition_pattern", "medium", "resume.experience"));
     }

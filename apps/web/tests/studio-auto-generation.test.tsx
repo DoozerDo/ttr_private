@@ -1139,13 +1139,48 @@ describe("Studio auto-generation", () => {
         resume: {
           status: "COMPLETED",
           artifactId: "resume-hydrated-1",
-          responseBody: null,
-          content: null,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            resumeResult: {
+              status: "success",
+              generationStatus: "success",
+              generationState: "generated_usable",
+              exportReady: true,
+              qualityStatus: "pass",
+              qualityGate: { status: "pass", reasons: [] },
+              actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+              preview: {
+                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                summary: "Support leader focused on scalable operations.",
+                experience: [
+                  {
+                    company: "Cat Daddy Games",
+                    roleTitle: "Senior Producer",
+                    location: "Los Angeles, CA",
+                    dateRange: "2020 - Present",
+                    bullets: [
+                      {
+                        text: "Led support operations programs.",
+                        sourceEvidenceIds: ["evidence-1"],
+                        source: { sourceEvidenceIds: ["evidence-1"] },
+                      },
+                    ],
+                  },
+                ],
+                education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                competencies: ["Customer strategy", "Operational leadership"],
+              },
+            },
+          },
+          content: "Resume",
           usableCurrent: true,
           inputsHash: true,
           failureCode: null,
           failureMessage: null,
-          confidence: "LOW",
+          confidence: "HIGH",
           failure: null,
         },
         coverLetter: {
@@ -1157,7 +1192,16 @@ describe("Studio auto-generation", () => {
             generationStatus: "success",
             exportReady: true,
             exports: { docx: true, pdf: true },
-            preview: { coverLetter: { paragraphs: ["Hello"] } },
+            coverLetterResult: {
+              status: "success",
+              generationStatus: "success",
+              generationState: "generated_usable",
+              exportReady: true,
+              qualityStatus: "pass",
+              qualityGate: { status: "pass", reasons: [] },
+              actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+              preview: { paragraphs: ["Hello"] },
+            },
           },
           content: "Hello",
           confidence: "HIGH",
@@ -1180,6 +1224,9 @@ describe("Studio auto-generation", () => {
       expect(raw).not.toContain("\"persisted_resume_artifact_missing\"");
       expect(raw).not.toContain("\"orchestrationDecision\": \"blocked\"");
     }, { timeout: 15000 });
+
+    expectCanonicalGeneratedArtifactArea();
+    expect(screen.queryByText("Something went wrong")).toBeNull();
   }, 15000);
 
   it("still auto-generates when verification confidence is limited", async () => {
