@@ -5379,8 +5379,8 @@ export default function StudioPage() {
 	      autoGenerationInFlight,
 	      resumeGenerating,
 	      coverGenerating,
-	      // Debug payload: use the same authority source as missingOutput/UI renderability.
-	      hasResumeArtifact: hasRenderableResumeContent,
+	      // Debug payload: use the same persisted authority source as the rest of Studio orchestration.
+	      hasResumeArtifact,
 	      hasCoverLetterArtifact: hasRenderableCoverLetterContent,
 	      hasResumeArtifactPersisted,
 	      hasCoverLetterArtifactPersisted,

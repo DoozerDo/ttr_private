@@ -1419,6 +1419,9 @@ describe("Studio auto-generation", () => {
       const debug = screen.getByTestId("studio-orchestration-debug");
       const raw = debug.querySelector("pre")?.textContent ?? "";
       expect(raw).toContain("\"hasResumeArtifactPersisted\": true");
+      expect(raw).toContain("\"resumeArtifactId\": \"resume-hydrated-failed-1\"");
+      expect(raw).toContain("\"hasResumeArtifact\": true");
+      expect(raw).toContain("\"studioArtifactPairStatus\": \"completed\"");
       expect(raw).toContain("\"missingResumeOutput\": false");
       expect(raw).toContain("\"orchestrationDecision\": \"hydrate_existing_artifacts\"");
       expect(raw).not.toContain("\"missingResumeOutput\": true");
