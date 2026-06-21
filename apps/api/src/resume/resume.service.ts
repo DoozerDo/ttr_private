@@ -3092,9 +3092,11 @@ export class ResumeService {
           const persisted =
             this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
           if (!persisted || typeof persisted !== 'object') return null;
-          const usability = evaluateResumeV2Usability(persisted);
-          if (!usability.usable) return null;
-          return normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
+          const normalized = normalizeNormalizedResumeDocument(
+            persisted as NormalizedResumeDocument,
+          );
+          const validation = validateNormalizedResumeDocument(this.toTextOnlyResumeDocument(normalized));
+          return validation.valid ? normalized : null;
         } catch {
           return null;
         }
@@ -3427,12 +3429,12 @@ export class ResumeService {
         return null;
       }
     })();
-    const hasPersistedResumeV2Authority = (() => {
+    const hasPersistedResumeV2AuthorityForGeneration = (() => {
       try {
         const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
         if (!persisted || typeof persisted !== 'object') return false;
-        const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
-        return validateNormalizedResumeDocument(this.toTextOnlyResumeDocument(normalized)).valid;
+        const usability = evaluateResumeV2Usability(persisted);
+        return Boolean(usability.usable);
       } catch {
         return false;
       }
@@ -3541,7 +3543,7 @@ export class ResumeService {
 	    const insufficientBaselineDetails =
 	      getInsufficientExtractedTextDetails(effectiveBaselineText);
 	    let forcedMinimalSections: ResumeDraftSection[] | null = null;
-    if (insufficientBaselineDetails && !hasPersistedResumeV2Authority) {
+    if (insufficientBaselineDetails && !hasPersistedResumeV2AuthorityForGeneration) {
       const normalizedBaselineText = String(baselineText ?? '').trim();
       const normalizedEffectiveBaselineText = String(effectiveBaselineText ?? '').trim();
 	      if (!normalizedEffectiveBaselineText) {
