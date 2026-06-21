@@ -73,7 +73,7 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
           status: 'success',
           generationStatus: 'success',
           exportReady: true,
-          qualityGate: { status: 'pass', reasons: [] },
+          qualityGate: { status: 'failed', reasons: ['quality_failed_fixture'] },
           preview: { coverLetter: { paragraphs: ['Hello'] } },
         },
         coverLetterContent: 'Hello',
@@ -866,7 +866,7 @@ describe('StudioArtifactsService (unit): artifact record hydration metadata', ()
 });
 
 describe('StudioArtifactsService (unit): readState suppresses rejected resume artifacts', () => {
-  it('returns null resume.responseBody/content when a minimal resume artifact is rejected from preview/use', async () => {
+  it('keeps a minimal resume artifact renderable when persisted preview.resume exists', async () => {
     const studioArtifactRepository = {
       findOne: jest.fn().mockResolvedValue({
         id: 'artifact-1',
@@ -883,7 +883,7 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
             resumeGenerationMode: 'top_level_fail_safe_minimal',
             resumeFailSafeMinimalUsed: true,
           },
-          qualityGate: { status: 'pass', reasons: [] },
+          qualityGate: { status: 'failed', reasons: ['quality_failed_fixture'] },
         },
         resumeContent: 'x'.repeat(318),
         resumeFailureCode: null,
@@ -950,9 +950,103 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
     });
 
     expect(state.resume).toBeTruthy();
-    expect(state.resume?.artifactCurrent).toBe(false);
-    expect(state.resume?.responseBody).toBeNull();
-    expect(state.resume?.content).toBeNull();
+    expect((state.resumeResult as any)?.preview).toBeTruthy();
+    expect((state.resumeResult as any)?.preview?.heading?.name).toBe('Alex');
+    expect((state.resumeResult as any)?.generationState).toBe('generated_needs_correction');
+    expect((state.resumeResult as any)?.qualityStatus).toBe('needs_refinement');
+    expect((state.resumeResult as any)?.exportReady).toBe(false);
+    expect(state.resume?.responseBody).toBeTruthy();
+    expect(state.resume?.content).toBe('x'.repeat(318));
+  });
+
+  it('surfaces a diagnostic when a minimal resume artifact has no usable persisted preview model', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'artifact-2',
+        createdAt: new Date('2026-05-31T00:00:00.000Z'),
+        updatedAt: new Date('2026-05-31T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        resumeInputsHash: 'hash-1',
+        resumeResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          auditId: 'minimal:1780277132821',
+          internal: {
+            resumeGenerationMode: 'top_level_fail_safe_minimal',
+            resumeFailSafeMinimalUsed: true,
+          },
+          qualityGate: { status: 'pass', reasons: [] },
+        },
+        resumeContent: 'plain text only resume output',
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: new Date('2026-05-31T00:01:00.000Z'),
+        resumeFailedAt: null,
+        resumeMetadata: { auditId: 'minimal:1780277132821' },
+        coverLetterStatus: StudioArtifactLifecycleStatus.MISSING,
+        coverLetterInputsHash: null,
+        coverLetterResponseBody: null,
+        coverLetterContent: null,
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: null,
+        coverLetterFailedAt: null,
+        coverLetterMetadata: {},
+      } as any),
+    } as any;
+
+    const baselineRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
+    } as any;
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
+    } as any;
+    const jobRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }),
+    } as any;
+    const fitAssessmentRepository = {
+      findOne: jest.fn().mockResolvedValue({ overallScore: 90 }),
+    } as any;
+    const baselineResumeV2BackfillService = {
+      backfillLatestIfMissing: jest.fn().mockResolvedValue(null),
+    } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('hash-1');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('hash-1');
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    expect((state.errors as any[]).some((error) => error.code === 'resume_minimal_preview_missing')).toBe(true);
+    expect((state.resumeResult as any)?.preview).toBeNull();
+    expect((state.resume?.responseBody as any)?.preview).toBeUndefined();
+    expect((state.coverLetterResult as any)?.preview).toBeNull();
   });
 
   it('hydrates a fresh non-minimal resume payload from an equivalent normalized model even when preview.resume is absent and emits targeted resumeHydration diagnostics', async () => {

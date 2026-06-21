@@ -1364,13 +1364,44 @@ export class StudioArtifactsService {
         };
       }
       if (resumeIsMinimal) {
+        const minimalPreviewModel = resumeRecoverablePreviewModel;
+        if (!minimalPreviewModel) {
+          errors.push({
+            code: 'resume_minimal_preview_missing',
+            message: 'Minimal resume artifact has no usable persisted preview model.',
+            details: {
+              responseBodyPresent: Boolean((resumeRecord as any)?.responseBody),
+              resumeContentPresent: Boolean(String((resumeRecord as any)?.content ?? '').trim()),
+            },
+          });
+        }
+
+        const responseBody = normalizeRecord(resumeRecord.responseBody);
+        const canonicalResponseBody = minimalPreviewModel
+          ? {
+              ...(responseBody ?? {}),
+              preview: {
+                ...(normalizeRecord((responseBody as any)?.preview) ?? {}),
+                resume: minimalPreviewModel,
+              },
+            }
+          : responseBody;
+
         emitResumeHydrationDebug(
-          'nulled_minimal',
-          Boolean((resumeRecord as any)?.responseBody),
-          Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
-          getResumeHydrationProjectionReason(null, normalizeRecord((resumeRecord as any)?.responseBody ?? null), (resumeRecord as any)?.content ?? null),
+          minimalPreviewModel ? 'preserved_minimal_recoverable' : 'minimal_preview_missing',
+          Boolean(canonicalResponseBody),
+          Boolean(minimalPreviewModel),
+          getResumeHydrationProjectionReason(
+            minimalPreviewModel,
+            normalizeRecord((resumeRecord as any)?.responseBody ?? null),
+            (resumeRecord as any)?.content ?? null,
+          ),
         );
-        return { ...resumeRecord, responseBody: null, content: null };
+        return {
+          ...resumeRecord,
+          responseBody: canonicalResponseBody,
+          content: resumeRecord.content,
+        };
       }
       if (resumeIsStaleLegacy && !resumeIsMinimal) {
         emitResumeHydrationDebug(
