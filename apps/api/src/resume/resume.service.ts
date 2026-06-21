@@ -3429,6 +3429,16 @@ export class ResumeService {
         return null;
       }
     })();
+    const hasPersistedResumeV2Authority = (() => {
+      try {
+        const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
+        if (!persisted || typeof persisted !== 'object') return false;
+        const normalized = normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
+        return validateNormalizedResumeDocument(this.toTextOnlyResumeDocument(normalized)).valid;
+      } catch {
+        return false;
+      }
+    })();
 
 	    // When template readiness is missing or structured extraction yields zero experience headers,
 	    // degrade to a baseline-only resume draft instead of hard-blocking qualified Studio workflows.
@@ -3533,7 +3543,7 @@ export class ResumeService {
 	    const insufficientBaselineDetails =
 	      getInsufficientExtractedTextDetails(effectiveBaselineText);
 	    let forcedMinimalSections: ResumeDraftSection[] | null = null;
-	    if (insufficientBaselineDetails && !persistedResumeV2AuthorityWithExperience) {
+    if (insufficientBaselineDetails && !hasPersistedResumeV2Authority) {
       const normalizedBaselineText = String(baselineText ?? '').trim();
       const normalizedEffectiveBaselineText = String(effectiveBaselineText ?? '').trim();
 	      if (!normalizedEffectiveBaselineText) {

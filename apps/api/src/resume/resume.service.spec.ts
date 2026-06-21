@@ -5280,7 +5280,7 @@ describe('ResumeService contract', () => {
     baseline.sections = original;
   });
 
-  it('allows ResumeV2 authoritative generation to bypass baseline_file_unavailable when the latest parsed record is not verified but a usable ResumeV2 authority exists', async () => {
+  it('allows ResumeV2 authoritative generation to bypass insufficient_extracted_text when the latest parsed record is not verified but a broader persisted ResumeV2 authority exists', async () => {
     const { service, studioArtifactsService } = buildService();
     const originalSections = baseline.sections;
     const originalParsedRecords = (baseline as any).parsedRecords;
