@@ -1345,12 +1345,18 @@ describe("Studio auto-generation", () => {
       expect(raw).not.toContain("\"orchestrationDecision\": \"should_auto_generate\"");
       expect(raw).not.toContain("\"needsAutoGeneration\": true");
       expect(screen.queryByText(/Resume not generated yet/i)).toBeNull();
-      expect(screen.getByTestId("studio-instant-resume-panel")).toBeInTheDocument();
-      const resumePanel = screen.getByTestId("studio-instant-resume-panel");
-      const resumePanelScope = within(resumePanel);
-      expect(resumePanel).toBeInTheDocument();
-      expect(resumePanelScope.getByText("Alex Candidate")).toBeInTheDocument();
-      expect(resumePanelScope.getByText("Support leader focused on scalable operations.")).toBeInTheDocument();
+      const currentResumePanels = [
+        ...screen.queryAllByTestId("studio-resume-ready-panel"),
+        ...screen.queryAllByTestId("studio-resume-correction-panel"),
+      ];
+      const currentCoverPanels = [
+        ...screen.queryAllByTestId("studio-cover-ready-panel"),
+        ...screen.queryAllByTestId("studio-cover-correction-panel"),
+      ];
+      expect(currentResumePanels).toHaveLength(1);
+      expect(currentCoverPanels).toHaveLength(1);
+      expect(screen.queryByTestId("studio-instant-resume-panel")).toBeNull();
+      expect(screen.queryByTestId("studio-instant-cover-panel")).toBeNull();
       expect(screen.getByTestId("studio-cover-letter-preview-body")).toBeInTheDocument();
       expect(screen.queryByText("Something went wrong")).toBeNull();
     }, { timeout: 15000 });

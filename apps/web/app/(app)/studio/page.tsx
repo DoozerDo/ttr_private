@@ -10016,6 +10016,13 @@ export default function StudioPage() {
     !artifactContract.normalized.resumeResponse &&
     !artifactContract.normalized.coverLetterResponse;
 
+  const showArtifactMaterials =
+    !studioBlockedByNextAction &&
+    (hasAuthoritativeArtifacts ||
+      (!studioGenerationRenderState.isBlocked && !studioCardsGenerationBlocked) ||
+      resumeGating.primaryBlocker === "tier_gate" ||
+      coverGating.primaryBlocker === "tier_gate");
+
   const normalizedArtifactsTrackedRef = useRef<string | null>(null);
   useEffect(() => {
     const signature = [
@@ -10421,7 +10428,7 @@ export default function StudioPage() {
             ) : null}
             </div>
           ) : null}
-          {!shouldSuppressStalePreview ? (
+          {!shouldSuppressStalePreview && !showArtifactMaterials ? (
             <div className="grid gap-4 lg:grid-cols-2">
             {resumePresenter.status === "success" && resumeState.response ? (
               <section className="rounded-2xl border border-white/10 bg-slate-950/45 p-4" data-testid="studio-instant-resume-panel">
@@ -10918,13 +10925,6 @@ export default function StudioPage() {
     const focus = highestImpactEvidenceActions[0];
     return focus ? buildClaimVerificationHref(focus) : fitReviewHref;
   }, [buildClaimVerificationHref, fitReviewHref, highestImpactEvidenceActions]);
-
-  const showArtifactMaterials =
-    !studioBlockedByNextAction &&
-    (hasAuthoritativeArtifacts ||
-      (!studioGenerationRenderState.isBlocked && !studioCardsGenerationBlocked) ||
-      resumeGating.primaryBlocker === "tier_gate" ||
-      coverGating.primaryBlocker === "tier_gate");
 
   const canonicalStudioReadinessMessage =
     activeGenerationReadiness.status === "ready" && !activeGenerationReadiness.blocked
