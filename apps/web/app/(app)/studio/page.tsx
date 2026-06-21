@@ -5719,7 +5719,8 @@ export default function StudioPage() {
   const isHighQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "HIGH"; 
   // Low-confidence is still a signal, but score >= 80 must not block or degrade access to usable artifacts.
   const showLowQualityRecoveryLane = isLowQualityDraft && !generateNowEligible;
-  const hasUsableResume = artifactContract.reusableDecisions.resume.reusable;
+  // Resume existence authority is persisted artifact presence; quality feedback remains advisory.
+  const hasUsableResume = hasResumeArtifact;
   const hasUsableCoverLetter = artifactContract.reusableDecisions.coverLetter.reusable;
   // Canonical READY truth: if we have any usable output, behave as READY. Confidence only modulates tone.
   const isReadySuccessState = hasUsableResume || hasUsableCoverLetter;
@@ -5987,9 +5988,9 @@ export default function StudioPage() {
       if (resumeState.error) return "failed_due_to_system_error";
       if (resumeState.artifactFailure && !hasRenderableResumeContent) return "failed_due_to_system_error";
     }
-    if (resumePresenter.status === "success" && hasPersistedResumeTruth) {
+    if (hasPersistedResumeTruth) {
       // Never claim success if we cannot render/export a usable preview (e.g. missing normalized model).
-      // Treat any hydrated renderable payload as a "draft" for status purposes, even if existence flags lag.
+      // Treat any hydrated renderable payload as a "draft" for status purposes, even if presenter state lags.
       const hasDraftTruth = hasResumeDraft || Boolean(resumeState.response) || hasRenderableResumeContent;
       if (!hasDraftTruth) return "needs_correction";
       return resumeQualityPass ? "generated_successfully" : "needs_correction";

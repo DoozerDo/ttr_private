@@ -1327,6 +1327,113 @@ describe("Studio auto-generation", () => {
     expectCanonicalGeneratedArtifactArea();
   }, 15000);
 
+  it("keeps a persisted generated resume visible when quality is failed and the response is stale", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const fetchMock = installStrongFitFetches({
+      score: 71,
+      readinessStatus: "limited",
+      studioArtifactsPayload: {
+        status: "completed",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        assessmentScore: 71,
+        generationContractVersion: "studio-artifacts-v1",
+        resumeArtifactHydration: {
+          resumeArtifactId: "resume-hydrated-failed-1",
+          resumeArtifactSource: "fresh_generation",
+          resumeArtifactUpdatedAt: "2026-06-20T23:49:04.879Z",
+        },
+        resume: {
+          status: "COMPLETED",
+          usableCurrent: false,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: false,
+            exports: { docx: false, pdf: false },
+            resumeResult: {
+              status: "success",
+              generationStatus: "success",
+              generationState: "generated_needs_correction",
+              exportReady: false,
+              qualityStatus: "failed",
+              qualityGate: { status: "warn", reasons: ["Review evidence before exporting."] },
+              actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+              preview: {
+                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                summary: "Support leader focused on scalable operations.",
+                experience: [
+                  {
+                    company: "Cat Daddy Games",
+                    roleTitle: "Senior Producer",
+                    location: "Los Angeles, CA",
+                    dateRange: "2020 - Present",
+                    bullets: [
+                      {
+                        text: "Led support operations programs.",
+                        sourceEvidenceIds: ["evidence-1"],
+                        source: { sourceEvidenceIds: ["evidence-1"] },
+                      },
+                    ],
+                  },
+                ],
+                education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                competencies: ["Customer strategy", "Operational leadership"],
+              },
+            },
+          },
+          content: "Resume",
+          confidence: "LOW",
+          failure: null,
+        },
+        coverLetter: {
+          status: "COMPLETED",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          },
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+      },
+    });
+
+    setFetchImplementation(fetchMock as any);
+    renderStudio();
+
+    await waitFor(() => {
+      const debug = screen.getByTestId("studio-orchestration-debug");
+      const raw = debug.querySelector("pre")?.textContent ?? "";
+      expect(raw).toContain("\"hasResumeArtifactPersisted\": true");
+      expect(raw).toContain("\"missingResumeOutput\": false");
+      expect(raw).toContain("\"orchestrationDecision\": \"hydrate_existing_artifacts\"");
+      expect(raw).not.toContain("\"missingResumeOutput\": true");
+      expect(raw).not.toContain("\"orchestrationDecision\": \"should_auto_generate\"");
+      expect(screen.queryByText(/Resume not generated yet/i)).toBeNull();
+      expect(screen.getByTestId("studio-materials-completeness")).toHaveTextContent(
+        "Complete set: Resume + cover letter",
+      );
+      expect(screen.getByTestId("studio-resume-correction-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-ready-trust-summary")).toBeInTheDocument();
+      expect(screen.getByTestId("studio-confidence-label")).toHaveTextContent(/low/i);
+      expect(screen.queryByText("Something went wrong")).toBeNull();
+    }, { timeout: 15000 });
+  }, 15000);
+
   it("still auto-generates when verification confidence is limited", async () => {
     const fetchMock = installStrongFitFetches({ readinessStatus: "limited" });
 
