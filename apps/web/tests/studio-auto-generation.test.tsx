@@ -1152,7 +1152,10 @@ describe("Studio auto-generation", () => {
               qualityStatus: "pass",
               qualityGate: { status: "pass", reasons: [] },
               actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
-              preview: {
+              preview: null,
+            },
+            preview: {
+              resume: {
                 heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
                 summary: "Support leader focused on scalable operations.",
                 experience: [
@@ -1182,6 +1185,16 @@ describe("Studio auto-generation", () => {
           failureMessage: null,
           confidence: "HIGH",
           failure: null,
+        },
+        resumeResult: {
+          status: "success",
+          generationStatus: "success",
+          generationState: "generated_usable",
+          exportReady: true,
+          qualityStatus: "pass",
+          qualityGate: { status: "pass", reasons: [] },
+          actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+          preview: null,
         },
         coverLetter: {
           status: "completed",

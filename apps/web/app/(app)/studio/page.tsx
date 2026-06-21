@@ -712,6 +712,63 @@ function normalizeHydratedArtifactResponse(value: unknown): unknown | null {
   return value;
 }
 
+function readHydratedResumePreviewModel(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const preview = record.preview;
+  if (preview && typeof preview === "object") {
+    const nestedResume = (preview as Record<string, unknown>).resume;
+    if (nestedResume && typeof nestedResume === "object") return nestedResume as Record<string, unknown>;
+  }
+  return null;
+}
+
+function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unknown | null): unknown | null {
+  const normalizedResponse = normalizeHydratedArtifactResponse(responseBody);
+  const responseRecord = normalizedResponse && typeof normalizedResponse === "object" ? (normalizedResponse as Record<string, unknown>) : null;
+  const responseResumeResult = responseRecord?.resumeResult && typeof responseRecord.resumeResult === "object"
+    ? (responseRecord.resumeResult as Record<string, unknown>)
+    : null;
+  const responsePreview = responseRecord ? readHydratedResumePreviewModel(responseRecord) : null;
+  const responseResumeResultPreview = responseResumeResult ? readHydratedResumePreviewModel(responseResumeResult.preview) : null;
+  const fallbackResumeResult = resumeResult && typeof resumeResult === "object" ? (resumeResult as Record<string, unknown>) : null;
+  const fallbackPreview = fallbackResumeResult ? readHydratedResumePreviewModel(fallbackResumeResult.preview) : null;
+
+  if (!responseRecord) {
+    if (!fallbackResumeResult) return null;
+    if (fallbackPreview) {
+      return { resumeResult: { ...fallbackResumeResult, preview: fallbackPreview } };
+    }
+    return { resumeResult: fallbackResumeResult };
+  }
+
+  if (responseResumeResult && responseResumeResultPreview) {
+    return normalizedResponse;
+  }
+
+  const bridgedPreview = responsePreview ?? fallbackPreview;
+  if (bridgedPreview) {
+    return {
+      ...responseRecord,
+      resumeResult: {
+        ...(responseResumeResult ?? fallbackResumeResult ?? {}),
+        preview: bridgedPreview,
+      },
+    };
+  }
+
+  if (responseResumeResult) return normalizedResponse;
+
+  if (fallbackResumeResult) {
+    return {
+      ...responseRecord,
+      resumeResult: fallbackResumeResult,
+    };
+  }
+
+  return normalizedResponse;
+}
+
 function isMinimalResumeArtifactPayload(value: unknown): boolean {
   try {
     const normalized = normalizeHydratedArtifactResponse(value);
@@ -740,9 +797,10 @@ function isMinimalResumeArtifactPayload(value: unknown): boolean {
 }
 
 function extractResumeResponseFromStudioArtifacts(payload: BackendStudioArtifactsResponse): unknown | null {
-  // Studio must render resume content only from the canonical artifact contract preview (`resumeResult.preview`).
-  // Do not hydrate/merge persisted `resume.responseBody` or `resume.content` here.
-  return payload.resumeResult ? ({ resumeResult: payload.resumeResult } as unknown) : null;
+  // Hydrate the persisted resume into the canonical artifact contract shape before Studio evaluates it.
+  // The bridge only uses already-persisted responseBody/resumeResult data and promotes a missing preview
+  // into `resumeResult.preview` when the persisted artifact already contains the renderable resume model.
+  return bridgeHydratedResumeResponse(payload.resume?.responseBody ?? null, payload.resumeResult ?? null);
 }
 
 function extractCoverLetterResponseFromStudioArtifacts(payload: BackendStudioArtifactsResponse): unknown | null {
@@ -2350,12 +2408,7 @@ export default function StudioPage() {
     // Phase 1: prefer canonical artifact results when present, but keep legacy responseBody alongside it.
     const resumeResult = payload.resumeResult ?? null;
     const coverLetterResult = payload.coverLetterResult ?? null;
-    const resumeResponseWithResult =
-      resumeResult
-        ? (resumeResponse && typeof resumeResponse === "object"
-            ? ({ ...(resumeResponse as Record<string, unknown>), resumeResult } as unknown)
-            : ({ resumeResult } as unknown))
-        : resumeResponse;
+    const resumeResponseWithResult = bridgeHydratedResumeResponse(resumeResponse, resumeResult);
     const coverResponseWithResult =
       coverLetterResult
         ? (coverResponse && typeof coverResponse === "object"
@@ -2741,12 +2794,7 @@ export default function StudioPage() {
       // Phase 1: prefer canonical artifact results when present, but keep legacy responseBody alongside it.
       const resumeResult = normalizedBackendPayload ? normalizedBackendPayload.resumeResult ?? null : null;
       const coverLetterResult = normalizedBackendPayload ? normalizedBackendPayload.coverLetterResult ?? null : null;
-      const resumeResponseWithResult =
-        resumeResult
-          ? (resumeResponse && typeof resumeResponse === "object"
-              ? ({ ...(resumeResponse as Record<string, unknown>), resumeResult } as unknown)
-              : ({ resumeResult } as unknown))
-          : resumeResponse;
+      const resumeResponseWithResult = bridgeHydratedResumeResponse(resumeResponse, resumeResult);
       const coverResponseWithResult =
         coverLetterResult
           ? (coverResponse && typeof coverResponse === "object"
