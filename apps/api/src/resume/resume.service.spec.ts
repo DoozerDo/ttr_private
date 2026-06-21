@@ -5292,7 +5292,7 @@ describe('ResumeService contract', () => {
       .spyOn(service as any, 'assertResumeEvidenceBeforePersistence')
       .mockImplementation(() => undefined);
     const resumeV2Authority = {
-      heading: { name: 'Test', contactLine: 'Test' },
+      heading: { name: '', contactLine: '' },
       summary: 'Verified baseline summary.',
       experience: [
         {

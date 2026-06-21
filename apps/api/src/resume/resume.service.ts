@@ -3092,11 +3092,9 @@ export class ResumeService {
           const persisted =
             this.getLatestPersistedResumeV2Json(baseline.parsedRecords) ?? null;
           if (!persisted || typeof persisted !== 'object') return null;
-          const normalized = normalizeNormalizedResumeDocument(
-            persisted as NormalizedResumeDocument,
-          );
-          const validation = validateNormalizedResumeDocument(this.toTextOnlyResumeDocument(normalized));
-          return validation.valid ? normalized : null;
+          const usability = evaluateResumeV2Usability(persisted);
+          if (!usability.usable) return null;
+          return normalizeNormalizedResumeDocument(persisted as NormalizedResumeDocument);
         } catch {
           return null;
         }
