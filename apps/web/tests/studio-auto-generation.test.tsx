@@ -1324,10 +1324,12 @@ describe("Studio auto-generation", () => {
       expect(raw).toContain("\"studioArtifactPairStatus\": \"completed\"");
       expect(raw).toContain("\"missingResumeOutput\": false");
       expect(raw).toContain("\"orchestrationDecision\": \"hydrate_existing_artifacts\"");
+      expect(raw).toContain("\"resumeArtifactSource\": \"fresh_generation\"");
       expect(raw).not.toContain("\"missingResumeOutput\": true");
       expect(raw).not.toContain("\"orchestrationDecision\": \"should_auto_generate\"");
       expect(raw).not.toContain("\"needsAutoGeneration\": true");
       expect(screen.queryByText(/Resume not generated yet/i)).toBeNull();
+      expect(screen.getByTestId("studio-instant-resume-panel")).toBeInTheDocument();
       const resumePanel = screen.getByTestId("studio-instant-resume-panel");
       const resumePanelScope = within(resumePanel);
       expect(resumePanel).toBeInTheDocument();

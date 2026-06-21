@@ -747,6 +747,7 @@ function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unkno
     if (!fallbackResumeResult) return null;
     if (fallbackPreview) {
       return {
+        preview: { resume: fallbackPreview },
         resumeResult: {
           ...fallbackResumeResult,
           preview: fallbackPreview,
@@ -765,7 +766,29 @@ function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unkno
   }
 
   if (responseResumeResult && responseResumeResultPreview) {
-    return normalizedResponse;
+    const responseExports = responseRecord.exports && typeof responseRecord.exports === "object"
+      ? (responseRecord.exports as Record<string, unknown>)
+      : null;
+    return {
+      ...responseRecord,
+      preview: { resume: responseResumeResultPreview },
+      resumeResult: {
+        ...responseResumeResult,
+        preview: responseResumeResultPreview,
+        exportReady: true,
+        exports: {
+          docx: true,
+          pdf: true,
+          ...(responseExports ?? {}),
+        },
+        actions: {
+          ...(responseResumeResult?.actions && typeof responseResumeResult.actions === "object"
+            ? (responseResumeResult.actions as Record<string, unknown>)
+            : {}),
+          canExport: true,
+        },
+      },
+    };
   }
 
   const bridgedPreview = responsePreview ?? fallbackPreview;
@@ -775,6 +798,7 @@ function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unkno
       : null;
     return {
       ...responseRecord,
+      preview: { resume: bridgedPreview },
       resumeResult: {
         ...(responseResumeResult ?? fallbackResumeResult ?? {}),
         preview: bridgedPreview,
@@ -2408,6 +2432,10 @@ export default function StudioPage() {
     const resumeHydratedResponseWithPreview = hasHydratedResumePreview(resumeResponseWithResult)
       ? resumeResponseWithResult
       : null;
+    const resumeHydrationError =
+      resumeRecord?.responseBody && !resumeHydratedResponseWithPreview
+        ? "Persisted resume artifact exists, but Studio could not hydrate a usable resume preview."
+        : null;
 
     // Strict legacy hydration: only hydrate when the backend record is completed *and current*.
     // If a completed artifact is stale (hash mismatch after composition ruleset changes), do not
@@ -2420,7 +2448,7 @@ export default function StudioPage() {
           (hasHydratedResumePreview(current.response) ? current.response : null) ??
           (hasHydratedResumePreview(resumeResponseRef.current) ? resumeResponseRef.current : null) ??
           (hasHydratedResumePreview(resumeResponse) ? resumeResponse : null),
-        error: isResumeStaleAdvisory(current.error) ? current.error : null,
+        error: resumeHydrationError ?? (isResumeStaleAdvisory(current.error) ? current.error : null),
         tierGateError: null,
         artifactFailure: null,
       }));
@@ -2855,6 +2883,10 @@ export default function StudioPage() {
       const resumeResponseWithPreview = hasHydratedResumePreview(resumeResponseWithResult)
         ? resumeResponseWithResult
         : null;
+      const resumeHydrationError =
+        (normalizedBackendPayload?.resume?.responseBody ?? null) && !resumeResponseWithPreview
+          ? "Persisted resume artifact exists, but Studio could not hydrate a usable resume preview."
+          : null;
       const coverResponseWithResult =
         coverLetterResult
           ? (coverResponse && typeof coverResponse === "object"
@@ -2877,7 +2909,7 @@ export default function StudioPage() {
         setResumeState((current) => ({
           ...current,
           response: resumeResponseWithPreview ?? (hasHydratedResumePreview(resumeResponse) ? resumeResponse : null),
-          error: isResumeStaleAdvisory(current.error) ? current.error : null,
+          error: resumeHydrationError ?? (isResumeStaleAdvisory(current.error) ? current.error : null),
           tierGateError: null,
           artifactFailure: null,
         }));
@@ -2894,7 +2926,7 @@ export default function StudioPage() {
         setResumeState((current) => ({
           ...current,
           response: resumeResponseWithPreview ?? (hasHydratedResumePreview(resumeResponse) ? resumeResponse : null),
-          error: null,
+          error: resumeHydrationError,
           tierGateError: null,
           artifactFailure: null,
         }));
