@@ -847,12 +847,14 @@ export class CoverLettersService {
         evidence: resolveGenerationEvidence({
           baseline: draft.baseline as any,
           baselineVersionId: draft.baselineVersion.id,
-        }),
+      }),
         targetRequirements: ((input as any)?.excludedRequirements ?? []) as any,
       }).warnings as any;
       const display = this.buildSuccessDisplayPayload(eligibilityWarnings);
       const templateRenderable = await this.canRenderCoverLetterTemplate(draft);
-      const exportReady = draft.qualityGate.status === 'pass' && templateRenderable;
+      const canonicalAuthority = draft.generationAuthority === 'baseline_file';
+      const exportReady =
+        canonicalAuthority && draft.qualityGate.status === 'pass' && templateRenderable;
       const exports: DocumentGenerationExports = exportReady
         ? { docx: true, pdf: true }
         : { docx: false, pdf: false };

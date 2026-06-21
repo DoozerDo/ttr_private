@@ -5073,6 +5073,15 @@ export class ResumeService {
       );
     }
 
+    const canonicalResumeExportReady = await this.canExportResumeArtifact({
+      normalizedDocument: normalizedDocument as NormalizedResumeDocument,
+      usedStructuredBaselineTemplate,
+      qualityGate,
+      jobTitle: job?.title ?? null,
+      jobDescription: job?.rawDescription ?? null,
+      evidenceExists,
+    });
+
     if (preflightOnly) {
       emitArtifactQualityTelemetry(this.logger, {
         artifactType: 'resume',
@@ -5090,7 +5099,7 @@ export class ResumeService {
         ok: true,
         status: 'success',
         generationStatus: 'success',
-        exportReady: true,
+        exportReady: canonicalResumeExportReady,
         blocked: false,
         baselineId: baseline.id,
         baselineVersionId: baselineVersion.id,
@@ -5440,8 +5449,7 @@ export class ResumeService {
       final: qualityGate,
       repairAttempted,
     });
-	    const templateRenderable = await this.canRenderResumeTemplate(normalizedDocument as NormalizedResumeDocument);
-	    const exportable = qualityGate.status === 'pass' && templateRenderable;
+	    const exportable = canonicalResumeExportReady;
 	    // Studio eligible-score verified-only fallback: even when the pipeline bypasses the structured template lane
 	    // (e.g. minimal fallback due to weak extraction), preserve the non-blocking "zero_experience_headers"
 	    // limitation if the baseline sections contain no valid company|role headers.
@@ -5488,7 +5496,7 @@ export class ResumeService {
 	        const response: ResumeGenerationResponse & { internalTrace?: { usedEvidenceIds: string[] } } = {
 	          ok: true,
 	          status: 'success',
-	          generationStatus: 'success',
+      generationStatus: 'success',
       exportReady: exportable,
       blocked: false,
       baselineId: baseline.id,
@@ -6651,11 +6659,11 @@ export class ResumeService {
           }
         }
 
-	        const response: ResumeGenerationResponse = {
+        const response: ResumeGenerationResponse = {
           ok: true,
           status: 'success',
           generationStatus: 'success',
-          exportReady: true,
+          exportReady: false,
           blocked: false,
           baselineId: baselineForFailSafe.id,
           baselineVersionId: baselineVersionForFailSafe.id,
@@ -7095,6 +7103,31 @@ export class ResumeService {
     } catch {
       return false;
     }
+  }
+
+  private async canExportResumeArtifact(input: {
+    normalizedDocument: NormalizedResumeDocument;
+    usedStructuredBaselineTemplate: boolean;
+    qualityGate: ArtifactQualityGate;
+    jobTitle: string | null;
+    jobDescription: string | null;
+    evidenceExists: boolean;
+  }): Promise<boolean> {
+    if (!input.usedStructuredBaselineTemplate || input.qualityGate.status !== 'pass') {
+      return false;
+    }
+
+    const realDoc = validateRealResumeDocument({
+      resume: input.normalizedDocument,
+      jobTitle: input.jobTitle,
+      jobDescription: input.jobDescription,
+      evidenceExists: input.evidenceExists,
+    });
+    if (realDoc.classification !== 'usable') {
+      return false;
+    }
+
+    return this.canRenderResumeTemplate(input.normalizedDocument);
   }
 
   async getPreExportSnapshotForDiagnostics(

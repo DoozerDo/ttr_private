@@ -1123,7 +1123,7 @@ describe('ResumeService contract', () => {
 
   it('real document contract regression: fixture has only 1 meaningful role -> generated_unusable baseline_evidence_too_weak', async () => {
     const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
-    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'false';
     const originalDiagnostics = process.env.DOCGEN_DIAGNOSTICS;
     process.env.DOCGEN_DIAGNOSTICS = 'true';
     const { service } = buildService();
@@ -2895,6 +2895,74 @@ describe('ResumeService contract', () => {
     expect(JSON.stringify(preview.experience ?? [])).not.toContain('Experience entry needs correction');
     expect(preview.experience.length).toBe(1);
     expect(preview.experience[0].company).toBe('Example Co');
+  });
+
+  it('only marks canonical structured resume artifacts exportReady when the real document and template checks pass', async () => {
+    const { service } = buildService();
+    const canonicalResume = {
+      heading: { name: 'Jordan Lee', contactLine: 'jordan@example.com' },
+      summary:
+        'Operations leader with experience improving support systems and team execution. Delivers steady process improvements across cross-functional programs.',
+      experience: [
+        {
+          company: 'Example Co',
+          roleTitle: 'Program Manager',
+          dateRange: '2020 - 2024',
+          bullets: ['Led process improvements across support workflows.', 'Built reporting routines for leadership.'],
+        },
+        {
+          company: 'Acme Corp',
+          roleTitle: 'Customer Operations Lead',
+          dateRange: '2017 - 2020',
+          bullets: ['Improved triage quality and escalation handling.', 'Partnered with product and support teams.'],
+        },
+      ],
+      education: [],
+      certifications: [],
+    } as any;
+
+    await expect(
+      (service as any).canExportResumeArtifact({
+        normalizedDocument: canonicalResume,
+        usedStructuredBaselineTemplate: true,
+        qualityGate: { status: 'pass', reasons: [] },
+        jobTitle: 'Program Manager',
+        jobDescription: 'Lead customer operations programs.',
+        evidenceExists: true,
+      }),
+    ).resolves.toBe(true);
+
+    await expect(
+      (service as any).canExportResumeArtifact({
+        normalizedDocument: canonicalResume,
+        usedStructuredBaselineTemplate: false,
+        qualityGate: { status: 'pass', reasons: [] },
+        jobTitle: 'Program Manager',
+        jobDescription: 'Lead customer operations programs.',
+        evidenceExists: true,
+      }),
+    ).resolves.toBe(false);
+
+    await expect(
+      (service as any).canExportResumeArtifact({
+        normalizedDocument: {
+          ...canonicalResume,
+          experience: [
+            {
+              company: 'Example Co',
+              roleTitle: 'Program Manager',
+              dateRange: '2020 - 2024',
+              bullets: ['Led process improvements across support workflows.'],
+            },
+          ],
+        },
+        usedStructuredBaselineTemplate: true,
+        qualityGate: { status: 'pass', reasons: [] },
+        jobTitle: 'Program Manager',
+        jobDescription: 'Lead customer operations programs.',
+        evidenceExists: true,
+      }),
+    ).resolves.toBe(false);
   });
 
   it('applies preview sanitization on idempotency reuse responses before returning to client', async () => {
@@ -5174,6 +5242,8 @@ describe('ResumeService contract', () => {
   it('does not terminate Studio eligible generation with unsupported_input when resume structure is empty (degrades to minimal baseline-only resume)', async () => {
     const { service } = buildService();
     const original = baseline.sections;
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'false';
     // Paragraph-only baseline can still be cover-letter-capable, but should not hard-stop resume generation.
     baseline.sections = [
       {
@@ -5196,8 +5266,11 @@ describe('ResumeService contract', () => {
       ok: true,
       status: 'success',
       exportReady: false,
+      exports: { docx: false, pdf: false },
     });
 
+    if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+    else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     baseline.sections = original;
   });
 
@@ -5205,6 +5278,8 @@ describe('ResumeService contract', () => {
     const { service } = buildService();
     const original = baseline.sections;
     const originalScore = assessment.overallScore;
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'false';
     assessment.overallScore = 83;
 
     baseline.sections = [
@@ -5229,6 +5304,8 @@ describe('ResumeService contract', () => {
       exportReady: false,
     });
 
+    if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+    else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     assessment.overallScore = originalScore;
     baseline.sections = original;
   });
@@ -5237,9 +5314,9 @@ describe('ResumeService contract', () => {
 	    const { service, studioArtifactsService } = buildService();
 	    const original = baseline.sections;
 	    const originalScore = assessment.overallScore;
+	    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+	    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'false';
 	    assessment.overallScore = 83;
-    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
-    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
 
     baseline.sections = [
       {
@@ -5275,7 +5352,8 @@ describe('ResumeService contract', () => {
 	    expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
 	    expect(studioArtifactsService.recordResumeFailure).not.toHaveBeenCalled();
 
-	    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+	    if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+	    else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     assessment.overallScore = originalScore;
     baseline.sections = original;
   });
