@@ -750,7 +750,7 @@ function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unkno
         preview: { resume: fallbackPreview },
         resumeResult: {
           ...fallbackResumeResult,
-          preview: fallbackPreview,
+          preview: { ...(fallbackPreview as Record<string, unknown>), resume: fallbackPreview },
           exportReady: true,
           exports: { docx: true, pdf: true },
           actions: {
@@ -774,7 +774,7 @@ function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unkno
       preview: { resume: responseResumeResultPreview },
       resumeResult: {
         ...responseResumeResult,
-        preview: responseResumeResultPreview,
+        preview: { ...(responseResumeResultPreview as Record<string, unknown>), resume: responseResumeResultPreview },
         exportReady: true,
         exports: {
           docx: true,
@@ -801,7 +801,7 @@ function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unkno
       preview: { resume: bridgedPreview },
       resumeResult: {
         ...(responseResumeResult ?? fallbackResumeResult ?? {}),
-        preview: bridgedPreview,
+        preview: { ...(bridgedPreview as Record<string, unknown>), resume: bridgedPreview },
         exportReady: true,
         exports: {
           docx: true,
@@ -2443,11 +2443,7 @@ export default function StudioPage() {
     if (resumeArtifactCurrent && resumeRecord?.responseBody) {
       setResumeState((current) => ({
         ...current,
-        response:
-          resumeHydratedResponseWithPreview ??
-          (hasHydratedResumePreview(current.response) ? current.response : null) ??
-          (hasHydratedResumePreview(resumeResponseRef.current) ? resumeResponseRef.current : null) ??
-          (hasHydratedResumePreview(resumeResponse) ? resumeResponse : null),
+        response: resumeResponseWithResult ?? null,
         error: resumeHydrationError ?? (isResumeStaleAdvisory(current.error) ? current.error : null),
         tierGateError: null,
         artifactFailure: null,
@@ -2458,8 +2454,9 @@ export default function StudioPage() {
       const hydratedResumeResponse = normalizeHydratedArtifactResponse(resumeRecord?.responseBody ?? null);
       setResumeState((current) => ({
         ...current,
-        response: current.response ?? resumeResponseRef.current ?? hydratedResumeResponse ?? null,
+        response: resumeResponseWithResult ?? null,
         error:
+          resumeHydrationError ??
           current.error ??
           "Your resume draft is out of date due to recent generator improvements. Please regenerate to refresh it.",
         tierGateError: null,
@@ -2494,7 +2491,7 @@ export default function StudioPage() {
     if (resumeResponseWithResult && !resumeArtifactStale) {
       setResumeState((current) => ({
         ...current,
-        response: resumeHydratedResponseWithPreview ?? (hasHydratedResumePreview(resumeResponse) ? resumeResponse : null),
+        response: resumeResponseWithResult ?? null,
         error: null,
         tierGateError: null,
         artifactFailure: null,
@@ -2511,11 +2508,7 @@ export default function StudioPage() {
     } else if (resumeArtifactStale && resumeResponseWithResult) {
       setResumeState((current) => ({
         ...current,
-        response:
-          resumeHydratedResponseWithPreview ??
-          (hasHydratedResumePreview(current.response) ? current.response : null) ??
-          (hasHydratedResumePreview(resumeResponseRef.current) ? resumeResponseRef.current : null) ??
-          (hasHydratedResumePreview(resumeResponse) ? resumeResponse : null),
+        response: resumeResponseWithResult ?? null,
         error:
           current.error ??
           "Your resume draft is out of date due to recent generator improvements. Please regenerate to refresh it.",
@@ -2908,7 +2901,7 @@ export default function StudioPage() {
       if (resumeResponseWithResult && resumeResponseIsUsableSuccess) {
         setResumeState((current) => ({
           ...current,
-          response: resumeResponseWithPreview ?? (hasHydratedResumePreview(resumeResponse) ? resumeResponse : null),
+          response: resumeResponseWithResult ?? null,
           error: resumeHydrationError ?? (isResumeStaleAdvisory(current.error) ? current.error : null),
           tierGateError: null,
           artifactFailure: null,
@@ -2925,7 +2918,7 @@ export default function StudioPage() {
       } else if (resumeResponseWithResult) {
         setResumeState((current) => ({
           ...current,
-          response: resumeResponseWithPreview ?? (hasHydratedResumePreview(resumeResponse) ? resumeResponse : null),
+          response: resumeResponseWithResult ?? null,
           error: resumeHydrationError,
           tierGateError: null,
           artifactFailure: null,

@@ -1266,6 +1266,7 @@ describe("Studio auto-generation", () => {
         },
         resume: {
           status: "COMPLETED",
+          artifactId: "resume-hydrated-1",
           usableCurrent: false,
           inputsHash: true,
           responseBody: {
@@ -1297,6 +1298,7 @@ describe("Studio auto-generation", () => {
         },
         coverLetter: {
           status: "COMPLETED",
+          artifactId: "cover-hydrated-1",
           usableCurrent: true,
           inputsHash: true,
           responseBody: {
@@ -1319,6 +1321,11 @@ describe("Studio auto-generation", () => {
     await waitFor(() => {
       const debug = screen.getByTestId("studio-orchestration-debug");
       const raw = debug.querySelector("pre")?.textContent ?? "";
+      const snapshot = JSON.parse(raw) as Record<string, any>;
+      expect(snapshot.resumeArtifactHydration?.resumeArtifactId).toBe("resume-hydrated-1");
+      expect(snapshot.resumeState?.response).not.toBeNull();
+      expect(snapshot.resumeState?.response?.preview?.resume).toBeDefined();
+      expect(snapshot.resumeState?.response?.resumeResult?.preview?.resume).toBeDefined();
       expect(raw).toContain("\"hasResumeArtifactPersisted\": true");
       expect(raw).toContain("\"hasAnyArtifactPersisted\": true");
       expect(raw).toContain("\"studioArtifactPairStatus\": \"completed\"");

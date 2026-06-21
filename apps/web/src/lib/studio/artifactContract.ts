@@ -82,6 +82,14 @@ function normalizeResumeResponse(payload: unknown): unknown {
   return candidate;
 }
 
+function readResumeResultPreviewModel(value: unknown): ResumeModel | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const wrappedResume = record.resume;
+  if (wrappedResume && typeof wrappedResume === "object") return wrappedResume as ResumeModel;
+  return readResumeModel(value);
+}
+
 function normalizeCoverLetterResponse(payload: unknown): unknown {
   const raw = toRecord(payload);
   if (!raw) return payload;
@@ -183,25 +191,23 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
 
   const resumeResult = toRecord(normalizedResumeResponse)?.resumeResult as ArtifactGenerationResult<unknown> | undefined;
   const coverLetterResult = toRecord(normalizedCoverLetterResponse)?.coverLetterResult as ArtifactGenerationResult<unknown> | undefined;
+  const resumePreviewModel = readResumeResultPreviewModel(resumeResult?.preview);
 
   const resumePresenter = presentResumeGeneration(
-    resumeResult?.preview && typeof resumeResult.preview === "object"
+    resumePreviewModel
       ? {
           ...(toRecord(normalizedResumeResponse) ?? {}),
           status: "success",
           generationStatus: "success",
-          exportReady: resumeResult.exportReady === true,
-          exports: resumeResult.exports ?? null,
-          preview: { resume: resumeResult.preview },
+          exportReady: resumeResult?.exportReady === true,
+          exports: resumeResult?.exports ?? null,
+          preview: { resume: resumePreviewModel },
         }
       : normalizedResumeResponse,
   );
   const coverPresenter = presentCoverLetterGeneration(normalizedCoverLetterResponse);
 
-  const resumeModel: ResumeModel | null =
-    resumeResult?.preview && typeof resumeResult.preview === "object"
-      ? (resumeResult.preview as ResumeModel)
-      : null;
+  const resumeModel: ResumeModel | null = resumePreviewModel;
   const coverParagraphs = (() => {
     const previewRecord = coverLetterResult?.preview && typeof coverLetterResult.preview === "object"
       ? (coverLetterResult.preview as Record<string, unknown>)
