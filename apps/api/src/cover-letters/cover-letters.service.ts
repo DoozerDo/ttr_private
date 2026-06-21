@@ -851,11 +851,15 @@ export class CoverLettersService {
         targetRequirements: ((input as any)?.excludedRequirements ?? []) as any,
       }).warnings as any;
       const display = this.buildSuccessDisplayPayload(eligibilityWarnings);
-      const exports: DocumentGenerationExports = { docx: true, pdf: true };
+      const templateRenderable = await this.canRenderCoverLetterTemplate(draft);
+      const exportReady = draft.qualityGate.status === 'pass' && templateRenderable;
+      const exports: DocumentGenerationExports = exportReady
+        ? { docx: true, pdf: true }
+        : { docx: false, pdf: false };
       const response = {
         status: 'success',
         generationStatus: 'success',
-        exportReady: true,
+        exportReady,
         ...(draft.qualityGate
           ? {
               quality:
@@ -2267,6 +2271,30 @@ export class CoverLettersService {
         href: '/results',
       },
     };
+  }
+
+  private async canRenderCoverLetterTemplate(draft: CoverLetterDraft): Promise<boolean> {
+    try {
+      const identity = resolveBaselineIdentity(draft.baseline);
+      const model = mapCoverLetterResultToModel(
+        draft.generation,
+        identity,
+        draft.jobContext,
+      );
+      const template = getDocxTemplate<CoverLetterDocxModel>(
+        'cover_letter',
+        DEFAULT_COVER_LETTER_TEMPLATE_KEY,
+      );
+      const renderContext: DocxRenderContextBase = {
+        templateKey: DEFAULT_COVER_LETTER_TEMPLATE_KEY,
+        font: 'Calibri',
+        margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
+      };
+      await template.render(model, renderContext);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private buildGenerationDedupeKey(input: {

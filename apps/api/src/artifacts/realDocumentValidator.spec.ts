@@ -16,6 +16,22 @@ describe('real document contract', () => {
     expect(result.reasonCodes).toContain('resume_contract:summary_too_thin');
   });
 
+  it('marks summary-only resume drafts as generated_unusable', () => {
+    const result = validateRealResumeDocument({
+      resume: {
+        heading: { name: 'Test', contactLine: 'x' },
+        summary:
+          'Experienced support operations leader with clear ownership and reliable follow through.',
+        experience: [],
+      } as any,
+      jobTitle: 'Director of Support Operations',
+      jobDescription: 'Own support operations.',
+      evidenceExists: false,
+    });
+    expect(result.classification).toBe('generated_unusable');
+    expect(result.reasonCodes).toContain('resume_contract:missing_experience_section');
+  });
+
   it('marks generic cover letters as generated_unusable', () => {
     const result = validateRealCoverLetterDocument({
       paragraphs: ['Hello', 'I am passionate about working in a fast-paced environment.', 'Thanks'],
@@ -27,4 +43,3 @@ describe('real document contract', () => {
     expect(result.reasonCodes).toContain('cover_contract:missing_company');
   });
 });
-

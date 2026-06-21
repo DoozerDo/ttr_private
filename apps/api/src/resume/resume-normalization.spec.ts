@@ -1256,6 +1256,60 @@ describe('resume-normalization', () => {
     expect(educationSection?.items).toHaveLength(1);
   });
 
+  it('renders certifications in the canonical resume template and plain-text export', async () => {
+    const document = normalizeNormalizedResumeDocument({
+      heading: {
+        name: 'Alex Candidate',
+        contactLine: 'alex@example.com',
+      },
+      summary:
+        'Experienced operations leader with a strong background in escalation management and process improvement.',
+      competencies: ['Process improvement', 'Escalation management'],
+      coreCompetencies: ['Process improvement', 'Escalation management'],
+      experience: [
+        {
+          company: 'Acme Corp',
+          roleTitle: 'Support Operations Lead',
+          dateRange: '2020 - 2024',
+          bullets: [
+            'Led incident response and playbooks across support operations.',
+            'Improved SLA reporting and routing clarity for cross-functional teams.',
+          ],
+        },
+      ],
+      education: [
+        {
+          institution: 'State University',
+          degree: 'B.S. Business',
+          location: 'Seattle, WA',
+        },
+      ],
+      additionalSections: [
+        {
+          title: 'Certifications',
+          items: [
+            'AWS Certified Solutions Architect | Amazon | 2024',
+            'ITIL Foundation',
+          ],
+        },
+      ],
+    } as any);
+
+    const model = mapNormalizedResumeToDocxModel(document);
+    const certifications = model.sections.find((section) => section.key === 'certifications');
+    expect(certifications?.items).toHaveLength(2);
+
+    const xml = await renderDocumentXml(model);
+    expect(xml).toContain('CERTIFICATIONS');
+    expect(xml).toContain('AWS Certified Solutions Architect');
+    expect(xml).toContain('ITIL Foundation');
+
+    const plain = buildResumePlainText(document);
+    expect(plain).toContain('Certifications');
+    expect(plain).toContain('AWS Certified Solutions Architect');
+    expect(plain).toContain('ITIL Foundation');
+  });
+
   it('applies generalized structure rules across gaming, support, and business operation fixtures', async () => {
     const fixtures = [
       {

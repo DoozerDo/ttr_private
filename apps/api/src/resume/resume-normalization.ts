@@ -4,6 +4,7 @@ import type {
   ExperienceItem,
   ResumeDocxModel,
   ResumeDocxSection,
+  ResumeCertificationItem,
   ResumeEducationItem,
   ResumeOtherItem,
   ResumeSectionItem,
@@ -1369,6 +1370,54 @@ export function normalizeNormalizedResumeDocument(
   return sanitizeNormalizedResumeDocument(document);
 }
 
+function isCertificationSectionTitle(value?: string | null): boolean {
+  const normalized = normalizeLine(value ?? '');
+  if (!normalized) return false;
+  return /\bcertifications?\b/i.test(normalized);
+}
+
+function parseCertificationLine(value: string): ResumeCertificationItem | null {
+  const cleaned = normalizeLine(value).replace(BULLET_PATTERN, '');
+  if (!cleaned) return null;
+
+  const parts = cleaned
+    .split('|')
+    .map((part) => normalizeLine(part))
+    .filter(Boolean);
+  if (!parts.length) return null;
+
+  const [title, organization, dateRange] = parts;
+  const item: ResumeCertificationItem = { title };
+  if (organization) item.organization = organization;
+  if (dateRange) item.dateRange = dateRange;
+  return item;
+}
+
+function collectCertificationItems(
+  sections?: NormalizedResumeDocument['additionalSections'],
+): ResumeCertificationItem[] {
+  const seen = new Set<string>();
+  const items: ResumeCertificationItem[] = [];
+
+  for (const section of sections ?? []) {
+    if (!isCertificationSectionTitle(section.title)) continue;
+    for (const rawLine of section.items ?? []) {
+      const parsed = parseCertificationLine(rawLine);
+      if (!parsed) continue;
+      const key = [parsed.title, parsed.organization ?? '', parsed.dateRange ?? '']
+        .map((part) => part.toLowerCase())
+        .join('|');
+      if (!key.replace(/\|/g, '').trim() || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      items.push(parsed);
+    }
+  }
+
+  return items;
+}
+
 export function mapNormalizedResumeToDocxModel(
   document: NormalizedResumeDocument,
 ): ResumeDocxModel {
@@ -1416,11 +1465,20 @@ export function mapNormalizedResumeToDocxModel(
     sections.push({ key: 'education', title: 'Education', items });
   }
 
+  const certificationItems = collectCertificationItems(document.additionalSections);
+  if (certificationItems.length) {
+    sections.push({ key: 'certifications', title: 'Certifications', items: certificationItems });
+  }
+
   if (document.additionalSections?.length) {
-    const items: ResumeOtherItem[] = document.additionalSections.map((section) => ({
-      lines: [section.title, ...section.items].filter((line) => !isPaginationArtifact(line)),
-    }));
-    sections.push({ key: 'other', title: 'Additional Information', items: items as ResumeSectionItem[] });
+    const items: ResumeOtherItem[] = document.additionalSections
+      .filter((section) => !isCertificationSectionTitle(section.title))
+      .map((section) => ({
+        lines: [section.title, ...section.items].filter((line) => !isPaginationArtifact(line)),
+      }));
+    if (items.length) {
+      sections.push({ key: 'other', title: 'Additional Information', items: items as ResumeSectionItem[] });
+    }
   }
 
   return {
@@ -1547,6 +1605,19 @@ export function buildResumePlainText(document: NormalizedResumeDocument): string
       const secondary = [entry.institution, entry.location].filter(Boolean).join(' | ');
       if (secondary) {
         lines.push(secondary);
+      }
+      lines.push('');
+    });
+    lines.push('');
+  }
+
+  const certificationItems = collectCertificationItems(document.additionalSections);
+  if (certificationItems.length) {
+    lines.push('Certifications');
+    certificationItems.forEach((entry) => {
+      const line = [entry.title, entry.organization, entry.dateRange].filter(Boolean).join(' | ');
+      if (line) {
+        lines.push(line);
       }
       lines.push('');
     });

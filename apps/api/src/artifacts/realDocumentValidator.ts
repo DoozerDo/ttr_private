@@ -57,6 +57,9 @@ export function validateRealResumeDocument(input: {
   if (summary && !hasRoleIdentity(summary)) reasons.push('resume_contract:missing_role_identity');
 
   const experience = Array.isArray((resume as any).experience) ? ((resume as any).experience as any[]) : [];
+  if (experience.length === 0) {
+    reasons.push('resume_contract:missing_experience_section');
+  }
   const meaningfulEntries = experience.filter((e) => trimToText(e?.company) && trimToText(e?.roleTitle));
   if (input.evidenceExists && meaningfulEntries.length < 2) reasons.push('resume_contract:insufficient_experience_entries');
 
@@ -126,4 +129,3 @@ export function validateRealCoverLetterDocument(input: {
       'We generated a draft, but it is not strong enough to use yet. Regenerate or refine your source inputs before exporting.',
   };
 }
-

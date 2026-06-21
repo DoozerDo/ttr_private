@@ -5440,7 +5440,8 @@ export class ResumeService {
       final: qualityGate,
       repairAttempted,
     });
-	    const exportable = qualityGate.status === 'pass';
+	    const templateRenderable = await this.canRenderResumeTemplate(normalizedDocument as NormalizedResumeDocument);
+	    const exportable = qualityGate.status === 'pass' && templateRenderable;
 	    // Studio eligible-score verified-only fallback: even when the pipeline bypasses the structured template lane
 	    // (e.g. minimal fallback due to weak extraction), preserve the non-blocking "zero_experience_headers"
 	    // limitation if the baseline sections contain no valid company|role headers.
@@ -7073,6 +7074,27 @@ export class ResumeService {
       });
     }
     return mapNormalizedResumeToDocxModel(normalizedDocument);
+  }
+
+  private async canRenderResumeTemplate(normalizedDocument: NormalizedResumeDocument): Promise<boolean> {
+    try {
+      const docxModel = await this.buildDocxModelFromGeneration({
+        normalizedDocument,
+      });
+      const template = getDocxTemplate<ResumeDocxModel>(
+        'resume',
+        DEFAULT_RESUME_TEMPLATE_KEY,
+      );
+      const renderContext: DocxRenderContextBase = {
+        templateKey: DEFAULT_RESUME_TEMPLATE_KEY,
+        font: 'Calibri',
+        margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
+      };
+      await template.render(docxModel, renderContext);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async getPreExportSnapshotForDiagnostics(

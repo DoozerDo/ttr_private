@@ -1,5 +1,6 @@
 import { UnprocessableEntityException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import JSZip from 'jszip';
 import { CoverLettersService } from './cover-letters.service';
 import { Baseline } from '../baseline/baseline.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
@@ -10,6 +11,9 @@ import { ComplianceAction, ComplianceFlagSeverity } from '../compliance/complian
 import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
+import { DEFAULT_COVER_LETTER_TEMPLATE_KEY, getDocxTemplate } from '../docx-templates/docx-template.registry';
+import { mapCoverLetterResultToModel } from '../docx-templates/mappers/cover-letter-result-to-model';
+import type { CoverLetterDocxModel } from '../docx-templates/docx-template.types';
 import { buildDalenDeterministicBaselineSections } from '../resume/__fixtures__/dalen-deterministic-baseline.fixture';
 
 const baseline: Partial<Baseline> = {
@@ -755,6 +759,111 @@ describe('CoverLettersService contract', () => {
       }),
     );
     buildDraftSpy.mockRestore();
+  });
+
+  it('does not mark a cover letter exportReady when the quality gate needs refinement', async () => {
+    const { service } = buildService();
+    const buildDraftSpy = jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({
+      baseline,
+      baselineVersion,
+      job,
+      analysisAssessment: assessment,
+      allowedBlocks: [],
+      templateReadiness: {
+        canGenerateResume: true,
+        canGenerateCoverLetter: true,
+        hardBlockReasons: [],
+        warnings: [],
+        stats: { totalExperience: 1, validExperience: 1, invalidExperience: 0 },
+      },
+      jobContext: {
+        id: 'job-1',
+        title: 'Program Manager',
+        company: 'Example Co',
+        responsibilities: [],
+        requirements: [],
+      },
+      jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
+      closingTemplateKey: 'default',
+      generationInputsHash: 'hash',
+      generation: {
+        document: {
+          senderHeading: { name: 'Jordan Lee' },
+          salutation: 'Dear Hiring Team,',
+          opening: 'Opening.',
+          bodyParagraphs: ['Body one.', 'Body two.'],
+          closingParagraph: 'Closing.',
+          signoff: 'Sincerely,',
+          signatureName: 'Jordan Lee',
+        },
+        content: 'Dear Hiring Team,\\n\\nOpening.\\n\\nBody one.\\n\\nBody two.\\n\\nClosing.\\n\\nSincerely,\\n\\nJordan Lee',
+        wordCount: 260,
+        greeting: 'Dear Hiring Team,',
+        paragraphs: ['Opening.', 'Body one.', 'Body two.'],
+        closingParagraphs: ['Closing.'],
+        paragraphEvidence: [],
+      },
+      complianceResult: {
+        normalizedContent: 'This cover letter still needs refinement.',
+        complianceFlags: [],
+        blocked: false,
+        audit: { id: 'audit-1', baselineVersionHash: 'hash-1' },
+      },
+      qualityGate: { status: 'needs_refinement', reasons: ['missing_letter_structure'] },
+      firstPassQualityGate: { status: 'needs_refinement', reasons: ['missing_letter_structure'] },
+      qualityRepairAttempted: false,
+    });
+
+    const result = await service.generateCoverLetter('user-1', request as any);
+
+    expect(result.status).toBe('success');
+    expect(result.exportReady).toBe(false);
+    expect(result.exports).toEqual({ docx: false, pdf: false });
+    buildDraftSpy.mockRestore();
+  });
+
+  it('renders the canonical cover-letter template with the expected structure', async () => {
+    const template = getDocxTemplate<CoverLetterDocxModel>('cover_letter', DEFAULT_COVER_LETTER_TEMPLATE_KEY);
+    const model = mapCoverLetterResultToModel(
+      {
+        document: {
+          senderHeading: { name: 'Jordan Lee', contactLine: 'jordan@example.com' },
+          dateLine: 'June 21, 2026',
+          recipientLine: ['Program Manager', 'Example Co'],
+          salutation: 'Dear Hiring Team,',
+          opening: 'Opening paragraph.',
+          bodyParagraphs: ['Body paragraph one.', 'Body paragraph two.'],
+          closingParagraph: 'Closing paragraph.',
+          signoff: 'Sincerely,',
+          signatureName: 'Jordan Lee',
+        },
+        content: 'Dear Hiring Team,\n\nOpening paragraph.\n\nBody paragraph one.\n\nBody paragraph two.\n\nClosing paragraph.\n\nSincerely,\n\nJordan Lee',
+        wordCount: 28,
+        greeting: 'Dear Hiring Team,',
+        paragraphs: ['Opening paragraph.', 'Body paragraph one.', 'Body paragraph two.'],
+        closingParagraphs: ['Closing paragraph.'],
+        salutation: 'Dear Hiring Team,',
+        closing: 'Sincerely,\nJordan Lee',
+        traceMap: {},
+      } as any,
+      undefined,
+      { title: 'Program Manager', company: 'Example Co' },
+      { dateLine: 'June 21, 2026' },
+    );
+    const result = await template.render(model, {
+      templateKey: DEFAULT_COVER_LETTER_TEMPLATE_KEY,
+      font: 'Calibri',
+      margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
+    });
+    expect(result.buffer.byteLength).toBeGreaterThan(0);
+
+    const zip = await JSZip.loadAsync(result.buffer);
+    const documentXml = await zip.file('word/document.xml')?.async('string');
+    expect(documentXml).toContain('Dear Hiring Team,');
+    expect(documentXml).toContain('Sincerely,');
+    expect(documentXml).toContain('Jordan Lee');
+    expect(documentXml).toContain('Program Manager');
+    expect(documentXml).toContain('Example Co');
   });
 
   it('generates a cover letter when analysisId is omitted but a recent assessment exists', async () => {
