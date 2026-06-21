@@ -207,42 +207,88 @@ function sanitizeStoredResumeResponseBody(value: Record<string, unknown> | null)
   };
 }
 
-function extractCanonicalResumePreviewModel(
-  responseBody: Record<string, unknown> | null,
-): Record<string, unknown> | null {
-  if (!responseBody) return null;
-
-  const preview = normalizeRecord((responseBody as any).preview);
-  const previewResume = normalizeRecord(preview?.resume);
-  if (previewResume) return previewResume;
-
-  const candidateSources = [
-    (responseBody as any).previewResume,
-    (responseBody as any).normalizedDocument,
-    (responseBody as any).normalizedResume,
-    (responseBody as any).resume,
-    (responseBody as any).canonicalResume,
-    (responseBody as any).model,
-  ];
-
-  for (const candidateSource of candidateSources) {
-    const candidate = normalizeRecord(candidateSource);
-    if (!candidate) continue;
-
-    const nestedPreview = normalizeRecord(candidate.preview);
-    const nestedPreviewResume = normalizeRecord(nestedPreview?.resume);
-    if (nestedPreviewResume) return nestedPreviewResume;
-
-    const candidateResume = normalizeRecord(candidate.resume);
-    if (candidateResume) return candidateResume;
-
-    const hasCanonicalResumeShape =
-      Boolean(candidate.heading && typeof candidate.heading === 'object') &&
-      Array.isArray((candidate as any).experience);
-    if (hasCanonicalResumeShape) return candidate;
+function parseStructuredRecord(value: unknown): Record<string, unknown> | null {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
+    try {
+      return parseStructuredRecord(JSON.parse(trimmed));
+    } catch {
+      return null;
+    }
   }
+  if (typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
 
-  return null;
+function isCanonicalResumeShape(candidate: Record<string, unknown>): boolean {
+  return Boolean(
+    candidate.heading && typeof candidate.heading === 'object' &&
+      (Array.isArray(candidate.experience) ||
+        typeof candidate.summary === 'string' ||
+        Array.isArray(candidate.education) ||
+        Array.isArray(candidate.competencies) ||
+        Array.isArray(candidate.coreCompetencies)),
+  );
+}
+
+function extractCanonicalResumePreviewModel(
+  responseBody: unknown,
+  content?: unknown,
+): Record<string, unknown> | null {
+  const inspect = (value: unknown): Record<string, unknown> | null => {
+    const record = parseStructuredRecord(value);
+    if (!record) return null;
+
+    const preview = parseStructuredRecord((record as any).preview);
+    const previewResume = parseStructuredRecord(preview?.resume);
+    if (previewResume) return previewResume;
+    if (preview && isCanonicalResumeShape(preview)) return preview;
+
+    const resumeResult = parseStructuredRecord((record as any).resumeResult);
+    const resumeResultPreview = parseStructuredRecord(resumeResult?.preview);
+    const resumeResultPreviewResume = parseStructuredRecord(resumeResultPreview?.resume);
+    if (resumeResultPreviewResume) return resumeResultPreviewResume;
+    if (resumeResultPreview && isCanonicalResumeShape(resumeResultPreview)) return resumeResultPreview;
+
+    const candidateSources = [
+      (record as any).previewResume,
+      (record as any).normalizedDocument,
+      (record as any).normalizedResume,
+      (record as any).resume,
+      (record as any).canonicalResume,
+      (record as any).model,
+    ];
+
+    for (const candidateSource of candidateSources) {
+      const candidate = inspect(candidateSource);
+      if (candidate) return candidate;
+    }
+
+    if (isCanonicalResumeShape(record)) return record;
+    return null;
+  };
+
+  return inspect(responseBody) ?? inspect((responseBody as any)?.content) ?? inspect(content);
+}
+
+function extractCanonicalResumePreviewModelFromRecord(
+  record: { responseBody?: unknown; content?: unknown } | null,
+): Record<string, unknown> | null {
+  if (!record) return null;
+  return extractCanonicalResumePreviewModel(record.responseBody, record.content);
+}
+
+function getResumeHydrationProjectionReason(
+  previewModel: Record<string, unknown> | null,
+  responseBody: unknown,
+  content: unknown,
+): string {
+  if (previewModel) return 'usable_resume_model_promoted';
+  if (extractCanonicalResumePreviewModel(responseBody, content)) return 'usable_resume_model_promoted';
+  return 'usable_resume_model_missing';
 }
 
 function shouldDebugDocgen() {
@@ -1177,16 +1223,9 @@ export class StudioArtifactsService {
     const debugTargetArtifactId = 'c3696092-8b36-468e-b0f7-54e19e666ea4';
     const shouldEmitResumeHydrationDebug = String(authoritativeArtifactId ?? '') === debugTargetArtifactId;
 
-    const resumeRenderablePreviewModel = (() => {
-      if (!resumeRecord) return null;
-      const previewResume = normalizeRecord((resumeRecord.responseBody as any)?.preview?.resume ?? null);
-      return previewResume;
-    })();
+    const resumeRenderablePreviewModel = extractCanonicalResumePreviewModelFromRecord(resumeRecord);
 
-    const resumeRecoverablePreviewModel = (() => {
-      if (!resumeRecord) return null;
-      return extractCanonicalResumePreviewModel(resumeRecord.responseBody);
-    })();
+    const resumeRecoverablePreviewModel = resumeRenderablePreviewModel;
 
     const resumePreviewRenderable = Boolean(resumeRenderablePreviewModel);
 
@@ -1250,7 +1289,12 @@ export class StudioArtifactsService {
       if (!resumeRecord) return resumeRecord;
       // Never erase a renderable preview payload before canonical shaping.
       // Export eligibility is enforced at the resumeResult layer below.
-      const emitResumeHydrationDebug = (branchTaken: string, responseBodyPresent: boolean, previewResumePresent: boolean) => {
+      const emitResumeHydrationDebug = (
+        branchTaken: string,
+        responseBodyPresent: boolean,
+        previewResumePresent: boolean,
+        projectionReason: string,
+      ) => {
         if (!shouldEmitResumeHydrationDebug) return;
         resumeHydrationDebug = {
           loadedRecordId: String((resumeRecord as any)?.artifactId ?? ''),
@@ -1272,6 +1316,7 @@ export class StudioArtifactsService {
           resumeIsMinimal,
           resumeIsStaleLegacy,
           resumeRecordForResultBranchTaken: branchTaken,
+          resumeHydrationProjectionReason: projectionReason,
           resumeRecordForResultResponseBodyPresent: responseBodyPresent,
           resumeRecordForResultPreviewResumePresent: previewResumePresent,
           resumeRecordForResultHasResponseBody: responseBodyPresent,
@@ -1282,26 +1327,35 @@ export class StudioArtifactsService {
         };
       };
       if (!resumePreviewRenderable && !resumeHasRecoverablePayload) {
-        emitResumeHydrationDebug('nulled_non_renderable', false, false);
+        emitResumeHydrationDebug(
+          'nulled_non_renderable',
+          false,
+          false,
+          getResumeHydrationProjectionReason(null, normalizeRecord((resumeRecord as any)?.responseBody ?? null), (resumeRecord as any)?.content ?? null),
+        );
         return { ...resumeRecord, responseBody: null, content: null };
       }
       if (!resumeIsMinimal && resumeHasRecoverablePayload) {
         const responseBody = normalizeRecord(resumeRecord.responseBody);
         const canonicalPreviewResume = resumeRecoverablePreviewModel;
-        const canonicalResponseBody =
-          responseBody && canonicalPreviewResume
-            ? {
-                ...responseBody,
-                preview: {
-                  ...(normalizeRecord((responseBody as any).preview) ?? {}),
-                  resume: canonicalPreviewResume,
-                },
-              }
-            : responseBody;
+        const canonicalResponseBody = canonicalPreviewResume
+          ? {
+              ...(responseBody ?? {}),
+              preview: {
+                ...(normalizeRecord((responseBody as any)?.preview) ?? {}),
+                resume: canonicalPreviewResume,
+              },
+            }
+          : responseBody;
         emitResumeHydrationDebug(
           'preserved_recoverable',
           Boolean(canonicalResponseBody),
           Boolean(canonicalPreviewResume),
+          getResumeHydrationProjectionReason(
+            canonicalPreviewResume,
+            normalizeRecord((resumeRecord as any)?.responseBody ?? null),
+            (resumeRecord as any)?.content ?? null,
+          ),
         );
         return {
           ...resumeRecord,
@@ -1310,17 +1364,36 @@ export class StudioArtifactsService {
         };
       }
       if (resumeIsMinimal) {
-        emitResumeHydrationDebug('nulled_minimal', Boolean((resumeRecord as any)?.responseBody), Boolean((resumeRecord as any)?.responseBody?.preview?.resume));
+        emitResumeHydrationDebug(
+          'nulled_minimal',
+          Boolean((resumeRecord as any)?.responseBody),
+          Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+          getResumeHydrationProjectionReason(null, normalizeRecord((resumeRecord as any)?.responseBody ?? null), (resumeRecord as any)?.content ?? null),
+        );
         return { ...resumeRecord, responseBody: null, content: null };
       }
       if (resumeIsStaleLegacy && !resumeIsMinimal) {
-        emitResumeHydrationDebug('nulled_stale_legacy', Boolean((resumeRecord as any)?.responseBody), Boolean((resumeRecord as any)?.responseBody?.preview?.resume));
+        emitResumeHydrationDebug(
+          'nulled_stale_legacy',
+          Boolean((resumeRecord as any)?.responseBody),
+          Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+          getResumeHydrationProjectionReason(
+            resumeRecoverablePreviewModel,
+            normalizeRecord((resumeRecord as any)?.responseBody ?? null),
+            (resumeRecord as any)?.content ?? null,
+          ),
+        );
         return { ...resumeRecord, responseBody: null, content: null };
       }
       emitResumeHydrationDebug(
         resumeExportEligible ? 'preserved_renderable' : 'preserved_recoverable',
         Boolean((resumeRecord as any)?.responseBody),
         Boolean((resumeRecord as any)?.responseBody?.preview?.resume),
+        getResumeHydrationProjectionReason(
+          resumeRecoverablePreviewModel,
+          normalizeRecord((resumeRecord as any)?.responseBody ?? null),
+          (resumeRecord as any)?.content ?? null,
+        ),
       );
       return resumeRecord;
     })();
@@ -1357,6 +1430,11 @@ export class StudioArtifactsService {
         resumePreviewRenderable,
         resumeIsMinimal,
         resumeIsStaleLegacy,
+        resumeHydrationProjectionReason: getResumeHydrationProjectionReason(
+          resumeRenderablePreviewModel,
+          normalizeRecord((resumeRecord as any)?.responseBody ?? null),
+          (resumeRecord as any)?.content ?? null,
+        ),
         resumeRecordForResultBranchTaken: 'no_resume_record',
         resumeRecordForResultResponseBodyPresent: false,
         resumeRecordForResultHasResponseBody: false,
@@ -1642,7 +1720,7 @@ export class StudioArtifactsService {
       : null;
     const previewModel =
       artifact === 'resume'
-        ? preview?.resume ?? null
+        ? extractCanonicalResumePreviewModel(responseBody, record.content) ?? preview?.resume ?? null
         : preview?.coverLetter ?? null;
     const qualityGate =
       responseBody && typeof responseBody.qualityGate === 'object'
