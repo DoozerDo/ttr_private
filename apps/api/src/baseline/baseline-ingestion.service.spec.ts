@@ -61,4 +61,23 @@ describe('BaselineIngestionService', () => {
     expect(parsed[0].evidence[0].metrics.length).toBeGreaterThan(0);
     expect(parsed[0].evidence[0].text).toContain('Led strategy');
   });
+
+  it('drops contact, header, and summary noise from experience evidence', () => {
+    const context = { missingFields: [], ambiguityFlags: [], lowConfidence: [] };
+    const block = [
+      'Acme Corp | Senior Product Manager | May 2020 - Present',
+      'jane.doe@example.com | Seattle, WA',
+      'Professional Summary',
+      'Remote Dec 2022 - Aug 2025',
+      '- Led strategy that improved conversion by 25%',
+      '- Drove $120,000 in savings',
+    ].join('\n');
+
+    const parsed = (service as any).parseExperienceBlock(block, context);
+    expect(parsed).toHaveLength(1);
+    const evidenceTexts = parsed[0].evidence.map((entry: any) => String(entry?.text ?? '')).join(' | ');
+    expect(evidenceTexts).toContain('Led strategy that improved conversion by 25%');
+    expect(evidenceTexts).toContain('Drove $120,000 in savings');
+    expect(evidenceTexts).not.toMatch(/jane\.doe@example\.com|Seattle, WA|Professional Summary|Remote Dec 2022/i);
+  });
 });

@@ -50,6 +50,34 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
   });
 
+  it('fails closed instead of promoting summary-only fallback experience into bullets', () => {
+    const parsedBaseline: Record<string, unknown> = {
+      baseline_id: 'baseline-summary-only-1',
+      identity: { full_name: 'Summary Only', location: 'Summary City' },
+      experience: [
+        {
+          company_name: 'Acme',
+          role_title: 'Engineer',
+          summary: 'Professional Summary',
+          start_date: '2020',
+          end_date: '2021',
+        },
+      ],
+    };
+
+    expect(() => buildValidatedResumeV2FromParsedBaseline(parsedBaseline)).toThrow(
+      UnprocessableEntityException,
+    );
+    try {
+      buildValidatedResumeV2FromParsedBaseline(parsedBaseline);
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      const body = (error as UnprocessableEntityException).getResponse() as any;
+      expect(String(body?.error?.code ?? '')).toBe('baseline_resume_v2_ingestion_failed');
+      expect(String(body?.error?.message ?? '')).toMatch(/did not produce any usable experience entries/i);
+    }
+  });
+
   it('accepts nested field shapes (company.name, roleTitle.value) and does not drop usable experience entries', () => {
     const parsedBaseline: Record<string, unknown> = {
       baseline_id: 'baseline-nested-1',

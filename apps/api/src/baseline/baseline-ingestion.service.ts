@@ -291,12 +291,21 @@ export class BaselineIngestionService {
       context.missingFields.push('experience.company_or_role');
       return [];
     }
-    const evidence = body.flatMap((line) => this.splitIntoEvidence(line)).map((text) => ({
+    const evidence = body
+      .flatMap((line) => this.splitIntoEvidence(line))
+      .map((text) => this.cleanEvidenceText(text))
+      .filter((text) => text.length > 0 && !this.isExperienceNoiseLine(text))
+      .map((text) => ({
       id: randomUUID(),
-      text: this.cleanEvidenceText(text),
+      text,
       metrics: this.extractMetrics(text),
       tags: [role.toLowerCase()],
-    })).filter((unit) => unit.text.length > 0);
+    }))
+      .filter((unit) => unit.text.length > 0);
+    if (evidence.length === 0) {
+      context.missingFields.push('experience.bullets');
+      return [];
+    }
     return [{
       company: parsedHeader.company,
       role: parsedHeader.role,
@@ -308,6 +317,33 @@ export class BaselineIngestionService {
       scope_summary: evidence.map((item) => item.text).join(' '),
       details_text: evidence.map((item) => item.text).join('\n'),
     }];
+  }
+
+  private isExperienceNoiseLine(line: string): boolean {
+    const text = this.cleanEvidenceText(line);
+    if (!text) return true;
+    if (/\b(?:summary|professional summary|profile)\b/i.test(text)) {
+      return true;
+    }
+    if (/^(experience|professional experience|work experience|skills|technical skills|education|certifications?)\b/i.test(text)) {
+      return true;
+    }
+    if (/\b(?:https?:\/\/|www\.|linkedin\.com|github\.com|mailto:)\b/i.test(text) || /@/.test(text)) {
+      return true;
+    }
+    if (/\+?\d[\d\s().-]{7,}\d/.test(text)) {
+      return true;
+    }
+    if (
+      text.split(/\s+/).length <= 12 &&
+      (
+        /\b(?:19|20)\d{2}\b.*(?:[-–—]|to).*\b(?:19|20)\d{2}\b/i.test(text) ||
+        (/\b(?:19|20)\d{2}\b/.test(text) && /\b(?:present|current)\b/i.test(text))
+      )
+    ) {
+      return true;
+    }
+    return false;
   }
 
   private parseExperienceHeader(header: string): { company: string | null; role: string | null; start: string | null; end: string | null } {

@@ -119,6 +119,33 @@ function coerceResumeV2NormalizedDocument(raw: unknown): unknown {
   };
 }
 
+function isFallbackExperienceNoiseLine(line: string): boolean {
+  const text = trimToText(line);
+  if (!text) return true;
+  if (/\b(?:summary|professional summary|profile)\b/i.test(text)) {
+    return true;
+  }
+  if (/^(experience|professional experience|work experience|skills|technical skills|education|certifications?)\b/i.test(text)) {
+    return true;
+  }
+  if (/\b(?:https?:\/\/|www\.|linkedin\.com|github\.com|mailto:)\b/i.test(text) || /@/.test(text)) {
+    return true;
+  }
+  if (/\+?\d[\d\s().-]{7,}\d/.test(text)) {
+    return true;
+  }
+  if (
+    text.split(/\s+/).length <= 12 &&
+    (
+      /\b(?:19|20)\d{2}\b.*(?:[-–—]|to).*\b(?:19|20)\d{2}\b/i.test(text) ||
+      (/\b(?:19|20)\d{2}\b/.test(text) && /\b(?:present|current)\b/i.test(text))
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function classifyStructuredExperienceKeepDrop(input: {
   company: string;
   roleTitle: string;
@@ -450,7 +477,6 @@ export function buildValidatedResumeV2FromParsedBaseline(
         entry['responsibilities_text'],
         entry['responsibilitiesText'],
         entry['description'],
-        entry['summary'],
       );
       if (directText) {
         return directText
@@ -459,6 +485,7 @@ export function buildValidatedResumeV2FromParsedBaseline(
           .split('\n')
           .map((line) => String(line ?? '').trim())
           .filter(Boolean)
+          .filter((line) => !isFallbackExperienceNoiseLine(line))
           // Keep the replacement narrow; this is ingestion-only and must not rewrite meaning.
           .map((line) => `- ${line.replace(/^[-*â€¢]\s*/, '')}`);
       }
@@ -473,6 +500,7 @@ export function buildValidatedResumeV2FromParsedBaseline(
         return arrayCandidate
           .map((line) => (typeof line === 'string' ? line.trim() : ''))
           .filter(Boolean)
+          .filter((line) => !isFallbackExperienceNoiseLine(line))
           // Keep the replacement narrow; this is ingestion-only and must not rewrite meaning.
           .map((line) => `- ${line.replace(/^[-*â€¢]\s*/, '')}`);
       }
@@ -534,8 +562,6 @@ export function buildValidatedResumeV2FromParsedBaseline(
         );
         const start = readString(entry['start_date'], entry['startDate'], entry['start'], entry['from']);
         const end = readString(entry['end_date'], entry['endDate'], entry['end'], entry['to']) || 'Present';
-        const scopeSummary = readString(entry['scope_summary'], entry['scopeSummary'], entry['scope']);
-
         // `structuredBaselineExtractor.parseExperienceHeaderLine` expects: "Company | Role Title | Dates".
         // This ordering matters; reversing it can cause experience entries to be rejected as unsafe/not-company-like.
         const header = [company, role, [start, end].filter(Boolean).join(' - ')].filter(Boolean).join(' | ');
@@ -551,11 +577,7 @@ export function buildValidatedResumeV2FromParsedBaseline(
           .map((line) => `- ${line.replace(/^[-*•]\s*/, '')}`);
 
         const fallbackDetails = details.length ? details : readDetailsLines(entry);
-        const detailLines = fallbackDetails.length
-          ? fallbackDetails
-          : scopeSummary
-            ? [`- ${String(scopeSummary).trim()}`]
-            : [];
+        const detailLines = fallbackDetails;
         const keepDrop = classifyStructuredExperienceKeepDrop({ company, roleTitle: role, detailLines });
         if (shouldLog) {
           resumeV2CandidateKeepDrop = resumeV2CandidateKeepDrop ?? [];
@@ -572,9 +594,10 @@ export function buildValidatedResumeV2FromParsedBaseline(
           recordRejection('company_not_persistable', entry);
           return '';
         }
-        if (!header && detailLines.length === 0) {
+        if (detailLines.length === 0) {
           droppedEmptyCount += 1;
-          recordRejection('empty_header_and_details', entry);
+          rejectedMissingDetailsCount += 1;
+          recordRejection('missing_details_bullets', entry);
           if (shouldLog) {
             // eslint-disable-next-line no-console
             console.warn('[RESUME_V2_INGEST][ENTRY_DROPPED_EMPTY]', {
@@ -584,15 +607,6 @@ export function buildValidatedResumeV2FromParsedBaseline(
             });
           }
           return '';
-        }
-
-        if (!header) {
-          rejectedMissingHeaderCount += 1;
-          recordRejection('missing_header_company_or_role', entry);
-        }
-        if (detailLines.length === 0) {
-          rejectedMissingDetailsCount += 1;
-          recordRejection('missing_details_bullets', entry);
         }
 
         mappedCount += 1;

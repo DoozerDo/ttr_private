@@ -1,9 +1,15 @@
 import type { NormalizedResumeDocument } from '../documents/normalized-document.models';
+import { UnprocessableEntityException } from '@nestjs/common';
 import type { StructuredBaseline } from '../baseline/structuredBaselineExtractor';
 import type { AuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
 import type { CareerIdentitySnapshot } from '../career-identity/career-identity.models';
 import { NarrativeCompositionEngine } from '../composition/narrative-composition-engine';
 import { createHash } from 'crypto';
+import {
+  buildNormalizedResumeValidationFailures,
+  formatResumeV2InvalidMessage,
+  validateNormalizedResumeDocument,
+} from './resume-normalization';
 
 export type ResumeTemplateIdentityLike = {
   name?: unknown;
@@ -31,60 +37,6 @@ function buildRoleKey(company: string, roleTitle: string): string {
   const c = trimToText(company).toLowerCase();
   const r = trimToText(roleTitle).toLowerCase();
   return `${c}::${r}`;
-}
-
-function coerceResumeV2ExperienceFromStructuredBaseline(input: {
-  resumeV2: NormalizedResumeDocument;
-  structuredBaseline: StructuredBaseline | null;
-}): NormalizedResumeDocument {
-  const structured = input.structuredBaseline;
-  const structuredExperience = Array.isArray((structured as any)?.experience) ? ((structured as any).experience as any[]) : [];
-  if (!structuredExperience.length) return input.resumeV2;
-
-  const v2Experience = Array.isArray((input.resumeV2 as any)?.experience) ? (((input.resumeV2 as any).experience as any[]) ?? []) : [];
-
-  const bulletsByRoleKey = new Map<string, string[]>();
-  for (const entry of v2Experience) {
-    const companyRaw = trimToText((entry as any)?.company);
-    const roleRaw = trimToText((entry as any)?.roleTitle);
-    const bulletsRaw = Array.isArray((entry as any)?.bullets)
-      ? (((entry as any).bullets as unknown[]) ?? []).map((b) => trimToText(b)).filter(Boolean)
-      : [];
-    if (!bulletsRaw.length) continue;
-
-    bulletsByRoleKey.set(buildRoleKey(companyRaw, roleRaw), bulletsRaw);
-
-    const dashParsed = normalizeDashRoleHeader(roleRaw);
-    if (dashParsed.roleTitle && dashParsed.companyHint) {
-      bulletsByRoleKey.set(buildRoleKey(dashParsed.companyHint, dashParsed.roleTitle), bulletsRaw);
-    }
-  }
-
-  const canonicalExperience = structuredExperience
-    .filter((entry) => isAllowedStructuredTemplateExperienceHeader(entry))
-    .map((entry) => {
-      const company = trimToText((entry as any)?.company);
-      const roleTitle = trimToText((entry as any)?.roleTitle);
-      const dates = trimToText((entry as any)?.dates ?? '');
-      const key = buildRoleKey(company, roleTitle);
-      const bullets =
-        bulletsByRoleKey.get(key) ??
-        (Array.isArray((entry as any)?.bullets) ? ((entry as any).bullets as unknown[]).map((b) => trimToText(b)).filter(Boolean) : []);
-      return {
-        company,
-        roleTitle,
-        ...(dates ? { dateRange: dates } : {}),
-        bullets,
-      };
-    })
-    .filter((entry) => entry.company && entry.roleTitle);
-
-  if (!canonicalExperience.length) return input.resumeV2;
-
-  return {
-    ...(input.resumeV2 as any),
-    experience: canonicalExperience,
-  } as any;
 }
 
 function ensureSentence(value: string): string {
@@ -374,10 +326,25 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   structuredBaselineForIdentity?: StructuredBaseline | null;
   careerIdentity?: CareerIdentitySnapshot | null;
 }): NormalizedResumeDocument {
-  const resumeV2ForAuthority = coerceResumeV2ExperienceFromStructuredBaseline({
-    resumeV2: input.resumeV2,
-    structuredBaseline: input.structuredBaselineForIdentity ?? null,
-  });
+  const normalizedValidation = validateNormalizedResumeDocument(input.resumeV2 as any);
+  if (!normalizedValidation.valid) {
+    const failures = buildNormalizedResumeValidationFailures(input.resumeV2 as NormalizedResumeDocument);
+    throw new UnprocessableEntityException({
+      error: {
+        code: 'resume_v2_normalized_model_invalid',
+        message: formatResumeV2InvalidMessage({
+          reasons: normalizedValidation.reasons,
+          failures,
+        }),
+        details: {
+          reasons: normalizedValidation.reasons,
+          failures,
+        },
+      },
+    });
+  }
+
+  const resumeV2ForAuthority = input.resumeV2;
 
   const baselineExperience = Array.isArray((resumeV2ForAuthority as any)?.experience)
     ? (((resumeV2ForAuthority as any).experience as any[]) ?? [])
@@ -437,7 +404,7 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   const finalExperience = (() => {
     if (selectedExperience.length > 0) return selectedExperience;
 
-    // Preserve the authoritative structured experience source when plan selection
+    // Preserve the authoritative ResumeV2 experience source when plan selection
     // filters everything away. Readiness already established these entries as usable.
     const fallbackExperience = baselineExperience.map((entry) => ({
       company: trimToText(entry.company),

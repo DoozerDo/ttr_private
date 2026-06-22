@@ -1,3 +1,4 @@
+import { UnprocessableEntityException } from '@nestjs/common';
 import { buildAuthoritativeResumeDraftFromResumeV2 } from './resumeTemplateAssembler';
 import { buildAuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
 
@@ -41,7 +42,8 @@ describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
         allowedEvidenceSnippetIds: null,
       }),
       professionalIdentity: 'Support Operations / Customer Operations leader',
-      targetNarrative: 'Operational leadership focused on scalable support systems, cross-functional execution, and escalation/root-cause rhythms.',
+      targetNarrative:
+        'Operational leadership focused on scalable support systems, cross-functional execution, and escalation/root-cause rhythms.',
     });
 
     const companies = (draft.experience ?? []).map((e: any) => String(e?.company ?? ''));
@@ -87,11 +89,12 @@ describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
       identity: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
       renderPlan: buildAuthoritativeRenderPlan({
         positioningPlan: {
-        emphasizeRoleIds: ['resume_v2_exp_2', 'resume_v2_exp_1'],
-        suppressRoleIds: ['resume_v2_exp_0'],
-        positioningThesis: 'Experienced support operations leader focused on escalation management and operational process improvement.',
-        summaryStrategy: 'operations_first',
-        topEvidenceThemes: ['escalation management', 'operational process improvement'],
+          emphasizeRoleIds: ['resume_v2_exp_2', 'resume_v2_exp_1'],
+          suppressRoleIds: ['resume_v2_exp_0'],
+          positioningThesis:
+            'Experienced support operations leader focused on escalation management and operational process improvement.',
+          summaryStrategy: 'operations_first',
+          topEvidenceThemes: ['escalation management', 'operational process improvement'],
         } as any,
         orderedFallbackRoleIds: ['resume_v2_exp_0', 'resume_v2_exp_1', 'resume_v2_exp_2'],
         suppressedFallbackRoleIds: [],
@@ -105,22 +108,21 @@ describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
     expect(String(draft.summary ?? '')).toMatch(/support operations|operations leader|escalation/i);
   });
 
-  it('prefers canonical structured baseline experience identity over malformed ResumeV2 parser-derived headers when available', () => {
+  it('keeps ResumeV2 experience authoritative and ignores structured baseline overrides', () => {
     const resumeV2 = {
       heading: { name: 'Prod Person', contactLine: 'prod@example.com' },
       summary: 'Old summary.',
       experience: [
         {
-          // Malformed identity coming from parser-derived fields.
-          company: 'Seattle',
-          roleTitle: 'Senior Manager, Customer Operations – SentinelOne',
-          dateRange: 'Dec 2018 – Oct 2019',
-          bullets: ['Owned incident operations and escalation handling.'],
+          company: 'SentinelOne',
+          roleTitle: 'Senior Manager, Customer Operations',
+          dateRange: 'Dec 2022 - Aug 2025',
+          bullets: ['Owned incident operations and escalation handling.', 'Built reporting cadence for escalations.'],
         },
         {
           company: 'iStreamPlanet',
           roleTitle: 'Director, Customer Success',
-          dateRange: 'United States 2006 – 2013',
+          dateRange: 'United States 2006 - 2013',
           bullets: ['Led customer success programs.'],
         },
       ],
@@ -129,15 +131,21 @@ describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
     const structuredBaselineForIdentity = {
       experience: [
         {
-          company: 'SentinelOne',
-          roleTitle: 'Senior Manager, Customer Operations',
-          dates: 'Remote Dec 2022 – Aug 2025',
+          company: 'Seattle',
+          roleTitle: 'Senior Manager, Customer Operations - SentinelOne',
+          dates: 'Remote Dec 2018 - Oct 2019',
           bullets: ['Owned incident operations and escalation handling.'],
+        },
+        {
+          company: 'Summary',
+          roleTitle: 'Professional Experience',
+          dates: '2020 - 2024',
+          bullets: ['Contact: prod@example.com | Seattle, WA'],
         },
         {
           company: 'iStreamPlanet (Warner Bros. Discovery)',
           roleTitle: 'Director, Customer Success',
-          dates: 'United States 2006 – 2013',
+          dates: 'United States 2006 - 2013',
           bullets: ['Led customer success programs.'],
         },
       ],
@@ -159,13 +167,51 @@ describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
     expect(String(top.company)).toBe('SentinelOne');
     expect(String(top.roleTitle)).toBe('Senior Manager, Customer Operations');
     expect(String(top.dateRange ?? '')).toMatch(/Dec 2022/i);
-    // Explicit cross-role date contamination guard: SentinelOne must not inherit iStreamPlanet's date range.
-    expect(String(top.dateRange ?? '')).not.toMatch(/2006/i);
-    expect(String(top.dateRange ?? '')).not.toMatch(/2013/i);
     expect(JSON.stringify(draft.experience ?? [])).not.toContain('"Seattle"');
+    expect(JSON.stringify(draft.experience ?? [])).not.toContain('Professional Experience');
+    expect(JSON.stringify(draft.experience ?? [])).not.toContain('Contact: prod@example.com');
 
     const iStream = (draft.experience ?? []).find((e: any) => String(e?.company ?? '').includes('iStreamPlanet')) as any;
     expect(String(iStream?.dateRange ?? '')).toMatch(/2006/i);
     expect(String(iStream?.dateRange ?? '')).toMatch(/2013/i);
+  });
+
+  it('fails closed when authoritative ResumeV2 experience is missing or invalid', () => {
+    const resumeV2 = {
+      heading: { name: 'Prod Person', contactLine: 'prod@example.com' },
+      summary: 'Role-targeted summary.',
+      experience: [],
+    } as any;
+
+    try {
+      buildAuthoritativeResumeDraftFromResumeV2({
+        resumeV2,
+        identity: { name: 'Prod Person', contactLine: 'prod@example.com' },
+        renderPlan: buildAuthoritativeRenderPlan({
+          positioningPlan: null,
+          orderedFallbackRoleIds: [],
+          suppressedFallbackRoleIds: [],
+          allowedEvidenceSnippetIds: null,
+        }),
+        structuredBaselineForIdentity: {
+          experience: [
+            {
+              company: 'SentinelOne',
+              roleTitle: 'Senior Manager, Customer Operations',
+              dates: 'Dec 2022 - Aug 2025',
+              bullets: ['Owned incident operations and escalation handling.'],
+            },
+          ],
+        } as any,
+      });
+      throw new Error('Expected authoritative ResumeV2 validation to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      const payload =
+        (error as any)?.response ??
+        (typeof (error as any)?.getResponse === 'function' ? (error as any).getResponse() : null);
+      expect(payload?.error?.code).toBe('resume_v2_normalized_model_invalid');
+      expect(String(payload?.error?.message ?? '')).toContain('ResumeV2 produced an invalid normalized resume model');
+    }
   });
 });
