@@ -5510,12 +5510,19 @@ export class ResumeService {
 	      }
 	      return Object.keys(result).length ? result : null;
 	    })();
+	    const qualityStatus = String((quality as any)?.status ?? quality ?? '').trim();
+	    const finalExportReady = Boolean(
+	      exportable &&
+	        qualityStatus === 'pass' &&
+	        !structuredBaselineTemplateDegradedToBaselineOnly &&
+	        !tailoringLimitations,
+	    );
 	    lastResumeGenerationCheckpoint = 'normalized_document_built';
-	        const response: ResumeGenerationResponse & { internalTrace?: { usedEvidenceIds: string[] } } = {
+	        const response: ResumeGenerationResponse & { internalTrace?: { usedEvidenceIds: string[] }; actions?: { canExport: boolean } } = {
 	          ok: true,
 	          status: 'success',
       generationStatus: 'success',
-      exportReady: exportable,
+      exportReady: finalExportReady,
       blocked: false,
       baselineId: baseline.id,
       baselineVersionId: baselineVersion.id,
@@ -5532,7 +5539,7 @@ export class ResumeService {
       ...(resumeTraceAudit.evidenceDetailsMap
         ? { evidenceDetailsMap: resumeTraceAudit.evidenceDetailsMap }
         : {}),
-      exports: exportable ? exports : ({ docx: false, pdf: false } as DocumentGenerationExports),
+      exports: finalExportReady ? exports : ({ docx: false, pdf: false } as DocumentGenerationExports),
       preview: {
         resume: sanitizedPreviewDocument,
       },
@@ -5547,7 +5554,10 @@ export class ResumeService {
       gapGuidance,
       display,
       safeDisplay: display,
-	      internal: {
+      actions: {
+        canExport: finalExportReady,
+      },
+	        internal: {
 	        auditId: audit.id,
 	        baselineVersionHash: audit.baselineVersionHash,
 	        generationPipeline: isResumeV2 ? 'v2' : 'v1',

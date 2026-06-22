@@ -861,14 +861,16 @@ export class CoverLettersService {
       const templateRenderable = await this.canRenderCoverLetterTemplate(draft);
       const canonicalAuthority = draft.generationAuthority === 'baseline_file';
       const exportReady =
-        canonicalAuthority && draft.qualityGate.status === 'pass' && templateRenderable;
+        canonicalAuthority &&
+        draft.baselineFileUsable === true &&
+        draft.qualityGate.status === 'pass' &&
+        templateRenderable;
       const exports: DocumentGenerationExports = exportReady
         ? { docx: true, pdf: true }
         : { docx: false, pdf: false };
       const response = {
         status: 'success',
         generationStatus: 'success',
-        exportReady,
         ...(draft.qualityGate
           ? {
               quality:
@@ -879,6 +881,7 @@ export class CoverLettersService {
           : {}),
         ...savedCoverLetter,
         baselineVersionId: draft.baselineVersion.id,
+        exportReady,
         exports,
         preview: {
           coverLetter: draft.generation.document,

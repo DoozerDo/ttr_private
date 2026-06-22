@@ -1143,6 +1143,78 @@ describe('CoverLettersService contract', () => {
     assessment.overallScore = originalScore;
   });
 
+  it('keeps fresh fallback cover letter generations non-exportable', async () => {
+    const { service, workflowIdempotencyService } = buildService();
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 70;
+    const buildDraftSpy = jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({
+      baseline,
+      baselineVersion,
+      job,
+      analysisAssessment: assessment,
+      generationAuthority: 'fallback',
+      baselineFileUsable: false,
+      allowedBlocks: [],
+      templateReadiness: {
+        canGenerateResume: true,
+        canGenerateCoverLetter: true,
+        hardBlockReasons: [],
+        warnings: [],
+        stats: { totalExperience: 1, validExperience: 1, invalidExperience: 0 },
+      },
+      jobContext: {
+        id: 'job-1',
+        title: 'Program Manager',
+        company: 'Example Co',
+        responsibilities: [],
+        requirements: [],
+      },
+      jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
+      closingTemplateKey: 'default',
+      generationInputsHash: 'hash',
+      generation: {
+        document: {
+          senderHeading: { name: 'Jordan Lee' },
+          salutation: 'Dear Hiring Team,',
+          opening: 'Opening.',
+          bodyParagraphs: ['Body one.'],
+          closingParagraph: 'Closing.',
+          signoff: 'Sincerely,',
+          signatureName: 'Jordan Lee',
+        },
+        content: 'Dear Hiring Team,\n\nOpening.\n\nBody one.\n\nClosing.\n\nSincerely,\n\nJordan Lee',
+        wordCount: 260,
+        greeting: 'Dear Hiring Team,',
+        paragraphs: ['Opening.', 'Body one.'],
+        closingParagraphs: ['Closing.'],
+        paragraphEvidence: [],
+      },
+      complianceResult: {
+        normalizedContent: 'This fresh fallback draft passes the existing quality gate.',
+        complianceFlags: [],
+        blocked: false,
+        audit: { id: 'audit-fallback', baselineVersionHash: 'hash-1' },
+      },
+      qualityGate: { status: 'pass', reasons: [] },
+      firstPassQualityGate: { status: 'pass', reasons: [] },
+      qualityRepairAttempted: false,
+    });
+    workflowIdempotencyService.reserve = jest.fn().mockResolvedValue({
+      status: 'accepted_new',
+      runId: 'run-1',
+      responseBody: null,
+    }) as any;
+
+    const result = await service.generateCoverLetter('user-1', request as any);
+
+    expect(result.generationAuthority).toBe('fallback');
+    expect(result.baselineFileUsable).toBe(false);
+    expect(result.exportReady).toBe(false);
+    expect(result.exports).toEqual({ docx: false, pdf: false });
+    buildDraftSpy.mockRestore();
+    assessment.overallScore = originalScore;
+  });
+
   it('forces regeneration for score >= 80 when an existing completed artifact is legacy', async () => {
     const { service, coverRepo, workflowIdempotencyService } = buildService();
     const assembler = require('./coverLetterTemplateAssembler');
