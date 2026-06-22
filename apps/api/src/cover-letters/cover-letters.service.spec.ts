@@ -65,6 +65,49 @@ const createRepo = (value: unknown) => ({
   create: jest.fn((payload: Record<string, unknown>) => payload),
   save: jest.fn(async (payload: Record<string, unknown>) => ({ ...payload, id: 'saved-1' })),
   remove: jest.fn(async (payload: unknown) => payload),
+  createQueryBuilder: jest.fn().mockReturnValue({
+    leftJoin: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    addOrderBy: jest.fn().mockReturnThis(),
+    getOne: jest.fn().mockResolvedValue(Array.isArray(value) ? value[0] ?? null : value),
+    getRawMany: jest.fn().mockImplementation(() => [
+      {
+        baseline_id: (value as any)?.id ?? baseline.id,
+        baseline_userId: (value as any)?.userId ?? baseline.userId,
+        baseline_version: 1,
+        baseline_originalFilename: 'resume.docx',
+        baseline_mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        baseline_storagePath: '/tmp/resume.docx',
+        baseline_hash: null,
+        baseline_status: 'active',
+        baseline_archivedAt: null,
+        baseline_createdAt: new Date(),
+        baseline_updatedAt: new Date(),
+        section_id: (baseline.sections?.[0] as any)?.id ?? null,
+        section_baselineId: baseline.id,
+        section_sectionType: (baseline.sections?.[0] as any)?.sectionType ?? null,
+        section_title: (baseline.sections?.[0] as any)?.title ?? null,
+        section_content: (baseline.sections?.[0] as any)?.content ?? null,
+        section_includePolicy: (baseline.sections?.[0] as any)?.includePolicy ?? null,
+        section_order: (baseline.sections?.[0] as any)?.order ?? null,
+        section_createdAt: (baseline.sections?.[0] as any)?.createdAt ?? new Date(),
+        section_updatedAt: (baseline.sections?.[0] as any)?.updatedAt ?? new Date(),
+        parsed_id: (baseline.parsedRecords?.[0] as any)?.id ?? 'parsed-1',
+        parsed_baselineId: baseline.id,
+        parsed_sourceFileId: (baseline.parsedRecords?.[0] as any)?.sourceFileId ?? 'source-file-1',
+        parsed_schemaVersion: (baseline.parsedRecords?.[0] as any)?.schemaVersion ?? '1',
+        parsed_sourceFormat: (baseline.parsedRecords?.[0] as any)?.sourceFormat ?? 'docx',
+        parsed_ingestedAt: (baseline.parsedRecords?.[0] as any)?.ingestedAt ?? new Date(),
+        parsed_parsedJson: (baseline.parsedRecords?.[0] as any)?.parsedJson ?? null,
+        parsed_resumeV2Json: (baseline.parsedRecords?.[0] as any)?.resumeV2Json ?? null,
+        parsed_flagsJson: (baseline.parsedRecords?.[0] as any)?.flagsJson ?? null,
+        parsed_createdAt: (baseline.parsedRecords?.[0] as any)?.createdAt ?? new Date(),
+      },
+    ]),
+  }),
 });
 
 const buildService = (options?: {
@@ -342,6 +385,82 @@ describe('CoverLettersService contract', () => {
           sectionType: BaselineSectionType.EXPERIENCE,
         } as any,
       ];
+    }
+  });
+
+  it('treats a valid persisted Resume V2 as usable even when readiness.usable is false', async () => {
+    const { service } = buildService();
+    (service as any).throwCoverLetterQualityError = jest.fn();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+
+    try {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = [
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          resumeV2Json: {
+            heading: { name: 'Test User', contactLine: 'test@example.com' },
+            summary:
+              'Operations leader with verified impact across support, technology operations, and cloud delivery. ' +
+              'Built repeatable operating rhythms, escalations, and service reliability programs that improved execution clarity. ' +
+              'Additional verified baseline context '.repeat(12),
+            readiness: { usable: false },
+            experience: [
+              {
+                company: 'SentinelOne',
+                roleTitle: 'Senior Manager, Customer Operations',
+                startDate: '2021-01',
+                endDate: '2024-01',
+                bullets: [
+                  'Led support operations across global teams.',
+                  'Improved escalation readiness, incident response quality, and operating review consistency.',
+                ],
+              },
+              {
+                company: 'Starbucks',
+                roleTitle: 'Senior Manager, Technology Operations',
+                startDate: '2018-01',
+                endDate: '2021-01',
+                bullets: [
+                  'Improved incident handling through clear triage, routing, and stakeholder communication.',
+                  'Built operational cadences that reduced repeat escalations and improved service reliability.',
+                ],
+              },
+              {
+                company: 'CenturyLink',
+                roleTitle: 'Director, Cloud Development and Support',
+                startDate: '2014-01',
+                endDate: '2018-01',
+                bullets: [
+                  'Owned cloud support delivery and cross-functional incident response.',
+                  'Improved service reliability and delivery coordination across teams.',
+                ],
+              },
+              {
+                company: 'Microsoft',
+                roleTitle: 'Senior Service Engineering Manager',
+                startDate: '2010-01',
+                endDate: '2014-01',
+                bullets: [
+                  'Improved service operations with repeatable processes and clear accountability.',
+                  'Partnered across teams to strengthen operational execution under pressure.',
+                ],
+              },
+            ],
+            education: [],
+            competencies: ['Support Operations', 'Incident Response', 'Cloud Delivery', 'Program Management'],
+          },
+        } as any,
+      ];
+
+      const result = await service.generateCoverLetter('user-1', request as any);
+      expect(result.status).toBe('success');
+      expect(result.generationAuthority).toBe('baseline_file');
+      expect(result.baselineFileUsable).toBe(true);
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsed;
     }
   });
   it('does not block cover letter generation with baseline_template_not_ready when interpreted evidence is meaningful', async () => {

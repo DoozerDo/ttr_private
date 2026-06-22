@@ -1575,8 +1575,27 @@ export class CoverLettersService {
     );
     const closingTemplate = resolveClosingTemplate(closingTemplateKey);
 
-    const persistedResumeV2 = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) as any;
-    const baselineFileUsable = Boolean(persistedResumeV2?.readiness?.usable);
+    const persistedResumeV2 = (() => {
+      try {
+        const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) as any;
+        if (!persisted || typeof persisted !== 'object') return null;
+        const hasUsableExperience = Array.isArray(persisted.experience)
+          ? persisted.experience.some((entry: any) => {
+              const company = String(entry?.company ?? '').trim();
+              const roleTitle = String(entry?.roleTitle ?? '').trim();
+              const bullets = Array.isArray(entry?.bullets)
+                ? entry.bullets.filter((bullet: unknown) => String(bullet ?? '').trim())
+                : [];
+              return Boolean(company && roleTitle && bullets.length > 0);
+            })
+          : false;
+        if (!hasUsableExperience) return null;
+        return persisted;
+      } catch {
+        return null;
+      }
+    })();
+    const baselineFileUsable = Boolean(persistedResumeV2);
     const baselineFileVersionHash = baselineVersion.hash ?? null;
     const sourceSections = baselineFileUsable ? [] : resolveBaselineSectionsForGeneration(baseline);
     const sections = baselineFileUsable ? [] : this.applyPoliciesToSections(sourceSections, policies);
