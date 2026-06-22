@@ -26,6 +26,12 @@ describe('AppController', () => {
 
     expect(response).toMatchObject({ status: 'ok', service: 'api' });
     expect(response.timestamp).toBeDefined();
+    expect(response.build).toMatchObject({
+      marker: 'authority-gate-build-check-20260621',
+      gitCommit: null,
+      buildTimestamp: null,
+      appVersion: expect.anything(),
+    });
   });
 
   it('returns a root health payload', () => {
@@ -49,6 +55,12 @@ describe('AppController', () => {
         startedAt: expect.any(String),
         uptimeSeconds: expect.any(Number),
         railway: expect.any(Object),
+        build: expect.objectContaining({
+          marker: 'authority-gate-build-check-20260621',
+          gitCommit: null,
+          buildTimestamp: null,
+          appVersion: expect.anything(),
+        }),
       }),
     );
     expect(typeof response.uptimeSeconds).toBe('number');
@@ -71,6 +83,12 @@ describe('AppController', () => {
         startedAt: expect.any(String),
         uptimeSeconds: expect.any(Number),
         railway: expect.any(Object),
+        build: expect.objectContaining({
+          marker: 'authority-gate-build-check-20260621',
+          gitCommit: null,
+          buildTimestamp: null,
+          appVersion: expect.anything(),
+        }),
       }),
     );
     expect(response.status).toBe('ok');

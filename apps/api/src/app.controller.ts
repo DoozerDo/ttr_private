@@ -13,7 +13,7 @@ export class AppController {
     return new Date().toISOString();
   }
 
-  private getGitSha(): string {
+  private getGitCommit(): string | null {
     const candidates = [
       process.env.RAILWAY_GIT_COMMIT_SHA,
       process.env.RAILWAY_GIT_COMMIT,
@@ -28,7 +28,23 @@ export class AppController {
       }
     }
 
-    return 'unknown';
+    return null;
+  }
+
+  private getBuildTimestamp(): string | null {
+    const candidates = [
+      process.env.BUILD_TIMESTAMP,
+      process.env.APP_BUILD_TIMESTAMP,
+      process.env.RAILWAY_DEPLOYMENT_CREATED_AT,
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate && candidate.trim()) {
+        return candidate;
+      }
+    }
+
+    return null;
   }
 
   private getAppVersion(): string {
@@ -76,6 +92,12 @@ export class AppController {
       status: 'ok',
       service: 'api',
       timestamp: this.getTimestamp(),
+      build: {
+        marker: 'authority-gate-build-check-20260621',
+        gitCommit: this.getGitCommit(),
+        buildTimestamp: this.getBuildTimestamp(),
+        appVersion: this.getAppVersion(),
+      },
     };
   }
 
@@ -97,13 +119,19 @@ export class AppController {
     return {
       version,
       appVersion: this.getAppVersion(),
-      gitSha: this.getGitSha(),
+      gitSha: this.getGitCommit() ?? 'unknown',
       env: this.config.get<string>('NODE_ENV') ?? 'development',
       port: this.config.get<number>('PORT') ?? 3001,
       startedAt: runtime.startedAt,
       uptimeSeconds: runtime.uptimeSeconds,
       railway: this.getRailwayMeta(),
       timestamp: this.getTimestamp(),
+      build: {
+        marker: 'authority-gate-build-check-20260621',
+        gitCommit: this.getGitCommit(),
+        buildTimestamp: this.getBuildTimestamp(),
+        appVersion: this.getAppVersion(),
+      },
     };
   }
 
@@ -117,13 +145,19 @@ export class AppController {
       service: 'api',
       version,
       appVersion: this.getAppVersion(),
-      gitSha: this.getGitSha(),
+      gitSha: this.getGitCommit() ?? 'unknown',
       env: this.config.get<string>('NODE_ENV') ?? 'development',
       port: this.config.get<number>('PORT') ?? 3001,
       startedAt: runtime.startedAt,
       uptimeSeconds: runtime.uptimeSeconds,
       railway: this.getRailwayMeta(),
       timestamp: this.getTimestamp(),
+      build: {
+        marker: 'authority-gate-build-check-20260621',
+        gitCommit: this.getGitCommit(),
+        buildTimestamp: this.getBuildTimestamp(),
+        appVersion: this.getAppVersion(),
+      },
     };
   }
 }
