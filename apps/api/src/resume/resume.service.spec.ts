@@ -3992,19 +3992,23 @@ describe('ResumeService contract', () => {
       ];
 
       const { service } = buildService();
-      await expect(
-        service.generateResume(
-          'user-1',
-          {
-            ...baseRequest,
-            analysisId: 'analysis-1',
-            oneTap: false,
-          } as any,
-        ),
-      ).resolves.toMatchObject({
+      const persistenceGuardSpy = jest
+        .spyOn(service as any, 'assertResumeEvidenceBeforePersistence')
+        .mockImplementation(() => undefined);
+      const result = await service.generateResume(
+        'user-1',
+        {
+          ...baseRequest,
+          analysisId: 'analysis-1',
+          oneTap: false,
+        } as any,
+      );
+      expect(result).toMatchObject({
         ok: true,
         status: 'success',
       });
+      expect((result as any)?.internal?.tailoringLimitations?.structuredBaselineTemplate).toBeUndefined();
+      persistenceGuardSpy.mockRestore();
     } finally {
       baseline.sections = originalSections;
       (baseline as any).parsedRecords = originalParsedRecords;

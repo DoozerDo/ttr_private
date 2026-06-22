@@ -4201,12 +4201,6 @@ export class ResumeService {
             }
           }
 	          if (!isResumeV2 && this.isStudioEligibleGenerationLane(request, options, jobId, analysisId, effectiveAssessment ?? null)) {
-	            // Studio eligible lane: degrade to baseline-only resume draft and mark as non-blocking limitation.
-	            structuredBaselineExtractionMissingReasons = (structured.missingEvidenceReasons ?? []).slice(0, 12);
-	            structuredBaselineTemplateDegradedToBaselineOnly = {
-	              reason: 'zero_experience_headers',
-	              missingEvidenceReasons: structuredBaselineExtractionMissingReasons,
-	            };
 	            if (persistedResumeV2AuthorityWithExperience) {
 	              const authoritativeSections = this.buildResumeV2AuthoritySectionsFromNormalizedDocument(
 	                persistedResumeV2AuthorityWithExperience as NormalizedResumeDocument,
@@ -4218,6 +4212,12 @@ export class ResumeService {
 	                { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
 	              );
 	            }
+	            // Studio eligible lane: degrade to baseline-only resume draft and mark as non-blocking limitation.
+	            structuredBaselineExtractionMissingReasons = (structured.missingEvidenceReasons ?? []).slice(0, 12);
+	            structuredBaselineTemplateDegradedToBaselineOnly = {
+	              reason: 'zero_experience_headers',
+	              missingEvidenceReasons: structuredBaselineExtractionMissingReasons,
+	            };
 	            throw new UnprocessableEntityException(buildArtifactFailurePayload({
 	              code: 'generation_blocked',
 	              category: 'generation_blocked',
@@ -4297,13 +4297,6 @@ export class ResumeService {
 		        if ((structured.experience ?? []).length === 0) {
 		          lastResumeGenerationCheckpoint = 'structured_template_zero_experience';
 	          if (this.isStudioEligibleGenerationLane(request, options, jobId, analysisId, effectiveAssessment ?? null)) {
-	            // Studio eligible lane: degrade to a baseline-only resume draft (verified content only) and mark
-	            // limitations as non-blocking metadata.
-	            structuredBaselineExtractionMissingReasons = structured.missingEvidenceReasons.slice(0, 12);
-	            structuredBaselineTemplateDegradedToBaselineOnly = {
-	              reason: 'zero_experience_headers',
-	              missingEvidenceReasons: structuredBaselineExtractionMissingReasons,
-	            };
 	            if (persistedResumeV2AuthorityWithExperience) {
 	              const authoritativeSections = this.buildResumeV2AuthoritySectionsFromNormalizedDocument(
 	                persistedResumeV2AuthorityWithExperience as NormalizedResumeDocument,
@@ -4315,6 +4308,13 @@ export class ResumeService {
 	                { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
 	              );
 	            }
+	            // Studio eligible lane: degrade to a baseline-only resume draft (verified content only) and mark
+	            // limitations as non-blocking metadata.
+	            structuredBaselineExtractionMissingReasons = structured.missingEvidenceReasons.slice(0, 12);
+	            structuredBaselineTemplateDegradedToBaselineOnly = {
+	              reason: 'zero_experience_headers',
+	              missingEvidenceReasons: structuredBaselineExtractionMissingReasons,
+	            };
 	            throw new UnprocessableEntityException(buildArtifactFailurePayload({
 	              code: 'generation_blocked',
 	              category: 'generation_blocked',
