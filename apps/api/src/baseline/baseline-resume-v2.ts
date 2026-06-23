@@ -1690,6 +1690,9 @@ export function buildValidatedResumeV2FromParsedBaseline(
   }
 
   if (!sections[0].content.trim()) {
+    const thematicFields = summarizeThematicEvidenceDiagnostics(parsedBaseline);
+    const thematicFieldsFound = thematicFields.filter((entry) => entry.hasContent);
+    const hasThematicEvidence = thematicFieldsFound.length > 0;
     if (shouldLog) {
       // eslint-disable-next-line no-console
       console.warn('[RESUME_V2_INGEST][FINAL_SECTION_EMPTY]', {
@@ -1702,6 +1705,34 @@ export function buildValidatedResumeV2FromParsedBaseline(
         parsedExperienceCount: parsedExperienceSourcePresent ? experience.length : null,
         identityFullNamePresent: Boolean(fullName && String(fullName).trim()),
         identityLocationPresent: Boolean(location && String(location).trim()),
+        experienceArrayEmpty: parsedExperienceArrayEmpty,
+        thematicFieldsFound: thematicFieldsFound.map((entry) => entry.field),
+      });
+    }
+    if (hasThematicEvidence) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'baseline_role_chronology_missing',
+          message:
+            'Useful resume evidence was found, but no usable work history entries with company, role, dates, and bullets were found. Please upload a resume with work history entries or add role chronology before generating documents.',
+          details: {
+            experienceArrayEmpty: true,
+            thematicFieldsFound: thematicFieldsFound.map((entry) => entry.field),
+            requiredExperienceFields: ['company', 'roleTitle', 'dateRange', 'bullets'],
+            nextAction: 'Upload a resume with work history entries or add role chronology before generating documents.',
+            diagnostics: {
+              inspectedKeys,
+              parsedExperiencePresent: parsedExperienceSourcePresent,
+              parsedWorkHistoryPresent: Array.isArray(parsedBaseline['work_history']),
+              parsedExperienceType,
+              parsedExperienceKeys,
+              parsedExperienceCount: lastParsedExperienceCount,
+              experienceArrayEmpty: parsedExperienceArrayEmpty,
+              thematicFields,
+              mapping: lastMappingStats,
+            },
+          },
+        },
       });
     }
     throw new UnprocessableEntityException({

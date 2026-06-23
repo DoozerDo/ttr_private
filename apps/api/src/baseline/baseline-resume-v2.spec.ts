@@ -215,7 +215,7 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     }
   });
 
-  it('surfaces thematic-field diagnostics when experience is empty but role evidence still exists outside the experience array', () => {
+  it('returns baseline_role_chronology_missing when experience is empty but thematic fields contain role evidence without chronology', () => {
     const parsedBaseline: Record<string, unknown> = {
       baseline_id: 'baseline-thematic-empty-1',
       identity: { full_name: 'Thematic Person', location: 'Thematic City' },
@@ -238,17 +238,24 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(UnprocessableEntityException);
       const body = (error as UnprocessableEntityException).getResponse() as any;
-      expect(String(body?.error?.code ?? '')).toBe('baseline_resume_v2_ingestion_failed');
-      expect(body?.error?.details?.diagnostics?.experienceArrayEmpty).toBe(true);
-      expect(Array.isArray(body?.error?.details?.diagnostics?.thematicFields)).toBe(true);
-      expect(body?.error?.details?.diagnostics?.thematicFields).toEqual(
+      expect(String(body?.error?.code ?? '')).toBe('baseline_role_chronology_missing');
+      expect(body?.error?.details?.experienceArrayEmpty).toBe(true);
+      expect(Array.isArray(body?.error?.details?.thematicFieldsFound)).toBe(true);
+      expect(body?.error?.details?.thematicFieldsFound).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ field: 'people_leadership', hasContent: true }),
-          expect.objectContaining({ field: 'operational_ownership', hasContent: true }),
-          expect.objectContaining({ field: 'tooling_and_platforms', hasContent: true }),
-          expect.objectContaining({ field: 'skills_and_tools', hasContent: true }),
+          'people_leadership',
+          'operational_ownership',
+          'tooling_and_platforms',
+          'skills_and_tools',
         ]),
       );
+      expect(body?.error?.details?.requiredExperienceFields).toEqual([
+        'company',
+        'roleTitle',
+        'dateRange',
+        'bullets',
+      ]);
+      expect(String(body?.error?.details?.nextAction ?? '')).toMatch(/Upload a resume with work history entries/i);
     }
   });
 
