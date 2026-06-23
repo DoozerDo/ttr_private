@@ -147,6 +147,74 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     }
   });
 
+  it('normalizes array experience string entries and nested scalar sections into canonical ResumeV2 experience entries', () => {
+    const parsedBaseline: Record<string, unknown> = {
+      baseline_id: 'baseline-array-strings-1',
+      identity: { full_name: 'Array Strings Person', location: 'Array City' },
+      experience: [
+        [
+          'Senior Manager, Customer Operations – SentinelOne',
+          'Remote Dec 2022 – Aug 2025',
+          '- Owned incident operations and escalation handling.',
+        ].join('\n'),
+        [
+          'Senior Manager, Technology Operations Excellence – Starbucks',
+          'Seattle, WA Dec 2018 – Oct 2019',
+          '- Improved operational workflows and reliability.',
+        ].join('\n'),
+      ],
+    };
+
+    const resumeV2 = buildValidatedResumeV2FromParsedBaseline(parsedBaseline);
+    expect(Array.isArray((resumeV2 as any).experience)).toBe(true);
+    expect((resumeV2 as any).experience.length).toBe(2);
+    const companies = ((resumeV2 as any).experience as any[]).map((entry) => String(entry?.company ?? '')).join(' | ');
+    expect(companies).toMatch(/SentinelOne/);
+    expect(companies).toMatch(/Starbucks/);
+    expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
+  });
+
+  it('reports array diagnostics when an experience array has no usable entries', () => {
+    const parsedBaseline: Record<string, unknown> = {
+      baseline_id: 'baseline-array-empty-1',
+      identity: { full_name: 'Array Empty Person', location: 'Array City' },
+      experience: [
+        'Summary',
+        ['Skills', 'Contact'],
+        { content: 'Profile' },
+      ],
+    };
+
+    expect(() => buildValidatedResumeV2FromParsedBaseline(parsedBaseline)).toThrow(
+      UnprocessableEntityException,
+    );
+    try {
+      buildValidatedResumeV2FromParsedBaseline(parsedBaseline);
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      const body = (error as UnprocessableEntityException).getResponse() as any;
+      expect(String(body?.error?.code ?? '')).toBe('baseline_resume_v2_ingestion_failed');
+      expect(String(body?.error?.message ?? '')).toMatch(/did not produce any usable experience entries/i);
+      expect(body?.error?.details?.diagnostics?.parsedExperienceType).toBe('array');
+      expect(body?.error?.details?.diagnostics?.parsedExperienceCount).toBeGreaterThan(0);
+      expect(Array.isArray(body?.error?.details?.diagnostics?.mapping?.arrayDiagnostics?.elementTypes)).toBe(true);
+      expect(body?.error?.details?.diagnostics?.mapping?.arrayDiagnostics?.length).toBe(3);
+      expect(Array.isArray(body?.error?.details?.diagnostics?.mapping?.arrayDiagnostics?.redactedSamples)).toBe(true);
+      expect(Array.isArray(body?.error?.details?.diagnostics?.mapping?.arrayDiagnostics?.rejectionReasons)).toBe(true);
+      expect(body?.error?.details?.diagnostics?.mapping?.arrayDiagnostics?.rejectionReasons).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'string', reason: 'unusable_string_experience_entry' }),
+        ]),
+      );
+      expect(body?.error?.details?.diagnostics?.mapping?.rejectionReasons).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ reason: 'structured_extraction_returned_no_experience' }),
+          expect.objectContaining({ reason: 'company_not_persistable' }),
+        ]),
+      );
+    }
+  });
+
   it('accepts nested field shapes (company.name, roleTitle.value) and does not drop usable experience entries', () => {
     const parsedBaseline: Record<string, unknown> = {
       baseline_id: 'baseline-nested-1',

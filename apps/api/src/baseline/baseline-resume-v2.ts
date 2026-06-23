@@ -147,7 +147,7 @@ function looksLikeDatesLineText(line: string): boolean {
   const yearMatches = normalized.match(/\b(?:19|20)\d{2}\b/g) ?? [];
   return (
     yearMatches.length >= 2 ||
-    (normalized.includes(' - ') || /\b(?:present|current)\b/i.test(normalized))
+    (yearMatches.length >= 1 && (normalized.includes(' - ') || /\b(?:present|current)\b/i.test(normalized)))
   );
 }
 
@@ -292,6 +292,105 @@ function parseExperienceTextIntoEntries(text: string): Array<Record<string, unkn
 
   flush();
   return entries;
+}
+
+function parseExperienceBlockString(text: string): Array<Record<string, unknown>> {
+  const lines = String(text ?? '')
+    .split(/\r?\n/)
+    .map((line) => trimToText(line))
+    .filter(Boolean)
+    .filter((line) => !isFallbackExperienceNoiseLine(line) || isTextBulletLine(line) || looksLikeDatesLineText(line) || Boolean(parseSimpleExperienceHeaderLine(line)));
+
+  const entries: Array<Record<string, unknown>> = [];
+  let current:
+    | {
+        company: string;
+        roleTitle: string;
+        dates?: string;
+        bullets: string[];
+      }
+    | null = null;
+
+  const flush = () => {
+    if (!current) return;
+    if (!current.company || !current.roleTitle || current.bullets.length === 0) {
+      current = null;
+      return;
+    }
+    entries.push({
+      company: current.company,
+      role_title: current.roleTitle,
+      ...(current.dates ? { dates: current.dates } : {}),
+      ...(current.dates ? splitCanonicalDateRangeText(current.dates) : {}),
+      details_text: current.bullets.join('\n'),
+    });
+    current = null;
+  };
+
+  for (let idx = 0; idx < lines.length; idx += 1) {
+    const line = lines[idx];
+    const header = parseSimpleExperienceHeaderLine(line);
+    if (header) {
+      flush();
+      current = {
+        company: header.company,
+        roleTitle: header.roleTitle,
+        ...(header.dates ? { dates: header.dates } : {}),
+        bullets: [],
+      };
+      const nextLine = lines[idx + 1] ?? '';
+      if (!current.dates && looksLikeDatesLineText(nextLine)) {
+        current.dates = trimToText(nextLine);
+        idx += 1;
+      }
+      continue;
+    }
+
+    if (!current) continue;
+
+    if (!current.dates && looksLikeDatesLineText(line)) {
+      current.dates = trimToText(line);
+      continue;
+    }
+
+    if (isTextBulletLine(line)) {
+      const bullet = trimToText(line.replace(/^[-â€¢*]\s+/, ''));
+      if (bullet) current.bullets.push(bullet);
+      continue;
+    }
+
+    if (isImplicitBulletCandidate(line)) {
+      current.bullets.push(line);
+    }
+  }
+
+  flush();
+  return entries;
+}
+
+function collectArrayTextLines(source: unknown): string[] {
+  if (typeof source === 'string') {
+    return [trimToText(source)].filter(Boolean);
+  }
+  if (Array.isArray(source)) {
+    return source.flatMap((item) => collectArrayTextLines(item));
+  }
+  if (isRecordLike(source)) {
+    return [
+      firstNonEmptyString(
+        source.content,
+        source.rawContent,
+        source.text,
+        source.body,
+        source.details_text,
+        source.detailsText,
+        source.description,
+        source.value,
+        source.title,
+      ),
+    ].filter(Boolean);
+  }
+  return [trimToText(source)].filter(Boolean);
 }
 
 function buildSyntheticExperienceSectionsFromSource(
@@ -473,10 +572,24 @@ function normalizeParsedExperienceSource(
   experienceType: string;
   experienceKeys: string[];
   rejectionReasons: Array<{ reason: string; count: number; sampleKeys: string[] }>;
+  arrayDiagnostics?: {
+    length: number;
+    elementTypes: string[];
+    redactedSamples: Array<{ type: string; sample: string }>;
+    rejectionReasons: Array<{ type: string; reason: string; sample: string }>;
+  };
 } {
   const experienceType = Array.isArray(source) ? 'array' : source === null ? 'null' : typeof source;
   const experienceKeys = isRecordLike(source) ? Object.keys(source).slice(0, 40) : [];
   const rejectionReasons: Array<{ reason: string; count: number; sampleKeys: string[] }> = [];
+  const arrayDiagnostics = Array.isArray(source)
+    ? {
+        length: source.length,
+        elementTypes: [] as string[],
+        redactedSamples: [] as Array<{ type: string; sample: string }>,
+        rejectionReasons: [] as Array<{ type: string; reason: string; sample: string }>,
+      }
+    : undefined;
 
   const addReason = (reason: string, sampleSource: unknown) => {
     const sampleKeys =
@@ -604,68 +717,177 @@ function normalizeParsedExperienceSource(
     return [];
   };
 
-  if (Array.isArray(source)) {
-    const entries = source.flatMap((item) => {
-      if (!isRecordLike(item)) return [];
-      const directFieldsPresent = Boolean(
-        firstNonEmptyString(
-          item.company,
-          item.company_name,
-          item.companyName,
-          item.employer,
-          item.organization,
-          item.organization_name,
-          item.org,
-          item.role_title,
-          item.roleTitle,
-          item.position,
-          item.position_title,
-          item.positionTitle,
-          item.job_title,
-          item.jobTitle,
-        ),
+  const normalizeArrayElement = (item: unknown, index: number): Array<Record<string, unknown>> => {
+    const elementType = Array.isArray(item) ? 'array' : item === null ? 'null' : typeof item;
+    if (arrayDiagnostics) {
+      arrayDiagnostics.elementTypes.push(elementType);
+      const rawSample = trimToText(
+        typeof item === 'string'
+          ? item
+          : isRecordLike(item)
+            ? firstNonEmptyString(
+                (item as Record<string, unknown>).content,
+                (item as Record<string, unknown>).rawContent,
+                (item as Record<string, unknown>).text,
+                (item as Record<string, unknown>).body,
+              )
+            : item,
       );
-      const hasSectionPayloadShape = Boolean(
-        firstNonEmptyString(item.content, item.rawContent, item.text, item.body) ||
-          item.sectionType ||
-          item.type ||
-          item.title ||
-          item.sectionTitle ||
-          item.sections ||
-          item.section ||
-          item.entries ||
-          item.items ||
-          item.blocks,
-      );
-      if (hasSectionPayloadShape && !directFieldsPresent) {
-        const sections = buildSyntheticExperienceSectionsFromSource(item, baselineId);
-        if (sections.length) {
-          const structured = extractStructuredBaselineFromSections(sections as any);
-          const structuredEntries = Array.isArray((structured as any)?.experience)
-            ? ((structured as any).experience as Array<Record<string, unknown>>)
-            : [];
-          if (structuredEntries.length) {
-            return structuredEntries.map((entry) => {
-              const dates = firstNonEmptyString(entry.dates);
-              const splitDates = dates ? splitCanonicalDateRangeText(dates) : {};
-              return {
-                company: firstNonEmptyString(entry.company),
-                role_title: firstNonEmptyString(entry.roleTitle),
-                ...(dates ? { dates } : {}),
-                ...(splitDates.start_date ? { start_date: splitDates.start_date } : {}),
-                ...(splitDates.end_date ? { end_date: splitDates.end_date } : {}),
-                ...(Array.isArray(entry.bullets) && entry.bullets.length
-                  ? { details_text: entry.bullets.map((bullet) => trimToText(bullet)).filter(Boolean).join('\n') }
-                  : {}),
-              };
-            });
-          }
+      if (rawSample) {
+        arrayDiagnostics.redactedSamples.push({ type: elementType, sample: rawSample.slice(0, 120) });
+      }
+    }
+
+    if (Array.isArray(item)) {
+      const hasStructuredObjectEntry = item.some((nested) => {
+        if (!isRecordLike(nested)) return false;
+        return Boolean(
+          firstNonEmptyString(
+            nested.company,
+            nested.company_name,
+            nested.companyName,
+            nested.employer,
+            nested.organization,
+            nested.organization_name,
+            nested.org,
+            nested.role_title,
+            nested.roleTitle,
+            nested.position,
+            nested.position_title,
+            nested.positionTitle,
+            nested.job_title,
+            nested.jobTitle,
+            nested.role,
+          ),
+        );
+      });
+
+      if (!hasStructuredObjectEntry) {
+        const joinedText = collectArrayTextLines(item).join('\n').trim();
+        if (joinedText) {
+          const blockEntries = parseExperienceBlockString(joinedText);
+          if (blockEntries.length) return blockEntries;
+          const parsedTextEntries = parseTextSource(joinedText);
+          if (parsedTextEntries.length) return parsedTextEntries;
         }
       }
-      return [normalizeEntryRecord(item)];
-    });
-    if (entries.length === 0) addReason('array_experience_source_had_no_object_entries', source);
-    return { entries, experienceType, experienceKeys, rejectionReasons };
+
+      return item.flatMap((nested, nestedIndex) => normalizeArrayElement(nested, index * 1000 + nestedIndex));
+    }
+
+    if (typeof item === 'string') {
+      const entries = parseExperienceBlockString(item);
+      if (entries.length === 0) {
+        const fallbackEntries = parseTextSource(item);
+        if (fallbackEntries.length) return fallbackEntries;
+      }
+      if (entries.length === 0 && arrayDiagnostics) {
+        arrayDiagnostics.rejectionReasons.push({
+          type: 'string',
+          reason: 'unusable_string_experience_entry',
+          sample: trimToText(item).slice(0, 120),
+        });
+      }
+      return entries;
+    }
+
+    if (!isRecordLike(item)) {
+      if (arrayDiagnostics) {
+        arrayDiagnostics.rejectionReasons.push({
+          type: elementType,
+          reason: 'non_object_entry',
+          sample: trimToText(item).slice(0, 120),
+        });
+      }
+      return [];
+    }
+
+    const record = item as Record<string, unknown>;
+    const hasSectionPayloadShape = Boolean(
+      firstNonEmptyString(record.content, record.rawContent, record.text, record.body) ||
+        record.sectionType ||
+        record.type ||
+        record.title ||
+        record.sectionTitle ||
+        record.sections ||
+        record.section ||
+        record.entries ||
+        record.items ||
+        record.blocks,
+    );
+    const directFieldsPresent = Boolean(
+      firstNonEmptyString(
+        record.company,
+        record.company_name,
+        record.companyName,
+        record.employer,
+        record.organization,
+        record.organization_name,
+        record.org,
+        record.role_title,
+        record.roleTitle,
+        record.position,
+        record.position_title,
+        record.positionTitle,
+        record.job_title,
+        record.jobTitle,
+      ),
+    );
+
+    if (hasSectionPayloadShape && !directFieldsPresent) {
+      const sections = buildSyntheticExperienceSectionsFromSource(record, baselineId);
+      if (sections.length) {
+        const structured = extractStructuredBaselineFromSections(sections as any);
+        const structuredEntries = Array.isArray((structured as any)?.experience)
+          ? ((structured as any).experience as Array<Record<string, unknown>>)
+          : [];
+        if (structuredEntries.length) {
+          return structuredEntries.map((entry) => {
+            const dates = firstNonEmptyString(entry.dates);
+            const splitDates = dates ? splitCanonicalDateRangeText(dates) : {};
+            return {
+              company: firstNonEmptyString(entry.company),
+              role_title: firstNonEmptyString(entry.roleTitle),
+              ...(dates ? { dates } : {}),
+              ...(splitDates.start_date ? { start_date: splitDates.start_date } : {}),
+              ...(splitDates.end_date ? { end_date: splitDates.end_date } : {}),
+              ...(Array.isArray(entry.bullets) && entry.bullets.length
+                ? { details_text: entry.bullets.map((bullet) => trimToText(bullet)).filter(Boolean).join('\n') }
+                : {}),
+            };
+          });
+        }
+      }
+    }
+
+    const normalized = normalizeEntryRecord(record);
+    if (firstNonEmptyString(normalized.company, normalized.role_title, normalized.details_text, normalized.content, normalized.rawContent, normalized.text)) {
+      return [normalized];
+    }
+
+    if (arrayDiagnostics) {
+      arrayDiagnostics.rejectionReasons.push({
+        type: 'object',
+        reason: 'object_entry_unusable',
+        sample: JSON.stringify(Object.keys(record).slice(0, 12)).slice(0, 120),
+      });
+    }
+    return [];
+  };
+
+  if (Array.isArray(source)) {
+    const entries = source.flatMap((item, index) => normalizeArrayElement(item, index));
+    if (entries.length === 0) {
+      addReason('array_experience_source_had_no_object_entries', source);
+      if (arrayDiagnostics) {
+        arrayDiagnostics.rejectionReasons.push({
+          type: 'array',
+          reason: 'array_experience_source_had_no_object_entries',
+          sample: `length=${source.length}`,
+        });
+      }
+    }
+    return { entries, experienceType, experienceKeys, rejectionReasons, ...(arrayDiagnostics ? { arrayDiagnostics } : {}) };
   }
 
   if (typeof source === 'string') {
@@ -1049,6 +1271,12 @@ export function buildValidatedResumeV2FromParsedBaseline(
         survivingBlocks: number;
         experienceType: string;
         experienceKeys: string[];
+        arrayDiagnostics?: {
+          length: number;
+          elementTypes: string[];
+          redactedSamples: Array<{ type: string; sample: string }>;
+          rejectionReasons: Array<{ type: string; reason: string; sample: string }>;
+        };
         rejectionReasons: Array<{ reason: string; count: number; sampleKeys: string[] }>;
       }
     | null = null;
@@ -1385,6 +1613,9 @@ export function buildValidatedResumeV2FromParsedBaseline(
       survivingBlocks: blocks.length,
       experienceType: parsedExperienceType,
       experienceKeys: parsedExperienceKeys,
+      ...(normalizedExperienceSource.arrayDiagnostics
+        ? { arrayDiagnostics: normalizedExperienceSource.arrayDiagnostics }
+        : {}),
       rejectionReasons: Array.from(rejectionReasons.entries()).map(([reason, payload]) => ({
         reason,
         count: payload.count,
