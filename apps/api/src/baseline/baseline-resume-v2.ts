@@ -10,8 +10,54 @@ import {
 import { BaselineIncludePolicy, BaselineSectionType } from './baseline-section.entity';
 import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
 
+export const DATE_RANGE_MATCHER_VERSION = '2026-06-23-date-range-v3' as const;
+
+const MONTH_YEAR_TOKEN =
+  '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(?:19|20)\\d{2}';
+const YEAR_TOKEN = '(?:19|20)\\d{2}';
+const DATE_TOKEN = `(?:${MONTH_YEAR_TOKEN}|${YEAR_TOKEN})`;
+const DATE_RANGE_SEPARATOR_TOKEN = '(?:\\s*(?:\\||[-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2015\\u2212])\\s*|\\s+to\\s+)';
+const DATE_RANGE_MATCHER_RE = new RegExp(
+  `^\\s*${DATE_TOKEN}${DATE_RANGE_SEPARATOR_TOKEN}(?:${DATE_TOKEN}|present|current)\\s*$`,
+  'i',
+);
+
 function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function readRuntimeGitCommit(): string | null {
+  const candidates = [
+    process.env.GIT_COMMIT,
+    process.env.BUILD_SHA,
+    process.env.GITHUB_SHA,
+    process.env.VERCEL_GIT_COMMIT_SHA,
+    process.env.CI_COMMIT_SHA,
+    process.env.npm_package_gitHead,
+  ];
+  for (const candidate of candidates) {
+    const text = trimToText(candidate);
+    if (text) return text;
+  }
+  return null;
+}
+
+function runtimeSupportsDateRange(text: string): boolean {
+  return DATE_RANGE_MATCHER_RE.test(trimToText(text));
+}
+
+export function getBaselineRuntimeMarker() {
+  return {
+    gitCommit: readRuntimeGitCommit(),
+    dateRangeMatcherVersion: DATE_RANGE_MATCHER_VERSION,
+    matcherCapabilities: {
+      supportsDec2022Aug2025: runtimeSupportsDateRange('Dec 2022 - Aug 2025'),
+      supportsDec2020Mar2024: runtimeSupportsDateRange('Dec 2020 – March 2024'),
+      supportsOct2018Present: runtimeSupportsDateRange('Oct 2018 - Present'),
+      supportsOctober2015Mar2018: runtimeSupportsDateRange('October 2015 - March 2018'),
+      supports2021PipePresent: runtimeSupportsDateRange('2021 | Present'),
+    },
+  };
 }
 
 function isContactLikeText(value: string): boolean {
@@ -1727,6 +1773,7 @@ export function buildValidatedResumeV2FromParsedBaseline(
             thematicFieldsFound: thematicFieldsFound.map((entry) => entry.field),
             requiredExperienceFields: ['company', 'roleTitle', 'dateRange', 'bullets'],
             nextAction: 'Upload a resume with work history entries or add role chronology before generating documents.',
+            runtime: getBaselineRuntimeMarker(),
             diagnostics: {
               inspectedKeys,
               parsedExperiencePresent: parsedExperienceSourcePresent,
