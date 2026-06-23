@@ -1,5 +1,15 @@
 ﻿import type { BaselineSection } from './baseline-section.entity';
 
+import {
+  canonicalizeDateRange as sharedCanonicalizeDateRange,
+  extractDateRangeMatch as sharedExtractDateRangeMatch,
+  MONTH_YEAR_RE,
+  MONTH_YEAR_TOKEN,
+  looksLikeDatesLine as sharedLooksLikeDatesLine,
+  normalizeDateRangeSeparators as sharedNormalizeDateRangeSeparators,
+  splitCanonicalDateRangeText as sharedSplitCanonicalDateRangeText,
+} from './date-range-parser';
+
 export type StructuredBaseline = {
   contact?: Record<string, unknown>;
   summary?: string;
@@ -68,45 +78,12 @@ function isBulletLine(line: string): boolean {
 function stripBulletPrefix(line: string): string {
   return line.replace(/^[-•*]\s+/, '').trim();
 }
-
-
-const MONTH_YEAR_TOKEN =
-  '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(?:19|20)\\d{2}';
-const MONTH_YEAR_RE = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(?:19|20)\d{2}\b/i;
-const YEAR_TOKEN = '(?:19|20)\\d{2}';
-const DATE_TOKEN = '(?:' + MONTH_YEAR_TOKEN + '|' + YEAR_TOKEN + ')';
-const DATE_RANGE_SEPARATOR_TOKEN = '(?:\\s*(?:\\||[-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2015\\u2212])\\s*|\\s+to\\s+)';
-const DATE_RANGE_RE = new RegExp(
-  '\\b(' + DATE_TOKEN + ')\\b' + DATE_RANGE_SEPARATOR_TOKEN + '(?:(' + DATE_TOKEN + ')|(present|current))',
-  'i',
-);
 function extractDateRangeMatch(value: string): { start: string; end: string; matchedText: string } | null {
-  const raw = String(value ?? '').replace(/\s+/g, ' ').trim();
-  if (!raw) return null;
-  const normalized = normalizeDateRangeSeparators(raw);
-  const match = normalized.match(DATE_RANGE_RE);
-  if (!match) return null;
-  const start = String(match[1] ?? '').replace(/[),.;:]+$/, '').trim();
-  const end = String(match[2] ?? match[3] ?? '').replace(/[),.;:]+$/, '').trim();
-  if (!start || !end) return null;
-  return {
-    start,
-    end: /\b(?:present|current)\b/i.test(end) ? 'Present' : end,
-    matchedText: String(match[0] ?? '').trim(),
-  };
+  return sharedExtractDateRangeMatch(value);
 }
 
 function normalizeDateRangeSeparators(text: string): string {
-
-  return String(text ?? '')
-    .replace(/\u00C3\u00A2\u00E2\u0082\u00AC\u00E2\u0080\u009D/g, '-')
-    .replace(/\u00E2\u0080\u0094/g, '-')
-    .replace(/\u00E2\u0080\u0093/g, '-')
-    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, '-')
-    .replace(/\s+to\s+/gi, ' - ')
-    .replace(/\s*-\s*/g, ' - ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return sharedNormalizeDateRangeSeparators(text);
 }
 
 function stripLeadingLocationFromDatesLine(value: string): string {
@@ -118,32 +95,15 @@ function stripLeadingLocationFromDatesLine(value: string): string {
 }
 
 function canonicalizeDateRange(text: string): string {
-  const normalized = stripLeadingLocationFromDatesLine(text);
-  const match = extractDateRangeMatch(normalized);
-  if (!match) return normalized;
-  return `${match.start} – ${match.end}`.replace(/\s+/g, ' ').trim();
+  return sharedCanonicalizeDateRange(text);
 }
 
 function splitCanonicalDateRangeText(value: string): { start_date?: string; end_date?: string } {
-  const text = trimToText(value);
-  if (!text) return {};
-  const match = extractDateRangeMatch(text);
-  if (match) {
-    return { start_date: match.start, end_date: match.end };
-  }
-  const normalized = normalizeDateRangeSeparators(text);
-  const parts = normalized.split(' - ').map((part) => trimToText(part)).filter(Boolean);
-  if (parts.length === 1) {
-    return { start_date: parts[0] };
-  }
-  return {};
+  return sharedSplitCanonicalDateRangeText(value);
 }
 
 function looksLikeDatesLine(value: string): boolean {
-  const raw = trimToText(value);
-  if (!raw) return false;
-  const normalized = stripLeadingLocationFromDatesLine(raw);
-  return Boolean(extractDateRangeMatch(normalized)) && normalized.split(/\s+/).length <= 12;
+  return sharedLooksLikeDatesLine(value);
 }
 
 function looksLikeRoleTitle(value: string): boolean {

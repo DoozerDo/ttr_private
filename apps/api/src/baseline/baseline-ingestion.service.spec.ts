@@ -240,9 +240,11 @@ describe('BaselineIngestionService', () => {
 
     expect(result.canonical.experience).toHaveLength(2);
     expect(result.trace?.extractedText?.textLength).toBeGreaterThan(0);
+    expect(result.trace?.extractedText?.dateRangeCount).toBeGreaterThan(0);
     expect(result.trace?.parserOutput?.experienceSectionCount).toBeGreaterThan(0);
     expect(result.trace?.structuredBaselineExtractor?.candidateHeaderCount).toBeGreaterThan(0);
     expect(result.trace?.baselineIngestion?.candidateBlockCount).toBeGreaterThan(0);
+    expect(result.trace?.baselineIngestion?.rejectionReasons ?? []).not.toContain('experience.date_range');
     expect(result.canonical.experience[0]).toMatchObject({
       company: 'Acme Support',
       role: 'Senior Support Operations Manager',

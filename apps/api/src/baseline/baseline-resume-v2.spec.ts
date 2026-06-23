@@ -1,6 +1,7 @@
 import { UnprocessableEntityException } from '@nestjs/common';
 import { buildValidatedResumeV2FromParsedBaseline } from './baseline-resume-v2';
 import { validateNormalizedResumeDocument } from '../resume/resume-normalization';
+import { supportsDateRangeText } from './date-range-parser';
 
 describe('buildValidatedResumeV2FromParsedBaseline', () => {
   it('builds a valid ResumeV2 with populated experience', () => {
@@ -23,6 +24,14 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     expect((resumeV2 as any).experience.length).toBeGreaterThan(0);
     const validation = validateNormalizedResumeDocument(resumeV2 as any);
     expect(validation.valid).toBe(true);
+  });
+
+  it('uses the shared date parser for the approved safe date formats', () => {
+    expect(supportsDateRangeText('Dec 2022 - Aug 2025')).toBe(true);
+    expect(supportsDateRangeText('Dec 2020 – March 2024')).toBe(true);
+    expect(supportsDateRangeText('Oct 2018 - Present')).toBe(true);
+    expect(supportsDateRangeText('October 2015 - March 2018')).toBe(true);
+    expect(supportsDateRangeText('2021 | Present')).toBe(true);
   });
 
   it('accepts alternate parser field shapes (employer/jobTitle/highlights) and produces usable experience', () => {

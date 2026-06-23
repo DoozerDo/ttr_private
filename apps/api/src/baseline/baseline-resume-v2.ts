@@ -9,18 +9,13 @@ import {
 } from '../resume/resume-normalization';
 import { BaselineIncludePolicy, BaselineSectionType } from './baseline-section.entity';
 import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
+import {
+  looksLikeDatesLine as sharedLooksLikeDatesLine,
+  splitCanonicalDateRangeText as sharedSplitCanonicalDateRangeText,
+  supportsDateRangeText as sharedSupportsDateRangeText,
+} from './date-range-parser';
 
 export const DATE_RANGE_MATCHER_VERSION = '2026-06-23-date-range-v3' as const;
-
-const MONTH_YEAR_TOKEN =
-  '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(?:19|20)\\d{2}';
-const YEAR_TOKEN = '(?:19|20)\\d{2}';
-const DATE_TOKEN = `(?:${MONTH_YEAR_TOKEN}|${YEAR_TOKEN})`;
-const DATE_RANGE_SEPARATOR_TOKEN = '(?:\\s*(?:\\||[-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2015\\u2212])\\s*|\\s+to\\s+)';
-const DATE_RANGE_MATCHER_RE = new RegExp(
-  `^\\s*${DATE_TOKEN}${DATE_RANGE_SEPARATOR_TOKEN}(?:${DATE_TOKEN}|present|current)\\s*$`,
-  'i',
-);
 
 function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -43,7 +38,7 @@ function readRuntimeGitCommit(): string | null {
 }
 
 function runtimeSupportsDateRange(text: string): boolean {
-  return DATE_RANGE_MATCHER_RE.test(trimToText(text));
+  return sharedSupportsDateRangeText(text);
 }
 
 export function getBaselineRuntimeMarker() {
@@ -170,16 +165,7 @@ function firstNonEmptyString(...values: unknown[]): string {
 }
 
 function splitCanonicalDateRangeText(value: string): { start_date?: string; end_date?: string } {
-  const text = trimToText(value).replace(/\s*[\u2013\u2014]\s*/g, ' - ');
-  if (!text) return {};
-  const parts = text.split(/\s+-\s+/).map((part) => trimToText(part)).filter(Boolean);
-  if (parts.length >= 2) {
-    return { start_date: parts[0], end_date: parts.slice(1).join(' - ') };
-  }
-  if (parts.length === 1) {
-    return { start_date: parts[0] };
-  }
-  return {};
+  return sharedSplitCanonicalDateRangeText(value);
 }
 
 function isTextBulletLine(line: string): boolean {
@@ -187,14 +173,7 @@ function isTextBulletLine(line: string): boolean {
 }
 
 function looksLikeDatesLineText(line: string): boolean {
-  const text = trimToText(line);
-  if (!text) return false;
-  const normalized = text.replace(/\s*[\u2013\u2014]\s*/g, ' - ');
-  const yearMatches = normalized.match(/\b(?:19|20)\d{2}\b/g) ?? [];
-  return (
-    yearMatches.length >= 2 ||
-    (yearMatches.length >= 1 && (normalized.includes(' - ') || /\b(?:present|current)\b/i.test(normalized)))
-  );
+  return sharedLooksLikeDatesLine(line);
 }
 
 function isImplicitBulletCandidate(line: string): boolean {
