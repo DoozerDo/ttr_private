@@ -220,8 +220,8 @@ export function assembleResumeFromStructuredBaseline(
 
     const strongRoles = expanded.filter((entry) => (entry.bullets ?? []).filter((b) => trimToText(b).length >= 20).length >= 2);
     const filtered = strongRoles.length >= 2 ? strongRoles : expanded;
-    // Prefer fewer strong roles only when that still preserves a multi-role verified baseline.
-    return filtered.slice(0, 4);
+    // Preserve every truthfully structured role that survives the noise filters.
+    return filtered;
   })();
 
   const competencies = (structured.skills ?? []).map((s) => trimToText(s)).filter(Boolean);
@@ -384,7 +384,8 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
     const weakFiltered = allowed.filter(
       (x) => !isWeakFragmentRole({ company: x.entry?.company, roleTitle: x.entry?.roleTitle }),
     );
-    return (weakFiltered.length ? weakFiltered : allowed).slice(0, 4);
+    // Preserve every role that survives the structured baseline filters.
+    return weakFiltered.length ? weakFiltered : allowed;
   })();
 
   const selectedExperience = selected.map((x) => {

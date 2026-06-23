@@ -110,6 +110,49 @@ function normalizeCoverLetterResponse(payload: unknown): unknown {
   };
 }
 
+function normalizeHydratedResult<TPreview>(
+  artifactType: "resume" | "cover_letter",
+  payload: unknown,
+  preview: TPreview | null,
+): ArtifactGenerationResult<TPreview> | null {
+  const record = toRecord(payload);
+  if (!record) return null;
+
+  const nestedKey = artifactType === "resume" ? "resumeResult" : "coverLetterResult";
+  const nestedResult = toRecord(record[nestedKey]);
+  const candidate = nestedResult ?? record;
+
+  const generationState = String(candidate.generationState ?? "").trim();
+  const qualityStatus = String(candidate.qualityStatus ?? "").trim();
+  if (generationState && qualityStatus) {
+    return candidate as ArtifactGenerationResult<TPreview>;
+  }
+
+  const status = String(candidate.status ?? "").trim().toLowerCase();
+  const generationStatus = String(candidate.generationStatus ?? "").trim().toLowerCase();
+  const exportReady = candidate.exportReady === true;
+  if (status !== "success" || generationStatus !== "success" || !exportReady || !preview) {
+    return nestedResult ? (nestedResult as ArtifactGenerationResult<TPreview>) : null;
+  }
+
+  return {
+    ...(candidate as Record<string, unknown>),
+    artifactType,
+    generationState: "generated_usable",
+    qualityStatus: "pass",
+    preview,
+    correctionReasons: Array.isArray(candidate.correctionReasons) ? candidate.correctionReasons : [],
+    exportReady: true,
+    exports: { docx: true, pdf: true },
+    actions: {
+      canEdit: true,
+      canRegenerate: true,
+      canExport: true,
+      canSaveToOpportunities: true,
+    },
+  } as ArtifactGenerationResult<TPreview>;
+}
+
 function hasNonEmptyText(value: unknown): boolean {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -189,9 +232,11 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
   const normalizedResumeResponse = normalizeResumeResponse(input.resumeResponse);
   const normalizedCoverLetterResponse = normalizeCoverLetterResponse(input.coverLetterResponse);
 
-  const resumeResult = toRecord(normalizedResumeResponse)?.resumeResult as ArtifactGenerationResult<unknown> | undefined;
-  const coverLetterResult = toRecord(normalizedCoverLetterResponse)?.coverLetterResult as ArtifactGenerationResult<unknown> | undefined;
-  const resumePreviewModel = readResumeResultPreviewModel(resumeResult?.preview);
+  const resumePreviewModel = readResumeResultPreviewModel(normalizedResumeResponse);
+  const resumeResult =
+    normalizeHydratedResult<ResumeModel>("resume", normalizedResumeResponse, resumePreviewModel) ??
+    (toRecord(normalizedResumeResponse)?.resumeResult as ArtifactGenerationResult<unknown> | undefined) ??
+    null;
 
   const resumePresenter = presentResumeGeneration(
     resumePreviewModel
@@ -208,12 +253,21 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
   const coverPresenter = presentCoverLetterGeneration(normalizedCoverLetterResponse);
 
   const resumeModel: ResumeModel | null = resumePreviewModel;
+  const coverParagraphPreview = buildCoverLetterParagraphs(normalizedCoverLetterResponse);
+  const coverLetterResult =
+    normalizeHydratedResult<{ paragraphs: string[] }>(
+      "cover_letter",
+      normalizedCoverLetterResponse,
+      coverParagraphPreview.length ? { paragraphs: coverParagraphPreview } : null,
+    ) ??
+    (toRecord(normalizedCoverLetterResponse)?.coverLetterResult as ArtifactGenerationResult<unknown> | undefined) ??
+    null;
   const coverParagraphs = (() => {
     const previewRecord = coverLetterResult?.preview && typeof coverLetterResult.preview === "object"
       ? (coverLetterResult.preview as Record<string, unknown>)
       : null;
     const paragraphs = previewRecord ? previewRecord.paragraphs : null;
-    return Array.isArray(paragraphs) ? paragraphs.map((p) => String(p ?? "")).filter(Boolean) : buildCoverLetterParagraphs(normalizedCoverLetterResponse);
+    return Array.isArray(paragraphs) ? paragraphs.map((p) => String(p ?? "")).filter(Boolean) : coverParagraphPreview;
   })();
   const coverLetterModel: StudioCoverLetterModel | null = coverParagraphs.length
     ? { paragraphs: coverParagraphs }

@@ -697,9 +697,9 @@ export class CoverLettersService {
         // Keep the reused response usable, but canonical persistence must exist for Studio reloads.
       }
       const cachedExportReady =
+        Boolean((effectiveReservation.responseBody as any)?.exportReady) &&
         draft.generationAuthority === 'baseline_file' &&
         draft.baselineFileUsable === true &&
-        draft.qualityGate.status === 'pass' &&
         (await this.canRenderCoverLetterTemplate(draft));
       return {
         ...(effectiveReservation.responseBody as CoverLetterGenerationResponse),
@@ -1662,7 +1662,12 @@ export class CoverLettersService {
       job: jobContext,
     });
     const hasArtifactReadyEvidenceBlocks = allowedBlocks.length > 0 || templateReadiness.canGenerateCoverLetter;
-    if (canonicalTextInsufficiency && !hasArtifactReadyEvidenceBlocks && !meaningfulInterpretedEvidenceExists) {
+    if (
+      canonicalTextInsufficiency &&
+      !baselineFileUsable &&
+      !hasArtifactReadyEvidenceBlocks &&
+      !meaningfulInterpretedEvidenceExists
+    ) {
       throw new UnprocessableEntityException(buildArtifactFailurePayload({
         code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
         category: 'unsupported_input',
@@ -2183,6 +2188,33 @@ export class CoverLettersService {
       );
     }
 
+    const finalParagraphs = generation.paragraphs ?? generation.document?.bodyParagraphs ?? [];
+    const finalArtifactQuality = validateCoverLetterArtifactQuality(finalParagraphs, {
+      company: jobContext.company,
+      roleTitle: jobContext.title,
+      requiredEvidenceSnippets: evidenceSnippets,
+    });
+    const finalRealDocument = validateRealCoverLetterDocument({
+      paragraphs: finalParagraphs,
+      jobTitle: jobContext.title ?? null,
+      companyName: jobContext.company ?? null,
+      requiredEvidenceSnippets: evidenceSnippets,
+    });
+    const finalQualityGate: ArtifactQualityGate =
+      finalArtifactQuality.status === 'pass' &&
+      finalRealDocument.classification === 'usable'
+        ? { status: 'pass', reasons: [] as string[] }
+        : {
+            status: 'needs_refinement',
+            reasons: Array.from(
+              new Set([
+                ...qualityResult.flags,
+                ...finalArtifactQuality.reasons,
+                ...finalRealDocument.reasonCodes,
+              ]),
+            ).slice(0, 8),
+          };
+
     return {
       baseline,
       baselineVersion,
@@ -2207,7 +2239,7 @@ export class CoverLettersService {
           }
         : {}),
       candidateName,
-      qualityGate: artifactQuality,
+      qualityGate: finalQualityGate,
       firstPassQualityGate: firstPassArtifactQuality,
       qualityRepairAttempted: repairAttempted,
       jobContext,

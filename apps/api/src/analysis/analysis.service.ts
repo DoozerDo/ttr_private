@@ -36,7 +36,10 @@ import {
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { BaselineSchema, BaselineSchemaCoreShape } from '../baseline/baseline-schema';
-import { evaluateResumeV2Usability } from '../baseline/baseline-resume-v2';
+import {
+  assertUsableResumeV2,
+  evaluateResumeV2Usability,
+} from '../baseline/baseline-resume-v2';
 import { ComplianceService } from '../compliance/compliance.service';
 import {
   ComplianceAction,
@@ -107,6 +110,10 @@ import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 import { findUserByIdSchemaSafe } from '../users/beta-access-schema-compat';
 import { ResumeService } from '../resume/resume.service';
+import {
+  normalizeNormalizedResumeDocument,
+  validateNormalizedResumeDocument,
+} from '../resume/resume-normalization';
 import { CoverLettersService } from '../cover-letters/cover-letters.service';
 import { VERIFIED_ONLY_GENERATION_THRESHOLD } from '../config/verifiedOnlyGenerationThreshold';
 import { StudioArtifact, StudioArtifactLifecycleStatus } from '../studio-artifacts/studio-artifact.entity';
@@ -1287,6 +1294,7 @@ export class AnalysisService {
   ): Array<{ type?: string; content: string }> {
     const sections: Array<{ type?: string; content: string }> = [];
 
+    const identitySummary = canonical.identity.summary?.trim();
     const identityParts = [
       canonical.identity.full_name?.trim(),
       canonical.identity.current_title?.trim(),
@@ -1294,7 +1302,12 @@ export class AnalysisService {
       canonical.identity.location?.trim(),
     ].filter((part): part is string => Boolean(part));
 
-    if (identityParts.length) {
+    if (identitySummary) {
+      sections.push({
+        type: BaselineSectionType.SUMMARY,
+        content: identitySummary,
+      });
+    } else if (identityParts.length) {
       sections.push({
         type: BaselineSectionType.SUMMARY,
         content: identityParts.join(' | '),
@@ -1359,8 +1372,124 @@ export class AnalysisService {
     return sections;
   }
 
+  private buildCanonicalBaselineFromResumeV2(
+    resumeV2Json: unknown,
+  ): BaselineSchemaCoreShape {
+    const normalized = normalizeNormalizedResumeDocument(
+      resumeV2Json as Parameters<typeof normalizeNormalizedResumeDocument>[0],
+    );
+    const validation = validateNormalizedResumeDocument(normalized);
+    if (!validation.valid) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'baseline_resume_v2_invalid',
+          message:
+            'Persisted Resume V2 is invalid for canonical scoring. Please re-upload your baseline and try again.',
+          details: {
+            reasons: validation.reasons,
+          },
+        },
+      });
+    }
+
+    const currentExperience = normalized.experience?.[0] ?? null;
+    return {
+      schema_version: 'baseline_schema_v1',
+      user_verified: true,
+      identity: {
+        full_name: normalized.heading.name.trim(),
+        summary: normalized.summary?.trim() ?? null,
+        current_title: currentExperience?.roleTitle?.trim() ?? null,
+        current_company: currentExperience?.company?.trim() ?? null,
+        location: normalized.heading.contactLine?.trim() ?? null,
+      },
+      experience: (normalized.experience ?? []).map((entry) => ({
+        company: entry.company.trim(),
+        role: entry.roleTitle.trim(),
+        start_date: entry.startDate?.trim() ?? null,
+        end_date: entry.endDate?.trim() ?? null,
+        evidence: [],
+        company_name: entry.company.trim(),
+        role_title: entry.roleTitle.trim(),
+        scope_summary: entry.dateRange?.trim() ?? undefined,
+        details_text: (entry.bullets ?? []).join('\n').trim(),
+      })),
+      education: (normalized.education ?? []).map((entry) => ({
+        school: entry.institution.trim(),
+        degree: entry.degree?.trim() ?? null,
+        startDate: null,
+        endDate: null,
+        evidence: [],
+      })),
+      skills: [
+        ...(normalized.competencies ?? []),
+        ...(normalized.coreCompetencies ?? []),
+      ]
+        .map((name) => String(name ?? '').trim())
+        .filter(Boolean)
+        .map((name) => ({ name, category: null })),
+      people_leadership: {
+        direct_reports: null,
+        managers_led: null,
+        global_teams: null,
+      },
+      operational_ownership: {
+        functions_owned: [],
+        process_design: null,
+        process_scaling: null,
+      },
+      tooling_and_platforms: {
+        tools: [],
+        ownership_level: 'unknown',
+      },
+      cross_functional_partnership: {
+        product: null,
+        engineering: null,
+        sales_cs: null,
+        executive: null,
+      },
+      customer_advocacy: {
+        executive_escalations: null,
+        voice_of_customer: null,
+        post_incident_rca: null,
+      },
+      scale_and_scope: {
+        customer_segment: 'unknown',
+        geo_scope: 'unknown',
+        org_stage: 'unknown',
+      },
+      metrics_and_outcomes: {
+        metrics_present: false,
+        metrics: [],
+      },
+      skills_and_tools: {
+        tools: [
+          ...(normalized.competencies ?? []),
+          ...(normalized.coreCompetencies ?? []),
+        ]
+          .map((name) => String(name ?? '').trim())
+          .filter(Boolean),
+        methodologies: [],
+        domains: [],
+      },
+      system_generated_read_only: {
+        missing_fields: [],
+        ambiguity_flags: [],
+        low_confidence_extractions: [],
+      },
+    };
+  }
+
+  private buildCanonicalScoringBaseline(baseline: Baseline): Baseline {
+    return {
+      ...baseline,
+      sections: [],
+    };
+  }
+
   private getCanonicalBaselineForScoring(
     baseline: Baseline,
+    options?: { requireResumeV2Authority?: boolean },
   ): CanonicalBaselineResult {
     const records = baseline.parsedRecords ?? [];
     const latest = records
@@ -1371,16 +1500,28 @@ export class AnalysisService {
         )[0];
 
     if (!latest) {
+      if (options?.requireResumeV2Authority) {
+        throw new UnprocessableEntityException({
+          error: {
+            code: 'baseline_resume_v2_missing',
+            message:
+              'Persisted Resume V2 is missing. Please re-upload your baseline before scoring.',
+          },
+        });
+      }
       return {
         canonical: this.buildFallbackCanonicalBaseline(baseline),
         fallbackUsed: true,
       };
     }
 
-    // Product contract: do not allow scoring on a baseline that cannot produce a usable Resume V2.
-    // Scoring must remain tied to the requested baseline/job pair even when Resume V2 usability is not yet ready.
-    // Downstream generation gates can still enforce readiness, but fit scoring should continue to produce a result.
     const resumeV2 = (latest as any).resumeV2Json ?? null;
+    if (options?.requireResumeV2Authority) {
+      assertUsableResumeV2(resumeV2);
+      const canonical = this.buildCanonicalBaselineFromResumeV2(resumeV2);
+      return { canonical, fallbackUsed: false };
+    }
+
     const resumeV2Usability = evaluateResumeV2Usability(resumeV2);
     if (!resumeV2Usability.usable) {
       this.logger.warn(
@@ -1663,12 +1804,15 @@ export class AnalysisService {
     baselineVersion?: number | null,
   ) {
     const { canonical: canonicalBaseline } =
-      this.getCanonicalBaselineForScoring(baseline);
+      this.getCanonicalBaselineForScoring(baseline, {
+        requireResumeV2Authority: true,
+      });
     const canonicalSections = this.buildCanonicalSectionPayload(
       canonicalBaseline,
     );
+    const scoringBaseline = this.buildCanonicalScoringBaseline(baseline);
     const baselineSelection = selectBaselineTextForScoring({
-      baseline,
+      baseline: scoringBaseline,
       canonicalSections,
     });
     const calibration = await this.getCalibration(userId);
@@ -2381,12 +2525,15 @@ export class AnalysisService {
       payload.selected_block_ids,
     );
     const { canonical: canonicalBaseline } =
-      this.getCanonicalBaselineForScoring(baseline);
+      this.getCanonicalBaselineForScoring(baseline, {
+        requireResumeV2Authority: true,
+      });
     const canonicalSections = this.buildCanonicalSectionPayload(
       canonicalBaseline,
     );
+    const scoringBaseline = this.buildCanonicalScoringBaseline(baseline);
     const baselineSelection = selectBaselineTextForScoring({
-      baseline,
+      baseline: scoringBaseline,
       normalizedSelectedBlockIds,
       canonicalSections,
     });
@@ -2784,14 +2931,6 @@ export class AnalysisService {
       });
     }
 
-    const includedSections =
-      baseline.sections?.filter(
-        (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
-      ) ?? [];
-
-    const complianceBaselineSections =
-      this.complianceService.normalizeSectionsForOutput(includedSections);
-
     const jobId = payload.jobId?.trim();
     const job = jobId
       ? await this.jobRepository.findOne({
@@ -2823,23 +2962,40 @@ export class AnalysisService {
         this.logShortTextWarningOnce(shortTextWarningKey, warningMessage);
       }
 
-      const baselineText = this.buildBaselineText(includedSections);
-      const insufficientBaselineDetails =
-        getInsufficientExtractedTextDetails(baselineText);
-      if (insufficientBaselineDetails) {
-        const payload = {
-          errorCode: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
-          code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
-          message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
-          details: insufficientBaselineDetails,
-          error: {
+      const { canonical: canonicalBaseline } =
+        this.getCanonicalBaselineForScoring(baseline, {
+          requireResumeV2Authority: true,
+        });
+      const canonicalSections = this.buildCanonicalSectionPayload(
+        canonicalBaseline,
+      );
+      const scoringBaseline = this.buildCanonicalScoringBaseline(baseline);
+      const baselineSelection = selectBaselineTextForScoring({
+        baseline: scoringBaseline,
+        canonicalSections,
+      });
+      const baselineText = baselineSelection.normalizedBaselineText;
+      if (baselineSelection.source !== 'baseline_parsed') {
+        const insufficientBaselineDetails =
+          getInsufficientExtractedTextDetails(baselineText);
+        if (insufficientBaselineDetails) {
+          const payload = {
+            errorCode: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
             code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
             message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
             details: insufficientBaselineDetails,
-          },
-        };
-        throw new UnprocessableEntityException(payload);
+            error: {
+              code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+              message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+              details: insufficientBaselineDetails,
+            },
+          };
+          throw new UnprocessableEntityException(payload);
+        }
       }
+      const sectionPayload = baselineSelection.sectionsForScoring;
+      const complianceBaselineSections =
+        this.complianceService.normalizeSectionsForOutput(sectionPayload);
       const baselineKeywords = this.normalizeKeywords(baselineText);
       const jobKeywords = this.normalizeKeywords(jobDescription);
 
@@ -2894,7 +3050,7 @@ export class AnalysisService {
         baselineVersion: { hash: baseline.hash } as BaselineVersion,
         job,
         outputHash,
-        baselineSections: complianceBaselineSections,
+          baselineSections: complianceBaselineSections,
         generatedSections: generatedSectionsForCompliance,
         debugCompliance: Boolean(payload.debugCompliance),
       });
@@ -3060,17 +3216,20 @@ export class AnalysisService {
       const {
         canonical: canonicalBaseline,
         fallbackUsed: baselineFallbackUsed,
-      } = this.getCanonicalBaselineForScoring(baseline);
+      } = this.getCanonicalBaselineForScoring(baseline, {
+        requireResumeV2Authority: true,
+      });
       const canonicalSections = this.buildCanonicalSectionPayload(
         canonicalBaseline,
       );
+      const scoringBaseline = this.buildCanonicalScoringBaseline(baseline);
       currentStage = "parsing";
       logStageLifecycle("parse_started", currentStage);
       logAttemptEvent?.("baseline_parsing_started", {
         stage: currentStage,
       });
       const baselineSelection = selectBaselineTextForScoring({
-        baseline,
+        baseline: scoringBaseline,
         canonicalSections,
       });
       if (baselineFallbackUsed) {
@@ -3086,21 +3245,23 @@ export class AnalysisService {
         fallbackUsed: baselineFallbackUsed,
       });
       const baselineText = baselineSelection.normalizedBaselineText;
-      const insufficientBaselineDetails =
-        getInsufficientExtractedTextDetails(baselineText);
-      if (insufficientBaselineDetails) {
-        const payload = {
-          errorCode: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
-          code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
-          message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
-          details: insufficientBaselineDetails,
-          error: {
+      if (baselineSelection.source !== 'baseline_parsed') {
+        const insufficientBaselineDetails =
+          getInsufficientExtractedTextDetails(baselineText);
+        if (insufficientBaselineDetails) {
+          const payload = {
+            errorCode: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
             code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
             message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
             details: insufficientBaselineDetails,
-          },
-        };
-        throw new UnprocessableEntityException(payload);
+            error: {
+              code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+              message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+              details: insufficientBaselineDetails,
+            },
+          };
+          throw new UnprocessableEntityException(payload);
+        }
       }
       const sectionPayload = baselineSelection.sectionsForScoring;
 
@@ -3548,12 +3709,16 @@ export class AnalysisService {
       if (freshInputsHash !== inputsHash) {
         if (process.env.NODE_ENV !== 'production') {
           const freshCanonicalBaseline =
-            this.getCanonicalBaselineForScoring(freshBaseline);
+            this.getCanonicalBaselineForScoring(freshBaseline, {
+              requireResumeV2Authority: true,
+            });
           const freshCanonicalSections = this.buildCanonicalSectionPayload(
             freshCanonicalBaseline.canonical,
           );
+          const freshScoringBaseline =
+            this.buildCanonicalScoringBaseline(freshBaseline);
           const freshBaselineSelection = selectBaselineTextForScoring({
-            baseline: freshBaseline,
+            baseline: freshScoringBaseline,
             canonicalSections: freshCanonicalSections,
           });
           const freshJobTextForScoring = buildJobTextForScoring({
@@ -4092,20 +4257,12 @@ export class AnalysisService {
       });
     }
 
-    const includedSections =
-      baseline.sections?.filter(
-        (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
-      ) ?? [];
-
     const baselineVersionValue = payload.baselineVersion ?? baseline.version ?? 0;
+    const scoringBaseline = this.buildCanonicalScoringBaseline(baseline);
     const baselineForHash: Baseline = {
-      ...baseline,
-      sections: includedSections,
+      ...scoringBaseline,
       version: baselineVersionValue,
     };
-
-    const complianceBaselineSections =
-      this.complianceService.normalizeSectionsForOutput(includedSections);
 
     const calibration = await this.getCalibration(userId);
     const dimensionWeights = this.mapCalibrationToDimensionWeights(
@@ -4113,11 +4270,15 @@ export class AnalysisService {
     );
 
     const { canonical: canonicalBaseline } =
-      this.getCanonicalBaselineForScoring(baseline);
+      this.getCanonicalBaselineForScoring(baseline, {
+        requireResumeV2Authority: true,
+      });
     const canonicalSections = this.buildCanonicalSectionPayload(
       canonicalBaseline,
     );
     const sectionPayload = canonicalSections;
+    const complianceBaselineSections =
+      this.complianceService.normalizeSectionsForOutput(sectionPayload);
 
     const { canonicalJobForScoring, canonicalJobForHash, jobTextForScoring } =
       this.buildCanonicalJobAssets({
@@ -4453,8 +4614,12 @@ export class AnalysisService {
         return [] as Array<{ type?: string; content: string }>;
       }
     })();
+    const scoringBaseline = this.buildCanonicalScoringBaseline({
+      ...baseline,
+      sections,
+    } as Baseline);
     const baselineSelection = selectBaselineTextForScoring({
-      baseline: { ...baseline, sections } as Baseline,
+      baseline: scoringBaseline,
       canonicalSections,
     });
     const sectionsForScoring = baselineSelection.sectionsForScoring;

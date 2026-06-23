@@ -458,6 +458,8 @@ describe('CoverLettersService contract', () => {
       expect(result.status).toBe('success');
       expect(result.generationAuthority).toBe('baseline_file');
       expect(result.baselineFileUsable).toBe(true);
+      expect(result.exportReady).toBe(true);
+      expect(result.exports).toEqual({ docx: true, pdf: true });
     } finally {
       baseline.sections = originalSections;
       (baseline as any).parsedRecords = originalParsed;

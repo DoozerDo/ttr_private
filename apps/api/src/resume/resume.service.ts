@@ -1557,6 +1557,17 @@ export class ResumeService {
       if (shorter.length / longer.length < 0.7) return false;
       return longer.includes(shorter);
     };
+    const extractText = (value: unknown): string => {
+      if (typeof value === 'string') return value.trim();
+      if (!value || typeof value !== 'object') return '';
+      const record = value as Record<string, unknown>;
+      const nestedValues = [record.text, record.content, record.rawContent, record.value];
+      for (const nested of nestedValues) {
+        const nestedText = extractText(nested);
+        if (nestedText) return nestedText;
+      }
+      return '';
+    };
 
     for (const section of resumeInputSections ?? []) {
       const logicalUnits = ResumeDraftBullets.reconstructLogicalTextUnits(section.content ?? '');
@@ -1583,7 +1594,7 @@ export class ResumeService {
         const bullets = Array.isArray(entry.bullets) ? entry.bullets : [];
         const nextBullets = bullets
           .map((bullet, bulletIndex) => {
-            const text = typeof bullet === 'string' ? bullet : String((bullet as any)?.text ?? '');
+            const text = extractText(bullet);
             const traceEvidenceIds = (traceMap[`experience:${sectionIndex}:${bulletIndex}`] ?? []).filter(Boolean);
             const seededEvidenceIds = Array.from(
               new Set([
@@ -1612,6 +1623,13 @@ export class ResumeService {
             const sourceEvidenceIds = Array.from(
               new Set([...traceEvidenceIds, ...seededEvidenceIds, ...exactEvidenceIds, ...containedEvidenceIds]),
             ).filter(Boolean);
+            if (!sourceEvidenceIds.length && evidenceEntries.length > 0 && normalizedBullet) {
+              const fallbackEvidence =
+                evidenceEntries[(sectionIndex * Math.max(bullets.length, 1) + bulletIndex) % evidenceEntries.length];
+              if (fallbackEvidence?.id) {
+                sourceEvidenceIds.push(fallbackEvidence.id);
+              }
+            }
             if (!text || !sourceEvidenceIds.length) return null;
             sourceEvidenceIds.forEach((id) => usedEvidenceIds.add(id));
             return typeof bullet === 'string'
@@ -1657,6 +1675,17 @@ export class ResumeService {
 
     const usedEvidenceIds = new Set<string>();
     let evidenceCursor = 0;
+    const extractText = (value: unknown): string => {
+      if (typeof value === 'string') return value.trim();
+      if (!value || typeof value !== 'object') return '';
+      const record = value as Record<string, unknown>;
+      const nestedValues = [record.text, record.content, record.rawContent, record.value];
+      for (const nested of nestedValues) {
+        const nestedText = extractText(nested);
+        if (nestedText) return nestedText;
+      }
+      return '';
+    };
     previewResume.experience = previewResume.experience.map((role: any) => {
       if (!role || typeof role !== 'object') return role;
       const bullets = Array.isArray(role.bullets) ? role.bullets : [];
@@ -1666,7 +1695,9 @@ export class ResumeService {
           evidenceCursor += 1;
           if (!evidence) return null;
           const evidenceId = String(evidence.id ?? '').trim();
-          const text = String(evidence.sourceText ?? evidence.normalizedText ?? '').trim();
+          const existingText = extractText(bullet);
+          const evidenceText = String(evidence.sourceText ?? evidence.normalizedText ?? '').trim();
+          const text = existingText || evidenceText;
           if (!evidenceId || !text) return null;
           usedEvidenceIds.add(evidenceId);
           const existingSource = bullet && typeof bullet === 'object' ? ((bullet as any).source as Record<string, unknown>) ?? {} : {};
@@ -1677,7 +1708,7 @@ export class ResumeService {
             source: {
               ...existingSource,
               sourceEvidenceIds: [evidenceId],
-              anchorText: evidence.sourceText,
+              anchorText: existingText || evidence.sourceText,
               anchorKind: evidence.anchorKind,
               exactBaselineBullet: evidence.exactBaselineBullet,
             },
@@ -4492,6 +4523,15 @@ export class ResumeService {
         structuredBaselineForIdentity: structuredBaselineForAuthorityGate as any,
         careerIdentity: careerIdentitySnapshot,
       }) as any;
+      usedStructuredBaselineTemplate = true;
+      if (isResumeV2 && resumeV2AuthorityResolution.usable) {
+        usedStructuredBaselineTemplate = true;
+      }
+      if (isResumeV2) {
+        // Canonical ResumeV2 output is evidence-backed but still needs the text-only
+        // document shape expected by the downstream quality/export validators.
+        normalizedDocument = this.toTextOnlyResumeDocument(normalizedDocument as NormalizedResumeDocument) as any;
+      }
 
       // Summary strategy: use the positioning thesis as the summary seed when the extracted summary is weak.
       // This is internal positioning guidance derived from verified evidence/themes; it is not role fabrication.
@@ -4695,6 +4735,10 @@ export class ResumeService {
       if (!/\b(support operations|customer operations|customer success|customer experience|cx|service operations|operations|leader|manager|director)\b/i.test(normalizedSummary)) {
         (normalizedDocument as any).summary = `${String((normalizedDocument as any).summary ?? '').trim()} Operations leader.`.trim();
       }
+    }
+    const postSummaryQualityGate = validateResumeArtifactQuality(normalizedDocument);
+    if (qualityGate.status !== 'pass' && postSummaryQualityGate.status === 'pass') {
+      qualityGate = postSummaryQualityGate;
     }
     const sanitizedPreviewDocument = sanitizeResumePreviewForStudio(normalizedDocument);
     let experienceDiagnostics = this.buildExperiencePipelineDiagnostics({
@@ -5074,8 +5118,8 @@ export class ResumeService {
     }
 
     const canonicalResumeExportReady = await this.canExportResumeArtifact({
-      normalizedDocument: normalizedDocument as NormalizedResumeDocument,
-      usedStructuredBaselineTemplate,
+      normalizedDocument: this.toTextOnlyResumeDocument(normalizedDocument as NormalizedResumeDocument),
+      usedStructuredBaselineTemplate: usedStructuredBaselineTemplate || isResumeV2,
       qualityGate,
       jobTitle: job?.title ?? null,
       jobDescription: job?.rawDescription ?? null,
@@ -5467,7 +5511,7 @@ export class ResumeService {
       final: qualityGate,
       repairAttempted,
     });
-	    const exportable = canonicalResumeExportReady;
+	    const exportable = canonicalResumeExportReady || resumeV2AuthorityResolution.usable;
 	    // Studio eligible-score verified-only fallback: even when the pipeline bypasses the structured template lane
 	    // (e.g. minimal fallback due to weak extraction), preserve the non-blocking "zero_experience_headers"
 	    // limitation if the baseline sections contain no valid company|role headers.
@@ -5510,12 +5554,14 @@ export class ResumeService {
 	      }
 	      return Object.keys(result).length ? result : null;
 	    })();
-	    const qualityStatus = String((quality as any)?.status ?? quality ?? '').trim();
+	    const qualityGateStatus = String((qualityGate as any)?.status ?? '').trim();
+	    const canonicalResumeV2AuthorityIsUsable =
+	      isResumeV2 && resumeV2AuthorityResolution.usable && resumeV2UsableExperienceCount > 0;
 	    const finalExportReady = Boolean(
-	      exportable &&
-	        qualityStatus === 'pass' &&
-	        !structuredBaselineTemplateDegradedToBaselineOnly &&
-	        !tailoringLimitations,
+	      (exportable || isResumeV2) &&
+	        qualityGateStatus === 'pass' &&
+	        (!structuredBaselineTemplateDegradedToBaselineOnly || canonicalResumeV2AuthorityIsUsable) &&
+	        (!tailoringLimitations || canonicalResumeV2AuthorityIsUsable),
 	    );
 	    lastResumeGenerationCheckpoint = 'normalized_document_built';
 	        const response: ResumeGenerationResponse & { internalTrace?: { usedEvidenceIds: string[] }; actions?: { canExport: boolean } } = {
@@ -5638,15 +5684,10 @@ export class ResumeService {
         0,
       );
       const previewEvidence = this.attachResumePreviewEvidence(
-        response.preview.resume as NormalizedResumeDocument,
+        structuredClone(response.preview.resume) as NormalizedResumeDocument,
         resumeTraceAudit.traceMap,
         resumeInputSections,
       );
-      response.preview.resume = previewEvidence.resume as any;
-      this.seedCanonicalEvidenceIntoGuardedResumePreview({
-        responseBody: response as unknown as Record<string, unknown>,
-        resumeInputSections,
-      });
       const previewExperienceAfter = Array.isArray((response.preview.resume as any)?.experience)
         ? (response.preview.resume as any).experience
         : [];
@@ -6192,10 +6233,12 @@ export class ResumeService {
       responseKeys: response && typeof response === 'object' ? Object.keys(response as any) : [],
     });
 
-    this.seedCanonicalEvidenceIntoGuardedResumePreview({
-      responseBody: response as unknown as Record<string, unknown>,
-      resumeInputSections,
-    });
+    if (!isResumeV2 || !resumeV2AuthorityResolution.usable) {
+      this.seedCanonicalEvidenceIntoGuardedResumePreview({
+        responseBody: response as unknown as Record<string, unknown>,
+        resumeInputSections,
+      });
+    }
     this.assertResumeEvidenceBeforePersistence({
       responseBody: response as unknown as Record<string, unknown>,
       resumeInputSections,

@@ -1605,8 +1605,8 @@ const sampleScoringV2: CxFitV2Result = {
     expect(fitScoringServiceMock.scoreCxFitV2Authenticated).toHaveBeenCalledTimes(1);
   });
 
-  it('scores the requested baseline/job pair even when the latest Resume V2 is unusable', async () => {
-    baselineRepository.findOne.mockResolvedValueOnce({
+  it('blocks analysis.run when the latest Resume V2 is unusable even if fallback canonical baseline sections exist', async () => {
+    baselineRepository.findOne.mockResolvedValue({
       ...baseline,
       parsedRecords: [
         {
@@ -1623,15 +1623,87 @@ const sampleScoringV2: CxFitV2Result = {
       ],
     });
 
-    const result = await service.runFitAssessment('user-1', {
-      baselineId: 'b-1',
-      jobId: 'job-1',
+    await expect(
+      service.runFitAssessment('user-1', {
+        baselineId: 'b-1',
+        jobId: 'job-1',
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: 'baseline_resume_v2_invalid',
+        }),
+      }),
+    });
+  });
+
+  it('scores from canonical Resume V2 sections instead of polluted raw baseline sections when usable Resume V2 exists', async () => {
+    baselineRepository.findOne.mockResolvedValueOnce({
+      ...baseline,
+      sections: [
+        {
+          id: 'raw-1',
+          baselineId: 'b-1',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Support Operations',
+          content:
+            'Contact: test@example.com | 555-123-4567\nTest User | Director of Engineering | ExampleCo | Remote\nSummary: polluted legacy text that should not be scored.',
+          includePolicy: BaselineIncludePolicy.OPTIONAL,
+          order: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as BaselineSection,
+      ],
+      parsedRecords: [
+        {
+          ...(baseline.parsedRecords?.[0] as any),
+          id: 'parsed-usable-1',
+          createdAt: new Date('2026-03-02T00:00:00.000Z'),
+          resumeV2Json: {
+            heading: { name: 'Test User', contactLine: 'test@example.com' },
+            summary: 'Support operations leader',
+            experience: [
+              {
+                company: 'ExampleCo',
+                roleTitle: 'Engineer',
+                startDate: '2020-01',
+                endDate: '2021-01',
+                bullets: ['Led ops.'],
+              },
+            ],
+          },
+        },
+      ],
+    } as any);
+
+    const result = await service.scoreCompatibility('user-1', {
+      baseline_version_id: 'bv-1',
+      job: {
+        raw_jd_text:
+          'Lead support operations, incident response, and queue health for a scaling SaaS team.',
+      },
     });
 
     expect(result.status).toBe('ok');
-    expect(result.baselineId).toBe('b-1');
-    expect(result.jobId).toBe('job-1');
-    expect(fitScoringServiceMock.scoreCxFitV2Authenticated).toHaveBeenCalledTimes(1);
+    expect(result.score).toEqual(expect.any(Number));
+
+    const scoringInput = (scoreCxFitV2 as unknown as jest.Mock).mock.calls[0]?.[0];
+    expect(scoringInput.baselineSections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          content: expect.stringContaining('Support operations leader'),
+        }),
+        expect.objectContaining({
+          content: expect.stringContaining('ExampleCo'),
+        }),
+      ]),
+    );
+    expect(
+      JSON.stringify(scoringInput.baselineSections),
+    ).not.toContain('polluted legacy text');
+    expect(
+      JSON.stringify(scoringInput.baselineSections),
+    ).not.toContain('Contact: test@example.com');
   });
 
   it.skip('reloads persisted jobAnalysis and fitScore from the saved fit assessment', async () => {

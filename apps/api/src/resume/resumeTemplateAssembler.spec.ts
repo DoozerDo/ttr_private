@@ -1,5 +1,5 @@
 import { UnprocessableEntityException } from '@nestjs/common';
-import { buildAuthoritativeResumeDraftFromResumeV2 } from './resumeTemplateAssembler';
+import { assembleResumeFromStructuredBaseline, buildAuthoritativeResumeDraftFromResumeV2 } from './resumeTemplateAssembler';
 import { buildAuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
 
 describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
@@ -174,6 +174,92 @@ describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
     const iStream = (draft.experience ?? []).find((e: any) => String(e?.company ?? '').includes('iStreamPlanet')) as any;
     expect(String(iStream?.dateRange ?? '')).toMatch(/2006/i);
     expect(String(iStream?.dateRange ?? '')).toMatch(/2013/i);
+  });
+
+  it('preserves all truthfully structured experience groups through assembly and final ResumeV2 drafting', () => {
+    const structuredBaseline = {
+      summary: 'Service Delivery and Operations leader with verified baseline experience.',
+      skills: ['Zendesk', 'Jira', 'Salesforce Service Cloud'],
+      education: [],
+      missingEvidenceReasons: [],
+      experience: [
+        {
+          company: 'SentinelOne',
+          roleTitle: 'Senior Manager, Customer Operations',
+          dates: 'Dec 2022 – Aug 2025',
+          bullets: [
+            'Owned global incident and escalation management for Customer Operations supporting Fortune 500 clients.',
+            'Led distributed operations team managing two thousand plus monthly cases with 98 percent SLA adherence.',
+          ],
+        },
+        {
+          company: 'Starbucks',
+          roleTitle: 'Senior Manager, Technology Operations Excellence',
+          dates: 'Apr 2020 – Mar 2022',
+          bullets: [
+            'Directed the Technology Operations Excellence program spanning 30,000 plus retail and corporate locations.',
+            'Designed SLA frameworks, KPI dashboards, and automation models guiding enterprise level decision making.',
+          ],
+        },
+        {
+          company: 'iStreamPlanet (Warner Bros. Discovery)',
+          roleTitle: 'Director, Customer Success',
+          dates: 'Dec 2018 – Oct 2019',
+          bullets: [
+            'Directed SaaS service delivery and customer success operations for enterprise media clients.',
+            'Implemented RCA and escalation frameworks improving reliability and client satisfaction.',
+          ],
+        },
+        {
+          company: 'CenturyLink Business for Enterprise',
+          roleTitle: 'Director, Cloud Development and Support',
+          dates: 'Dec 2013 – Dec 2018',
+          bullets: [
+            'Led support and development teams across NA, EMEA, and APAC while managing enterprise cloud and infrastructure services.',
+            'Instituted SLA reporting, KPI tracking, and RCA driven governance reducing chronic escalations.',
+          ],
+        },
+        {
+          company: 'Microsoft',
+          roleTitle: 'Support Engineer',
+          dates: '2006 – 2013',
+          bullets: [
+            'Directed incident and change operations for Office 365 sustaining 99.99 percent uptime.',
+            'Created training guides for operational execution and incident practices.',
+          ],
+        },
+      ],
+    } as any;
+
+    const identity = { name: 'Test Candidate', contactLine: 'test@example.com' };
+    const assembled = assembleResumeFromStructuredBaseline(structuredBaseline, identity);
+    expect(assembled.experience).toHaveLength(5);
+    expect((assembled.experience ?? []).map((e: any) => String(e.company ?? ''))).toEqual(
+      expect.arrayContaining([
+        'SentinelOne',
+        'Starbucks',
+        'iStreamPlanet (Warner Bros. Discovery)',
+        'CenturyLink Business for Enterprise',
+        'Microsoft',
+      ]),
+    );
+    expect(JSON.stringify(assembled.experience ?? [])).not.toContain('Vue 3), deck builder frontend');
+
+    const draft = buildAuthoritativeResumeDraftFromResumeV2({
+      resumeV2: assembled,
+      identity,
+      renderPlan: buildAuthoritativeRenderPlan({
+        positioningPlan: null,
+        orderedFallbackRoleIds: [],
+        suppressedFallbackRoleIds: [],
+        allowedEvidenceSnippetIds: null,
+      }),
+      professionalIdentity: 'Support Operations leader',
+      targetNarrative: 'Operational leadership focused on escalations and service quality.',
+    });
+
+    expect(draft.experience).toHaveLength(5);
+    expect(JSON.stringify(draft.experience ?? [])).not.toContain('Vue 3), deck builder frontend');
   });
 
   it('fails closed when authoritative ResumeV2 experience is missing or invalid', () => {
