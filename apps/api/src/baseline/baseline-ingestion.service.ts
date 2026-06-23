@@ -22,6 +22,37 @@ export type BaselineIngestionResult = {
   parsedSections: ParsedSection[];
   canonical: BaselineSchemaCoreShape;
   sourceFormat: BaselineSourceFormat;
+  trace?: BaselineUploadTrace;
+};
+
+export type BaselineUploadTrace = {
+  extractedText?: {
+    textLength: number;
+    workHistoryHeadingDetected: boolean;
+    dateRangeCount: number;
+  };
+  parserOutput?: {
+    sectionTypes: string[];
+    experienceSectionCount: number;
+    otherSectionCount: number;
+  };
+  canonicalParsedBaseline?: {
+    experienceType: string;
+    experienceCount: number;
+    thematicFieldsPresent: boolean;
+  };
+  structuredBaselineExtractor?: {
+    candidateHeaderCount: number;
+    structuredExperienceCount: number;
+    unsafeHeaderRejectionCount: number;
+    rejectionReasons: string[];
+  };
+  baselineIngestion?: {
+    candidateBlockCount: number;
+    mappedExperienceCount: number;
+    rejectedBlockCount: number;
+    rejectionReasons: string[];
+  };
 };
 
 type ParsingContext = {
@@ -393,7 +424,22 @@ export class BaselineIngestionService {
         }
       }
       const parsedSections = this.parseBaselineWithPolicy(rawText);
-      const canonical = this.buildCanonical(rawText, parsedSections);
+      const trace = this.buildUploadTrace(rawText, parsedSections);
+      const canonical = this.buildCanonical(rawText, parsedSections, trace);
+      trace.canonicalParsedBaseline = {
+        experienceType: Array.isArray(canonical.experience) ? 'array' : typeof canonical.experience,
+        experienceCount: Array.isArray(canonical.experience) ? canonical.experience.length : 0,
+        thematicFieldsPresent: Boolean(
+          canonical.people_leadership ||
+            canonical.operational_ownership ||
+            canonical.tooling_and_platforms ||
+            canonical.cross_functional_partnership ||
+            canonical.customer_advocacy ||
+            canonical.scale_and_scope ||
+            canonical.metrics_and_outcomes ||
+            canonical.skills_and_tools,
+        ),
+      } as any;
       if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
         try {
           const byType = parsedSections.reduce<Record<string, number>>((acc, section) => {
@@ -429,7 +475,7 @@ export class BaselineIngestionService {
         flow: CriticalFlowEventType.BASELINE_PARSED_SUCCESS,
         areaOrRoute: 'baseline',
       });
-      return { rawText, parsedSections, canonical, sourceFormat };
+      return { rawText, parsedSections, canonical, sourceFormat, trace };
     } catch (error) {
       void this.criticalFlowTrackerService?.recordCriticalFlowEvent({
         flow: CriticalFlowEventType.BASELINE_PARSED_FAILURE,
@@ -459,8 +505,65 @@ export class BaselineIngestionService {
     sourceFormat: BaselineSourceFormat,
   ): Promise<BaselineIngestionResult> {
     const parsedSections = this.parseBaselineWithPolicy(rawText);
-    const canonical = this.buildCanonical(rawText, parsedSections);
-    return { rawText, parsedSections, canonical, sourceFormat };
+    const trace = this.buildUploadTrace(rawText, parsedSections);
+    const canonical = this.buildCanonical(rawText, parsedSections, trace);
+    trace.canonicalParsedBaseline = {
+      experienceType: Array.isArray(canonical.experience) ? 'array' : typeof canonical.experience,
+      experienceCount: Array.isArray(canonical.experience) ? canonical.experience.length : 0,
+      thematicFieldsPresent: Boolean(
+        canonical.people_leadership ||
+          canonical.operational_ownership ||
+          canonical.tooling_and_platforms ||
+          canonical.cross_functional_partnership ||
+          canonical.customer_advocacy ||
+          canonical.scale_and_scope ||
+          canonical.metrics_and_outcomes ||
+          canonical.skills_and_tools,
+      ),
+    } as any;
+    return { rawText, parsedSections, canonical, sourceFormat, trace };
+  }
+
+  private buildUploadTrace(
+    rawText: string,
+    parsedSections: ParsedSection[],
+    canonical?: BaselineSchemaCoreShape,
+  ): BaselineUploadTrace {
+    const text = String(rawText ?? '');
+    return {
+      extractedText: {
+        textLength: text.length,
+        workHistoryHeadingDetected: /^(experience|professional experience|work experience)\b/im.test(text),
+        dateRangeCount: (text.match(/\b(?:19|20)\d{2}\b\s*(?:[-–—]|to)\s*(?:present|current|\b(?:19|20)\d{2}\b)/gi) ?? []).length,
+      },
+      parserOutput: {
+        sectionTypes: parsedSections.map((section) => String((section as any)?.sectionType ?? 'UNKNOWN')),
+        experienceSectionCount: parsedSections.filter(
+          (section) => String((section as any)?.sectionType ?? '').toUpperCase() === 'EXPERIENCE',
+        ).length,
+        otherSectionCount: parsedSections.filter(
+          (section) => String((section as any)?.sectionType ?? '').toUpperCase() === 'OTHER',
+        ).length,
+      },
+      ...(canonical
+        ? {
+            canonicalParsedBaseline: {
+              experienceType: Array.isArray(canonical.experience) ? 'array' : typeof canonical.experience,
+              experienceCount: Array.isArray(canonical.experience) ? canonical.experience.length : 0,
+              thematicFieldsPresent: Boolean(
+                canonical.people_leadership ||
+                  canonical.operational_ownership ||
+                  canonical.tooling_and_platforms ||
+                  canonical.cross_functional_partnership ||
+                  canonical.customer_advocacy ||
+                  canonical.scale_and_scope ||
+                  canonical.metrics_and_outcomes ||
+                  canonical.skills_and_tools,
+              ),
+            } as any,
+          }
+        : {}),
+    };
   }
 
   private detectFormat(file: Express.Multer.File): BaselineSourceFormat {
@@ -473,13 +576,14 @@ export class BaselineIngestionService {
   private buildCanonical(
     rawText: string,
     parsedSections: ParsedSection[],
+    trace?: BaselineUploadTrace,
   ): BaselineSchemaCoreShape {
     const context: ParsingContext = {
       missingFields: [],
       ambiguityFlags: [],
       lowConfidence: [],
     };
-    const experience = this.buildExperience(parsedSections, context);
+    const experience = this.buildExperience(parsedSections, context, trace);
     const identity = this.buildIdentity(rawText, experience, context);
     const normalized = normalizeText(rawText);
     const tooling = this.buildToolingAndSkills(normalized);
@@ -578,6 +682,7 @@ export class BaselineIngestionService {
   private buildExperience(
     parsedSections: ParsedSection[],
     context: ParsingContext,
+    trace?: BaselineUploadTrace,
   ): BaselineSchemaCoreShape['experience'] {
     const experienceSections = parsedSections.filter(
       (section) => section.sectionType === BaselineSectionType.EXPERIENCE,
@@ -615,6 +720,14 @@ export class BaselineIngestionService {
       return [];
     }
     const blocks = selectedContents.flatMap((sectionContent) => this.groupExperienceBlocks(sectionContent));
+    if (trace) {
+      trace.baselineIngestion = {
+        candidateBlockCount: blocks.length,
+        mappedExperienceCount: 0,
+        rejectedBlockCount: 0,
+        rejectionReasons: [],
+      };
+    }
     if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
       try {
         // eslint-disable-next-line no-console
@@ -629,11 +742,11 @@ export class BaselineIngestionService {
         // ignore
       }
     }
-    const experience = blocks.flatMap((block) => this.parseExperienceBlock(block, context));
-    if (experience.length > 0) {
-      return experience;
+    const experience = blocks.flatMap((block) => this.parseExperienceBlock(block, context, trace));
+    if (trace?.baselineIngestion) {
+      trace.baselineIngestion.mappedExperienceCount = experience.length;
+      trace.baselineIngestion.rejectedBlockCount = Math.max(0, blocks.length - experience.length);
     }
-
     const promotedSections = parsedSections.map((section) => {
       if (!shouldPromoteSectionTitleToExperienceContent(section)) return section;
       const title = normalizeExperienceHeaderSeparatorText(String(section?.title ?? ''));
@@ -644,8 +757,31 @@ export class BaselineIngestionService {
         content: content ? `${title}\n${content}` : title,
       };
     });
-
-    const structured = extractStructuredBaselineFromSections(promotedSections as any);
+    const structured = extractStructuredBaselineFromSections(promotedSections as any, { includeDiagnostics: true });
+    if (trace) {
+      const diagnostics = (structured as any)?.diagnostics ?? {};
+      trace.structuredBaselineExtractor = {
+        candidateHeaderCount: Array.isArray(diagnostics.detectedExperienceHeaders)
+          ? diagnostics.detectedExperienceHeaders.length
+          : 0,
+        structuredExperienceCount: Array.isArray((structured as any)?.experience) ? (structured as any).experience.length : 0,
+        unsafeHeaderRejectionCount: Array.isArray(diagnostics.rejectedExperienceHeaders)
+          ? diagnostics.rejectedExperienceHeaders.length
+          : 0,
+        rejectionReasons: Array.isArray(diagnostics.rejectedExperienceHeaders)
+          ? Array.from(
+              new Set(
+                diagnostics.rejectedExperienceHeaders
+                  .map((entry: any) => String(entry?.reason ?? '').trim())
+                  .filter(Boolean),
+              ),
+            )
+          : [],
+      };
+    }
+    if (experience.length > 0) {
+      return experience;
+    }
     const structuredExperience = mapStructuredExperienceToCanonical(
       Array.isArray((structured as any)?.experience)
         ? ((structured as any).experience as Array<{ company: string; roleTitle: string; dates?: string; bullets: string[] }>)
@@ -715,30 +851,39 @@ export class BaselineIngestionService {
       .filter(Boolean);
   }
 
-  private parseExperienceBlock(block: string, context: ParsingContext): BaselineSchemaCoreShape['experience'] {
+  private parseExperienceBlock(
+    block: string,
+    context: ParsingContext,
+    trace?: BaselineUploadTrace,
+  ): BaselineSchemaCoreShape['experience'] {
     const lines = block.split(/\n/).map((line) => line.trim()).filter(Boolean);
     if (!lines.length) return [];
     const headerRead = this.readExperienceHeaderAt(lines, 0);
     if (!headerRead) {
       context.missingFields.push('experience.company_or_role');
+      if (trace?.baselineIngestion) trace.baselineIngestion.rejectionReasons.push('experience.company_or_role');
       return [];
     }
     const parsedHeader = headerRead.header;
     if (!parsedHeader.company || !parsedHeader.role) {
       context.missingFields.push('experience.company_or_role');
+      if (trace?.baselineIngestion) trace.baselineIngestion.rejectionReasons.push('experience.company_or_role');
       return [];
     }
     if (!parsedHeader.start || !parsedHeader.end) {
       context.missingFields.push('experience.date_range');
+      if (trace?.baselineIngestion) trace.baselineIngestion.rejectionReasons.push('experience.date_range');
       return [];
     }
     if (isContactLikeText(parsedHeader.company) || isContactLikeText(parsedHeader.role)) {
       context.missingFields.push('experience.company_or_role');
+      if (trace?.baselineIngestion) trace.baselineIngestion.rejectionReasons.push('experience.company_or_role');
       return [];
     }
     const role = parsedHeader.role;
     if (!role) {
       context.missingFields.push('experience.company_or_role');
+      if (trace?.baselineIngestion) trace.baselineIngestion.rejectionReasons.push('experience.company_or_role');
       return [];
     }
     const body = lines.slice(headerRead.consumed);
@@ -755,6 +900,7 @@ export class BaselineIngestionService {
       .filter((unit) => unit.text.length > 0);
     if (evidence.length === 0) {
       context.missingFields.push('experience.bullets');
+      if (trace?.baselineIngestion) trace.baselineIngestion.rejectionReasons.push('experience.bullets');
       return [];
     }
     return [{

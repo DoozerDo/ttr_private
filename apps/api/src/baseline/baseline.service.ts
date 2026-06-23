@@ -24,6 +24,7 @@ import { BaselineParsed } from './baseline-parsed.entity';
 import {
   BaselineIngestionResult,
   BaselineIngestionService,
+  type BaselineUploadTrace,
   BaselineSourceFormat,
 } from './baseline-ingestion.service';
 import {
@@ -1493,6 +1494,29 @@ export class BaselineService {
     }
 
     let resumeV2Json: Record<string, unknown> | null = null;
+    const uploadTrace: BaselineUploadTrace | undefined = ingestion.trace
+      ? {
+          ...ingestion.trace,
+          canonicalParsedBaseline: {
+            experienceType: Array.isArray((parsedBaseline as any)?.experience)
+              ? 'array'
+              : typeof (parsedBaseline as any)?.experience,
+            experienceCount: Array.isArray((parsedBaseline as any)?.experience)
+              ? (parsedBaseline as any).experience.length
+              : 0,
+            thematicFieldsPresent: Boolean(
+              (parsedBaseline as any)?.people_leadership ||
+                (parsedBaseline as any)?.operational_ownership ||
+                (parsedBaseline as any)?.tooling_and_platforms ||
+                (parsedBaseline as any)?.cross_functional_partnership ||
+                (parsedBaseline as any)?.customer_advocacy ||
+                (parsedBaseline as any)?.scale_and_scope ||
+                (parsedBaseline as any)?.metrics_and_outcomes ||
+                (parsedBaseline as any)?.skills_and_tools,
+            ),
+          },
+        }
+      : undefined;
     try {
       if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
         try {
@@ -1527,7 +1551,41 @@ export class BaselineService {
         }
       }
       if (error instanceof HttpException) {
-        throw error;
+        const response = error.getResponse();
+        const responseBody = typeof response === 'object' && response !== null ? (response as any) : null;
+        const errorBody = responseBody?.error && typeof responseBody.error === 'object' ? responseBody.error : null;
+        const details = errorBody?.details && typeof errorBody.details === 'object' ? errorBody.details : {};
+        const mergedTrace = {
+          ...(uploadTrace ?? {}),
+          ...(details?.trace && typeof details.trace === 'object' ? details.trace : {}),
+          stage5CanonicalBaseline: {
+            experienceType: Array.isArray((parsedBaseline as any)?.experience)
+              ? 'array'
+              : typeof (parsedBaseline as any)?.experience,
+            experienceCount: Array.isArray((parsedBaseline as any)?.experience)
+              ? (parsedBaseline as any).experience.length
+              : 0,
+            thematicFieldsPresent: Boolean(
+              (parsedBaseline as any)?.people_leadership ||
+                (parsedBaseline as any)?.operational_ownership ||
+                (parsedBaseline as any)?.tooling_and_platforms ||
+                (parsedBaseline as any)?.cross_functional_partnership ||
+                (parsedBaseline as any)?.customer_advocacy ||
+                (parsedBaseline as any)?.scale_and_scope ||
+                (parsedBaseline as any)?.metrics_and_outcomes ||
+                (parsedBaseline as any)?.skills_and_tools,
+            ),
+          },
+        };
+        throw new UnprocessableEntityException({
+          error: {
+            ...(errorBody ?? {}),
+            details: {
+              ...(details ?? {}),
+              trace: mergedTrace,
+            },
+          },
+        });
       }
       throw new UnprocessableEntityException({
         error: {

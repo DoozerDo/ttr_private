@@ -23,6 +23,17 @@ export type StructuredBaseline = {
   };
 };
 
+export type StructuredBaselineTrace = {
+  candidateHeaderCount: number;
+  structuredExperienceCount: number;
+  unsafeHeaderRejectionCount: number;
+  rejectionReasons: string[];
+};
+
+export type StructuredBaselineExtractionOptions = {
+  includeDiagnostics?: boolean;
+};
+
 function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
@@ -529,9 +540,10 @@ function extractSectionByType(sections: BaselineSection[], type: string): Baseli
 
 export function extractStructuredBaselineFromSections(
   baselineSections: BaselineSection[],
+  options: StructuredBaselineExtractionOptions = {},
 ): StructuredBaseline {
   const missingEvidenceReasons: string[] = [];
-  const diagnosticsEnabled = process.env.DOCGEN_DIAGNOSTICS === 'true';
+  const diagnosticsEnabled = options.includeDiagnostics || process.env.DOCGEN_DIAGNOSTICS === 'true';
   const detectedExperienceHeaders: Array<{ company: string; roleTitle: string; dates?: string }> = [];
   const rejectedExperienceHeaders: Array<{ company: string; roleTitle: string; dates?: string; reason: string }> = [];
   const headerNormalizationFailures: string[] = [];

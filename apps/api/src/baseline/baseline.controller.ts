@@ -34,6 +34,7 @@ type UploadBaselineResponse = {
     missingFields: number;
     lowConfidence: number;
   };
+  trace?: Record<string, unknown>;
 };
 
 const stripBaselineVersioning = <T extends Record<string, unknown>>(baseline: T) => {
@@ -201,6 +202,7 @@ export class BaselineController {
           missingFields: systemFlags?.missing_fields?.length ?? 0,
           lowConfidence: systemFlags?.low_confidence_extractions?.length ?? 0,
         },
+        trace: result.ingestion?.trace as Record<string, unknown> | undefined,
       };
     } catch (error) {
       if (error instanceof HttpException) {

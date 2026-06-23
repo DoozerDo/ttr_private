@@ -1710,6 +1710,13 @@ export function buildValidatedResumeV2FromParsedBaseline(
       });
     }
     if (hasThematicEvidence) {
+      const trace = {
+        selectedEntries: experience.length,
+        mappedEntries: lastMappingStats?.mappedEntries ?? 0,
+        survivingBlocks: lastMappingStats?.survivingBlocks ?? 0,
+        finalExperienceCount: 0,
+        blockerCode: 'baseline_role_chronology_missing',
+      };
       throw new UnprocessableEntityException({
         error: {
           code: 'baseline_role_chronology_missing',
@@ -1731,6 +1738,7 @@ export function buildValidatedResumeV2FromParsedBaseline(
               thematicFields,
               mapping: lastMappingStats,
             },
+            trace,
           },
         },
       });

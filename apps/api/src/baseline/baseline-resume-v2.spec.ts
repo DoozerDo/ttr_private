@@ -255,6 +255,8 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
         'dateRange',
         'bullets',
       ]);
+      expect(body?.error?.details?.trace?.blockerCode).toBe('baseline_role_chronology_missing');
+      expect(body?.error?.details?.trace?.selectedEntries).toBe(0);
       expect(String(body?.error?.details?.nextAction ?? '')).toMatch(/Upload a resume with work history entries/i);
     }
   });
