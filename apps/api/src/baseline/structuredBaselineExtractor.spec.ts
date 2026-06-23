@@ -50,6 +50,80 @@ describe('structuredBaselineExtractor', () => {
     }
   });
 
+  it('recovers split-header chronology into structured experience entries', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Acme Support',
+          'Senior Support Operations Manager',
+          'Remote Dec 2022 – Aug 2025',
+          '- Led incident response and escalation handling across support operations.',
+          '',
+          'Senior Program Manager',
+          'Globex',
+          'Dec 2020 – March 2024',
+          '- Owned operational planning and stakeholder coordination.',
+          '',
+          'Director, Customer Operations - Example Co',
+          'Oct 2018 - Present',
+          '- Built customer escalation workflows and governance.',
+          '',
+          'Example Co October 2015 - March 2018',
+          'Support Lead',
+          '- Improved operational reporting and queue health visibility.',
+        ].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    expect(structured.experience).toHaveLength(4);
+    expect(structured.experience.map((entry) => `${entry.company}::${entry.roleTitle}`)).toEqual(
+      expect.arrayContaining([
+        'Acme Support::Senior Support Operations Manager',
+        'Globex::Senior Program Manager',
+        'Example Co::Director, Customer Operations',
+        'Example Co::Support Lead',
+      ]),
+    );
+    expect(structured.experience.every((entry) => String(entry.dates ?? '').trim().length > 0)).toBe(true);
+    expect(structured.experience.every((entry) => entry.bullets.length > 0)).toBe(true);
+  });
+
+  it('still rejects malformed split headers as unsafe', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          '2021 - Present',
+          '- Led incident triage.',
+        ].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    expect(structured.experience).toHaveLength(0);
+    expect(structured.missingEvidenceReasons.join(' ')).toMatch(/No safely structured experience entries found/i);
+  });
+
+  it('does not promote contact summary or skills lines into experience', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'jane.doe@example.com | Seattle, WA',
+          'Professional Summary',
+          'Skills',
+          'ServiceNow, Jira, reporting',
+        ].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    expect(structured.experience).toHaveLength(0);
+    expect(structured.missingEvidenceReasons.join(' ')).toMatch(/No safely structured experience entries found/i);
+  });
+
   it('parses role-company dash headers with following location/date lines', () => {
     const sections: any[] = [
       {

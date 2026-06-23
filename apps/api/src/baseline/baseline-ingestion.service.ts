@@ -35,10 +35,11 @@ type Metric = { type: 'percentage' | 'currency' | 'count'; value: string };
 function isContactLikeText(value: string): boolean {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim();
   if (!text) return true;
+  const digitCount = text.replace(/\D/g, '').length;
   return (
     /\b(?:https?:\/\/|www\.|linkedin\.com|github\.com|mailto:)\b/i.test(text) ||
     /@/.test(text) ||
-    /\+?\d[\d\s().-]{7,}\d/.test(text)
+    (digitCount >= 10 && /\+?\d[\d\s().-]{7,}\d/.test(text))
   );
 }
 
@@ -775,10 +776,10 @@ export class BaselineIngestionService {
   ): { header: { company: string; role: string; start: string | null; end: string | null }; consumed: number } | null {
     const line0 = String(lines[startIndex] ?? '').trim();
     if (!line0) return null;
-    if (looksLikeDatesLine(line0)) return null;
 
     const headerCandidate0 = line0;
     if (isStandaloneSectionHeadingLine(headerCandidate0)) return null;
+    if (isContactLikeText(headerCandidate0)) return null;
 
     const single = this.parseExperienceHeader(headerCandidate0);
     if (single.company && single.role) {
@@ -840,6 +841,8 @@ export class BaselineIngestionService {
         consumed: 1,
       };
     }
+
+    if (looksLikeDatesLine(line0)) return null;
 
     const firstWord = headerCandidate0.split(/\s+/)[0]?.toLowerCase() ?? '';
     const startsWithActionVerb = new Set([

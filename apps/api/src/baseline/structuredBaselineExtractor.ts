@@ -58,6 +58,171 @@ function stripBulletPrefix(line: string): string {
   return line.replace(/^[-•*]\s+/, '').trim();
 }
 
+const MONTH_YEAR_TOKEN =
+  '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(?:19|20)\\d{2}';
+const MONTH_YEAR_RE = new RegExp(`\\b${MONTH_YEAR_TOKEN}\\b`, 'i');
+
+function normalizeDateRangeSeparators(text: string): string {
+  return String(text ?? '')
+    .replace(/\u00C3\u00A2\u00E2\u0082\u00AC\u00E2\u0080\u009D/g, '-')
+    .replace(/\u00E2\u0080\u0094/g, '-')
+    .replace(/\u00E2\u0080\u0093/g, '-')
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, '-')
+    .replace(/\s+to\s+/gi, ' - ')
+    .replace(/\s*-\s*/g, ' - ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function stripLeadingLocationFromDatesLine(value: string): string {
+  const raw = trimToText(value);
+  if (!raw) return '';
+  const normalized = normalizeDateRangeSeparators(raw);
+  const monthYearStart = new RegExp(`^(${MONTH_YEAR_TOKEN})\\b`, 'i');
+  const yearStart = /^(19|20)\d{2}\b/;
+  const tokens = normalized.split(' ').filter(Boolean);
+  for (let i = 0; i < Math.min(tokens.length, 6); i += 1) {
+    const candidate = tokens.slice(i).join(' ');
+    if (monthYearStart.test(candidate) || yearStart.test(candidate)) return candidate;
+  }
+  return normalized;
+}
+
+function canonicalizeDateRange(text: string): string {
+  const normalized = normalizeDateRangeSeparators(stripLeadingLocationFromDatesLine(text));
+  const parts = normalized.split(' - ').map((part) => trimToText(part)).filter(Boolean);
+  if (parts.length < 2) return normalized;
+  const start = parts[0];
+  const end = parts.slice(1).join(' - ');
+  const canonicalEnd = /\bcurrent\b/i.test(end) ? 'Present' : end;
+  return `${start} – ${canonicalEnd}`.replace(/\s+/g, ' ').trim();
+}
+
+function splitCanonicalDateRangeText(value: string): { start_date?: string; end_date?: string } {
+  const text = trimToText(value);
+  if (!text) return {};
+  const normalized = normalizeDateRangeSeparators(text);
+  const parts = normalized.split(' - ').map((part) => trimToText(part)).filter(Boolean);
+  if (parts.length >= 2) {
+    return { start_date: parts[0], end_date: parts.slice(1).join(' - ') };
+  }
+  if (parts.length === 1) {
+    return { start_date: parts[0] };
+  }
+  return {};
+}
+
+function looksLikeDatesLine(value: string): boolean {
+  const raw = trimToText(value);
+  if (!raw) return false;
+  const normalized = normalizeDateRangeSeparators(stripLeadingLocationFromDatesLine(raw));
+  const hasYear = /\b(19|20)\d{2}\b/.test(normalized);
+  const looksLikeMonthYear = MONTH_YEAR_RE.test(normalized);
+  const looksLikeRange =
+    (looksLikeMonthYear || hasYear) &&
+    (normalized.includes(' - ') || /\b(?:present|current)\b/i.test(normalized));
+  return (hasYear || looksLikeMonthYear) && normalized.split(/\s+/).length <= 12 && looksLikeRange;
+}
+
+function looksLikeRoleTitle(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  return /\b(?:engineer|architect|administrator|sysadmin|developer|technician|specialist|founder|co-?founder|webmaster|assistant|manager|director|analyst|lead|program)\b/i.test(
+    text,
+  );
+}
+
+function isLikelyCompanyName(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  if (
+    /\b(?:program\s+manager|project\s+manager|product\s+manager|support\s+operations|operations|customer\s+experience|customer\s+success|engineer|architect|administrator|sysadmin|developer|technician|specialist|founder|co-?founder|webmaster|assistant|manager|director|analyst|contractor|consultant|lead)\b/i.test(
+      text,
+    ) &&
+    !/\b(?:inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corp\.|ltd|ltd\.|pllc|pllc\.)\b/i.test(text)
+  ) {
+    return false;
+  }
+  if (/\b(?:professional\s+experience|experience|project|projects|skills|education|summary)\b/i.test(text)) {
+    return false;
+  }
+  if (
+    /\b(?:automation\s*&\s*monitoring|datacenter\s+operations|internal\s+web\s+applications|internal\s+tooling\s*&\s*software\s+development|earlier\s+career)\b/i.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+  if (/\b(?:vue|react|angular|frontend|back\s*end|full[-\s]*stack|builder)\b/i.test(text)) {
+    return false;
+  }
+  if (/^\p{Ll}[\s\S]*$/u.test(text) || /^[,;:)\-]/.test(text) || /[,:;]\s*$/.test(text)) {
+    return false;
+  }
+  const openParens = (text.match(/\(/g) ?? []).length;
+  const closeParens = (text.match(/\)/g) ?? []).length;
+  if (openParens !== closeParens) return false;
+  const stateSuffixMatch = text.match(
+    /^(?:[A-Za-z][A-Za-z .'-]+),\s*(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b\.?$/i,
+  );
+  const locationLike =
+    Boolean(stateSuffixMatch) ||
+    /^(?:Seattle|San Francisco|New York|Los Angeles|Austin|Chicago|Boston|Denver|Portland|Miami|Dallas|Houston|Phoenix|San Diego|San Jose)\b/i.test(
+      text,
+    );
+  if (locationLike && text.split(/\s+/).length <= 4) return false;
+  return true;
+}
+
+function parseCompanyWithDates(line: string): { company: string; dates?: string } | null {
+  const raw = trimToText(line);
+  if (!raw) return null;
+  const match = raw.match(/^(.+?)\s*\(([^()]*\b(19|20)\d{2}[^()]*)\)\s*$/);
+  if (!match) return null;
+  const company = trimToText(match[1]);
+  const dates = trimToText(match[2]);
+  if (!company) return null;
+  return { company, ...(dates ? { dates } : {}) };
+}
+
+function parseCompanyWithInlineDates(line: string): { company: string; dates: string } | null {
+  const raw = trimToText(line);
+  if (!raw) return null;
+  const normalized = normalizeDateRangeSeparators(raw);
+  const match = normalized.match(
+    new RegExp(`^(.+?)\\s+(${MONTH_YEAR_TOKEN})\\s*-\\s*(?:(${MONTH_YEAR_TOKEN})|present|current)\\s*$`, 'i'),
+  );
+  if (!match) return null;
+  const company = trimToText(match[1]);
+  const start = trimToText(match[2]);
+  const end = trimToText(match[3] ?? 'Present');
+  if (!company || !start || !end) return null;
+  return { company, dates: canonicalizeDateRange(`${start} - ${end}`) };
+}
+
+function parseCompanyWithTrailingStartDate(line: string): { company: string; start: string } | null {
+  const raw = trimToText(line);
+  if (!raw) return null;
+  const match = raw.match(new RegExp(`^(.*?)(?:\\s+)(${MONTH_YEAR_TOKEN})\\s*$`, 'i'));
+  if (!match) return null;
+  const company = trimToText(match[1]);
+  const start = trimToText(match[2]);
+  if (!company || !start) return null;
+  return { company, start };
+}
+
+function parseRoleAtCompany(line: string): { company: string; roleTitle: string; dates?: string } | null {
+  const raw = trimToText(line);
+  if (!raw) return null;
+  const match = raw.match(/^(.+?)\s+at\s+(.+?)(?:\s*\(([^()]*)\))?\s*$/i);
+  if (!match) return null;
+  const roleTitle = trimToText(match[1]);
+  const company = trimToText(match[2]);
+  const dates = trimToText(match[3]);
+  if (!roleTitle || !company) return null;
+  return { company, roleTitle, ...(dates ? { dates } : {}) };
+}
+
 function looksLikeSentence(value: string): boolean {
   const text = trimToText(value);
   if (!text) return false;
@@ -124,79 +289,6 @@ function hasUnmatchedCompanyPunctuation(value: string): boolean {
   return openParens !== closeParens;
 }
 
-function isLikelyCompanyName(value: string): boolean {
-  const text = trimToText(value);
-  if (!text) return false;
-
-  // Reject common role/position tokens (prevents role titles like "Senior Program Manager" being treated as employers).
-  if (
-    /\b(?:program\s+manager|project\s+manager|product\s+manager|support\s+operations|operations|customer\s+experience|customer\s+success|engineer|architect|administrator|sysadmin|developer|technician|specialist|founder|co-?founder|webmaster|assistant|manager|director|analyst|contractor|consultant)\b/i.test(
-      text,
-    ) &&
-    !/\b(?:inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corp\.|ltd|ltd\.|pllc|pllc\.)\b/i.test(text)
-  ) {
-    return false;
-  }
-
-  // Reject obvious section labels / headings.
-  if (/\b(?:professional\s+experience|experience|project|projects|skills|education|summary)\b/i.test(text)) {
-    return false;
-  }
-
-  // Reject subsection labels and other non-employer headings that frequently leak out of PDF layouts.
-  if (
-    /\b(?:automation\s*&\s*monitoring|datacenter\s+operations|internal\s+web\s+applications|internal\s+tooling\s*&\s*software\s+development|earlier\s+career)\b/i.test(
-      text,
-    )
-  ) {
-    return false;
-  }
-
-  // Reject technology / fragment-like "companies" that commonly appear in project bullets.
-  // Keep this narrow and conservative to avoid false positives on real company names.
-  if (/\b(?:vue|react|angular|frontend|back\s*end|full[-\s]*stack|builder)\b/i.test(text)) {
-    return false;
-  }
-
-  // Reject wrapped bullet fragments / dangling continuation text.
-  if (
-    /^\p{Ll}[\s\S]*$/u.test(text) ||
-    /^[,;:)\-]/.test(text) ||
-    /[,:;]\s*$/.test(text) ||
-    /(?:\bVue\s+3\)\s*,?\s*deck\s+builder\s+frontend\b)/i.test(text)
-  ) {
-    return false;
-  }
-
-  // Reject malformed fragments with unmatched punctuation (common in truncated bullets like "Vue 3), ...").
-  if (hasUnmatchedCompanyPunctuation(text)) return false;
-
-  // Reject location-only tokens (prevents "Seattle" / "Seattle, WA" being treated as an employer).
-  // Keep the list intentionally small and conservative; this is an ingestion safety guard, not a geo parser.
-  const stateSuffixMatch = text.match(
-    /^(?:[A-Za-z][A-Za-z .'-]+),\s*(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b\.?$/i,
-  );
-  const locationLike =
-    // Only treat "City, ST" as location (comma required) to avoid rejecting real company suffixes like "Example Co".
-    Boolean(stateSuffixMatch) ||
-    /^(?:Seattle|San Francisco|New York|Los Angeles|Austin|Chicago|Boston|Denver|Portland|Miami|Dallas|Houston|Phoenix|San Diego|San Jose)\b/i.test(
-      text,
-    );
-  if (locationLike && text.split(/\s+/).length <= 4) return false;
-
-  return true;
-}
-
-function looksLikeRoleTitle(value: string): boolean {
-  const text = trimToText(value);
-  if (!text) return false;
-  // Heuristic: common role tokens that should not be treated as organizations.
-  // Keep conservative: only triggers swap logic when the next line is company-like.
-  return /\b(?:engineer|architect|administrator|sysadmin|developer|technician|specialist|founder|co-?founder|webmaster|assistant|manager|director|analyst)\b/i.test(
-    text,
-  );
-}
-
 function parseExperienceHeaderLine(line: string): { company: string; roleTitle: string; dates?: string } | null {
   const raw = trimToText(line);
   if (!raw) return null;
@@ -259,117 +351,6 @@ function parseExperienceHeaderLine(line: string): { company: string; roleTitle: 
   return null;
 }
 
-const MONTH_YEAR_TOKEN =
-  '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(?:19|20)\\d{2}';
-const MONTH_YEAR_RE = new RegExp(`\\b${MONTH_YEAR_TOKEN}\\b`, 'i');
-
-function normalizeDateRangeSeparators(text: string): string {
-  // Normalize dash-like separators (including mojibake artifacts) and "to" into a canonical hyphen.
-  return (
-    text
-      // Common UTF-8 mojibake renderings of en/em dashes when decoded as ISO-8859-1/Windows-1252.
-      .replace(/\u00C3\u00A2\u00E2\u0082\u00AC\u00E2\u0080\u009D/g, '-') // "Ã¢â‚¬â€"
-      .replace(/\u00E2\u0080\u0094/g, '-') // "â€”"
-      .replace(/\u00E2\u0080\u0093/g, '-') // "â€“"
-      // Real unicode dashes/minus.
-      .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, '-')
-      .replace(/\s+to\s+/gi, ' - ')
-      .replace(/\s*-\s*/g, ' - ')
-      .replace(/\s+/g, ' ')
-      .trim()
-  );
-}
-
-function stripLeadingLocationFromDatesLine(value: string): string {
-  const raw = trimToText(value);
-  if (!raw) return '';
-
-  // Accept "Remote Dec 2022 – Aug 2025", "Seattle, WA Dec 2018 – Oct 2019", "United States 2006 – 2013"
-  // by stripping a leading location token(s) when followed by a recognizable date start.
-  const normalized = normalizeDateRangeSeparators(raw);
-  const monthYearStart = new RegExp(`^(${MONTH_YEAR_TOKEN})\\b`, 'i');
-  const yearStart = /^(19|20)\d{2}\b/;
-  const tokens = normalized.split(' ').filter(Boolean);
-  for (let i = 0; i < Math.min(tokens.length, 6); i += 1) {
-    const candidate = tokens.slice(i).join(' ');
-    if (monthYearStart.test(candidate) || yearStart.test(candidate)) return candidate;
-  }
-  return normalized;
-}
-
-function canonicalizeDateRange(text: string): string {
-  const normalized = normalizeDateRangeSeparators(stripLeadingLocationFromDatesLine(text));
-  const parts = normalized.split(' - ').map((p) => trimToText(p)).filter(Boolean);
-  if (parts.length < 2) return normalized;
-  const start = parts[0];
-  const end = parts.slice(1).join(' - ');
-  const canonicalEnd = /\bcurrent\b/i.test(end) ? 'Present' : end;
-  return `${start} – ${canonicalEnd}`.replace(/\s+/g, ' ').trim();
-}
-
-function looksLikeDatesLine(line: string): boolean {
-  const raw = trimToText(line);
-  if (!raw) return false;
-  const normalized = normalizeDateRangeSeparators(stripLeadingLocationFromDatesLine(raw));
-  const hasYear = /\b(19|20)\d{2}\b/.test(normalized);
-  const looksLikeMonthYear = MONTH_YEAR_RE.test(normalized);
-  const looksLikeRange =
-    (looksLikeMonthYear || hasYear) &&
-    (normalized.includes(' - ') || /\b(?:present|current)\b/i.test(normalized));
-  return (hasYear || looksLikeMonthYear) && normalized.split(/\s+/).length <= 12 && looksLikeRange;
-}
-
-function parseCompanyWithDates(line: string): { company: string; dates?: string } | null {
-  const raw = trimToText(line);
-  if (!raw) return null;
-  const match = raw.match(/^(.+?)\s*\(([^()]*\b(19|20)\d{2}[^()]*)\)\s*$/);
-  if (!match) return null;
-  const company = trimToText(match[1]);
-  const dates = trimToText(match[2]);
-  if (!company) return null;
-  return { company, ...(dates ? { dates } : {}) };
-}
-
-function parseCompanyWithInlineDates(line: string): { company: string; dates: string } | null {
-  const raw = trimToText(line);
-  if (!raw) return null;
-
-  const normalized = normalizeDateRangeSeparators(raw);
-  const match = normalized.match(
-    new RegExp(`^(.+?)\\s+(${MONTH_YEAR_TOKEN})\\s*-\\s*(?:(${MONTH_YEAR_TOKEN})|present|current)\\s*$`, 'i'),
-  );
-  if (!match) return null;
-
-  const company = trimToText(match[1]);
-  const start = trimToText(match[2]);
-  const end = trimToText(match[3] ?? 'Present');
-  if (!company || !start || !end) return null;
-
-  return { company, dates: canonicalizeDateRange(`${start} - ${end}`) };
-}
-
-function parseCompanyWithTrailingStartDate(line: string): { company: string; start: string } | null {
-  const raw = trimToText(line);
-  if (!raw) return null;
-  const match = raw.match(new RegExp(`^(.*?)(?:\\s+)(${MONTH_YEAR_TOKEN})\\s*$`, 'i'));
-  if (!match) return null;
-  const company = trimToText(match[1]);
-  const start = trimToText(match[2]);
-  if (!company || !start) return null;
-  return { company, start };
-}
-function parseRoleAtCompany(line: string): { company: string; roleTitle: string; dates?: string } | null {
-  const raw = trimToText(line);
-  if (!raw) return null;
-  const match = raw.match(/^(.+?)\s+at\s+(.+?)(?:\s*\(([^()]*)\))?\s*$/i);
-  if (!match) return null;
-  const roleTitle = trimToText(match[1]);
-  const company = trimToText(match[2]);
-  const dates = trimToText(match[3]);
-  if (!roleTitle || !company) return null;
-  return { company, roleTitle, ...(dates ? { dates } : {}) };
-}
-
 function isImplicitBulletCandidate(line: string): boolean {
   const raw = trimToText(line);
   if (!raw) return false;
@@ -395,7 +376,7 @@ function isBulletPrefixedExperienceHeader(line: string): boolean {
 function readExperienceHeaderAt(
   lines: string[],
   startIndex: number,
-): { header: { company: string; roleTitle: string; dates?: string }; consumed: number } | null {
+): { header: { company: string; roleTitle: string; dates: string }; consumed: number } | null {
   const line0 = trimToText(lines[startIndex] ?? '');
   if (!line0) return null;
 
@@ -408,12 +389,31 @@ function readExperienceHeaderAt(
   if (single) {
     const line1 = trimToText(lines[startIndex + 1] ?? '');
     if (line1 && !isBulletLine(line1) && looksLikeDatesLine(line1)) {
+      const dates = canonicalizeDateRange(line1);
       return {
-        header: { ...single, dates: canonicalizeDateRange(line1) },
+        header: {
+          company: single.company,
+          roleTitle: single.roleTitle,
+          dates,
+        },
         consumed: 2,
       };
     }
-    return { header: single, consumed: 1 };
+    if (single.dates) {
+      const dates = canonicalizeDateRange(single.dates);
+      const splitDates = splitCanonicalDateRangeText(dates);
+      if (splitDates.start_date && splitDates.end_date) {
+        return {
+          header: {
+            company: single.company,
+            roleTitle: single.roleTitle,
+            dates,
+          },
+          consumed: 1,
+        };
+      }
+    }
+    return null;
   }
 
   // Prevent bullet-like prose from being misclassified as a multi-line header's company line.
@@ -425,6 +425,8 @@ function readExperienceHeaderAt(
   if (line1 && !isBulletLine(line1)) {
     const inlineDates = parseCompanyWithInlineDates(headerCandidate0);
     if (inlineDates) {
+      const splitDates = splitCanonicalDateRangeText(inlineDates.dates);
+      if (!splitDates.start_date || !splitDates.end_date) return null;
       return {
         header: { company: inlineDates.company, roleTitle: line1, dates: inlineDates.dates },
         consumed: 2,
@@ -442,11 +444,14 @@ function readExperienceHeaderAt(
       const trailingStart = parseCompanyWithTrailingStartDate(headerCandidate0);
       const line2 = trimToText(lines[startIndex + 2] ?? '');
       if (trailingStart && line2 && !isBulletLine(line2) && !looksLikeDatesLine(line2)) {
+        const dates = canonicalizeDateRange(`${trailingStart.start} - ${line1}`);
+        const splitDates = splitCanonicalDateRangeText(dates);
+        if (!splitDates.start_date || !splitDates.end_date) return null;
         return {
           header: {
             company: trailingStart.company,
             roleTitle: line2,
-            dates: canonicalizeDateRange(`${trailingStart.start} - ${line1}`),
+            dates,
           },
           consumed: 3,
         };
@@ -455,14 +460,19 @@ function readExperienceHeaderAt(
 
     const companyWithDates = parseCompanyWithDates(headerCandidate0);
     if (companyWithDates) {
-      return {
-        header: { company: companyWithDates.company, roleTitle: line1, ...(companyWithDates.dates ? { dates: companyWithDates.dates } : {}) },
-        consumed: 2,
-      };
+      const dates = companyWithDates.dates ? canonicalizeDateRange(companyWithDates.dates) : '';
+      const splitDates = dates ? splitCanonicalDateRangeText(dates) : {};
+      if (splitDates.start_date && splitDates.end_date && looksLikeRoleTitle(line1)) {
+        return {
+          header: { company: companyWithDates.company, roleTitle: line1, dates },
+          consumed: 2,
+        };
+      }
     }
 
     const line2 = trimToText(lines[startIndex + 2] ?? '');
-    const maybeDates = line2 && !isBulletLine(line2) && looksLikeDatesLine(line2) ? canonicalizeDateRange(line2) : undefined;
+    const maybeDates = line2 && !isBulletLine(line2) && looksLikeDatesLine(line2) ? canonicalizeDateRange(line2) : null;
+    const splitMaybeDates = maybeDates ? splitCanonicalDateRangeText(maybeDates) : {};
 
     // Common PDF-derived ordering: role title first, company second, optional dates third.
     // Example:
@@ -473,18 +483,33 @@ function readExperienceHeaderAt(
     const line1LooksLikeCompany = isLikelyCompanyName(line1);
     const line0LooksLikeRole = looksLikeRoleTitle(headerCandidate0);
     if ((!line0LooksLikeCompany || line0LooksLikeRole) && line1LooksLikeCompany) {
+      if (!splitMaybeDates.start_date || !splitMaybeDates.end_date) return null;
       return {
-        header: { company: line1, roleTitle: headerCandidate0, ...(maybeDates ? { dates: maybeDates } : {}) },
+        header: { company: line1, roleTitle: headerCandidate0, dates: maybeDates ?? '' },
         consumed: maybeDates ? 3 : 2,
       };
     }
 
-    const company = headerCandidate0;
-    const roleTitle = line1;
-    return {
-      header: { company, roleTitle, ...(maybeDates ? { dates: maybeDates } : {}) },
-      consumed: maybeDates ? 3 : 2,
-    };
+    if (line0LooksLikeCompany && looksLikeRoleTitle(line1)) {
+      if (!splitMaybeDates.start_date || !splitMaybeDates.end_date) return null;
+      return {
+        header: { company: headerCandidate0, roleTitle: line1, dates: maybeDates ?? '' },
+        consumed: maybeDates ? 3 : 2,
+      };
+    }
+
+    if (line0LooksLikeCompany && line1 && looksLikeDatesLine(line1)) {
+      const line2 = trimToText(lines[startIndex + 2] ?? '');
+      if (line2 && !isBulletLine(line2) && looksLikeRoleTitle(line2)) {
+        const dates = canonicalizeDateRange(line1);
+        const splitDates = splitCanonicalDateRangeText(dates);
+        if (!splitDates.start_date || !splitDates.end_date) return null;
+        return {
+          header: { company: headerCandidate0, roleTitle: line2, dates },
+          consumed: 3,
+        };
+      }
+    }
   }
 
   return null;
