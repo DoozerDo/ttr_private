@@ -69,11 +69,35 @@ function stripBulletPrefix(line: string): string {
   return line.replace(/^[-•*]\s+/, '').trim();
 }
 
+
 const MONTH_YEAR_TOKEN =
   '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(?:19|20)\\d{2}';
-const MONTH_YEAR_RE = new RegExp(`\\b${MONTH_YEAR_TOKEN}\\b`, 'i');
+const MONTH_YEAR_RE = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(?:19|20)\d{2}\b/i;
+const YEAR_TOKEN = '(?:19|20)\\d{2}';
+const DATE_TOKEN = '(?:' + MONTH_YEAR_TOKEN + '|' + YEAR_TOKEN + ')';
+const DATE_RANGE_SEPARATOR_TOKEN = '(?:\\s*(?:\\||[-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2015\\u2212])\\s*|\\s+to\\s+)';
+const DATE_RANGE_RE = new RegExp(
+  '\\b(' + DATE_TOKEN + ')\\b' + DATE_RANGE_SEPARATOR_TOKEN + '(?:(' + DATE_TOKEN + ')|(present|current))',
+  'i',
+);
+function extractDateRangeMatch(value: string): { start: string; end: string; matchedText: string } | null {
+  const raw = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!raw) return null;
+  const normalized = normalizeDateRangeSeparators(raw);
+  const match = normalized.match(DATE_RANGE_RE);
+  if (!match) return null;
+  const start = String(match[1] ?? '').replace(/[),.;:]+$/, '').trim();
+  const end = String(match[2] ?? match[3] ?? '').replace(/[),.;:]+$/, '').trim();
+  if (!start || !end) return null;
+  return {
+    start,
+    end: /\b(?:present|current)\b/i.test(end) ? 'Present' : end,
+    matchedText: String(match[0] ?? '').trim(),
+  };
+}
 
 function normalizeDateRangeSeparators(text: string): string {
+
   return String(text ?? '')
     .replace(/\u00C3\u00A2\u00E2\u0082\u00AC\u00E2\u0080\u009D/g, '-')
     .replace(/\u00E2\u0080\u0094/g, '-')
@@ -88,35 +112,27 @@ function normalizeDateRangeSeparators(text: string): string {
 function stripLeadingLocationFromDatesLine(value: string): string {
   const raw = trimToText(value);
   if (!raw) return '';
-  const normalized = normalizeDateRangeSeparators(raw);
-  const monthYearStart = new RegExp(`^(${MONTH_YEAR_TOKEN})\\b`, 'i');
-  const yearStart = /^(19|20)\d{2}\b/;
-  const tokens = normalized.split(' ').filter(Boolean);
-  for (let i = 0; i < Math.min(tokens.length, 6); i += 1) {
-    const candidate = tokens.slice(i).join(' ');
-    if (monthYearStart.test(candidate) || yearStart.test(candidate)) return candidate;
-  }
-  return normalized;
+  const match = extractDateRangeMatch(raw);
+  if (match) return match.matchedText;
+  return normalizeDateRangeSeparators(raw);
 }
 
 function canonicalizeDateRange(text: string): string {
-  const normalized = normalizeDateRangeSeparators(stripLeadingLocationFromDatesLine(text));
-  const parts = normalized.split(' - ').map((part) => trimToText(part)).filter(Boolean);
-  if (parts.length < 2) return normalized;
-  const start = parts[0];
-  const end = parts.slice(1).join(' - ');
-  const canonicalEnd = /\bcurrent\b/i.test(end) ? 'Present' : end;
-  return `${start} – ${canonicalEnd}`.replace(/\s+/g, ' ').trim();
+  const normalized = stripLeadingLocationFromDatesLine(text);
+  const match = extractDateRangeMatch(normalized);
+  if (!match) return normalized;
+  return `${match.start} – ${match.end}`.replace(/\s+/g, ' ').trim();
 }
 
 function splitCanonicalDateRangeText(value: string): { start_date?: string; end_date?: string } {
   const text = trimToText(value);
   if (!text) return {};
+  const match = extractDateRangeMatch(text);
+  if (match) {
+    return { start_date: match.start, end_date: match.end };
+  }
   const normalized = normalizeDateRangeSeparators(text);
   const parts = normalized.split(' - ').map((part) => trimToText(part)).filter(Boolean);
-  if (parts.length >= 2) {
-    return { start_date: parts[0], end_date: parts.slice(1).join(' - ') };
-  }
   if (parts.length === 1) {
     return { start_date: parts[0] };
   }
@@ -126,13 +142,8 @@ function splitCanonicalDateRangeText(value: string): { start_date?: string; end_
 function looksLikeDatesLine(value: string): boolean {
   const raw = trimToText(value);
   if (!raw) return false;
-  const normalized = normalizeDateRangeSeparators(stripLeadingLocationFromDatesLine(raw));
-  const hasYear = /\b(19|20)\d{2}\b/.test(normalized);
-  const looksLikeMonthYear = MONTH_YEAR_RE.test(normalized);
-  const looksLikeRange =
-    (looksLikeMonthYear || hasYear) &&
-    (normalized.includes(' - ') || /\b(?:present|current)\b/i.test(normalized));
-  return (hasYear || looksLikeMonthYear) && normalized.split(/\s+/).length <= 12 && looksLikeRange;
+  const normalized = stripLeadingLocationFromDatesLine(raw);
+  return Boolean(extractDateRangeMatch(normalized)) && normalized.split(/\s+/).length <= 12;
 }
 
 function looksLikeRoleTitle(value: string): boolean {
@@ -200,15 +211,11 @@ function parseCompanyWithInlineDates(line: string): { company: string; dates: st
   const raw = trimToText(line);
   if (!raw) return null;
   const normalized = normalizeDateRangeSeparators(raw);
-  const match = normalized.match(
-    new RegExp(`^(.+?)\\s+(${MONTH_YEAR_TOKEN})\\s*-\\s*(?:(${MONTH_YEAR_TOKEN})|present|current)\\s*$`, 'i'),
-  );
+  const match = extractDateRangeMatch(normalized);
   if (!match) return null;
-  const company = trimToText(match[1]);
-  const start = trimToText(match[2]);
-  const end = trimToText(match[3] ?? 'Present');
-  if (!company || !start || !end) return null;
-  return { company, dates: canonicalizeDateRange(`${start} - ${end}`) };
+  const company = trimToText(normalized.slice(0, normalized.indexOf(match.matchedText)).replace(/[\s|@-]+$/, ''));
+  if (!company || !isLikelyCompanyName(company)) return null;
+  return { company, dates: canonicalizeDateRange(match.matchedText) };
 }
 
 function parseCompanyWithTrailingStartDate(line: string): { company: string; start: string } | null {
@@ -300,6 +307,7 @@ function hasUnmatchedCompanyPunctuation(value: string): boolean {
   return openParens !== closeParens;
 }
 
+
 function parseExperienceHeaderLine(line: string): { company: string; roleTitle: string; dates?: string } | null {
   const raw = trimToText(line);
   if (!raw) return null;
@@ -309,7 +317,8 @@ function parseExperienceHeaderLine(line: string): { company: string; roleTitle: 
   if (raw.includes('|')) {
     const parts = raw.split('|').map((p) => trimToText(p)).filter(Boolean);
     if (parts.length < 2) return null;
-    let [company, roleTitle, dates] = parts;
+    let [company, roleTitle, ...dateParts] = parts;
+    const dates = dateParts.length > 0 ? dateParts.join(' | ') : undefined;
     if (!company || !roleTitle) return null;
 
     // Support role-first pipe ordering observed in some baselines:
@@ -327,27 +336,27 @@ function parseExperienceHeaderLine(line: string): { company: string; roleTitle: 
     return { company, roleTitle, ...(dates ? { dates } : {}) };
   }
 
-  // Support "Company — Role Title — dates" and "Company - Role Title - dates"
-  const dashParts = raw.split(/\s[—–-]\s/).map((p) => trimToText(p)).filter(Boolean);
+  // Support "Company ? Role Title ? dates" and "Company - Role Title - dates"
+  const dashParts = raw.split(/\s[??-]\s/).map((p) => trimToText(p)).filter(Boolean);
   if (dashParts.length >= 2) {
     // Avoid misclassifying "Company <Month YYYY> - <Month YYYY|Present>" as a header with company+roleTitle.
     if (dashParts.length === 2 && looksLikeDatesLine(dashParts[1])) return null;
 
     if (dashParts.length === 2) {
-      const monthYear =
-        /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(?:19|20)\d{2}\b/i;
+      const monthYear = /\\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(?:19|20)\\d{2}\\b/i;
       const leftHasMonthYear = monthYear.test(dashParts[0]);
-      const leftEndsWithMonthYear = monthYear.test(dashParts[0].split(/\s+/).slice(-2).join(' '));
+      const leftEndsWithMonthYear = monthYear.test(dashParts[0].split(/\\s+/).slice(-2).join(' '));
       const rightIsEnd = monthYear.test(dashParts[1]) || /\b(?:present|current)\b/i.test(dashParts[1]);
       if (leftHasMonthYear && leftEndsWithMonthYear && rightIsEnd) return null;
     }
 
-    let [company, roleTitle, dates] = dashParts;
+    let [company, roleTitle, ...dateParts] = dashParts;
+    const dates = dateParts.length > 0 ? dateParts.join(' - ') : undefined;
     if (!company || !roleTitle) return null;
 
     // Support role-first dash headers observed in production:
-    // "Senior Manager, Customer Operations – SentinelOne"
-    // "Director, Cloud Development and Support – CenturyLink Business for Enterprise"
+    // "Senior Manager, Customer Operations ? SentinelOne"
+    // "Director, Cloud Development and Support ? CenturyLink Business for Enterprise"
     if (!isLikelyCompanyName(company) && isLikelyCompanyName(roleTitle)) {
       const swappedCompany = roleTitle;
       const swappedRole = company;
@@ -396,9 +405,60 @@ function readExperienceHeaderAt(
   const headerCandidate0 = isBulletLine(line0) ? stripBulletPrefix(line0) : line0;
   if (!headerCandidate0) return null;
 
+  const line1 = trimToText(lines[startIndex + 1] ?? '');
+  const line2 = trimToText(lines[startIndex + 2] ?? '');
+  const line0LooksLikeCompany = isLikelyCompanyName(headerCandidate0);
+  const line0LooksLikeRole = looksLikeRoleTitle(headerCandidate0);
+  const line1LooksLikeCompany = isLikelyCompanyName(line1);
+
+  if (line1 && !isBulletLine(line1)) {
+    const inlineDates = parseCompanyWithInlineDates(headerCandidate0);
+    if (inlineDates && looksLikeRoleTitle(line1)) {
+      const splitDates = splitCanonicalDateRangeText(inlineDates.dates);
+      if (splitDates.start_date && splitDates.end_date) {
+        return {
+          header: { company: inlineDates.company, roleTitle: line1, dates: inlineDates.dates },
+          consumed: 2,
+        };
+      }
+    }
+
+    if (line0LooksLikeCompany && looksLikeRoleTitle(line1)) {
+      const line2Dates = line2 && !isBulletLine(line2) && looksLikeDatesLine(line2) ? canonicalizeDateRange(line2) : '';
+      const splitDates = line2Dates ? splitCanonicalDateRangeText(line2Dates) : {};
+      if (splitDates.start_date && splitDates.end_date) {
+        return {
+          header: { company: headerCandidate0, roleTitle: line1, dates: line2Dates },
+          consumed: 3,
+        };
+      }
+    }
+
+    if (line0LooksLikeCompany && looksLikeDatesLine(line1) && line2 && !isBulletLine(line2) && looksLikeRoleTitle(line2)) {
+      const dates = canonicalizeDateRange(line1);
+      const splitDates = splitCanonicalDateRangeText(dates);
+      if (splitDates.start_date && splitDates.end_date) {
+        return {
+          header: { company: headerCandidate0, roleTitle: line2, dates },
+          consumed: 3,
+        };
+      }
+    }
+
+    if ((!line0LooksLikeCompany || line0LooksLikeRole) && line1LooksLikeCompany) {
+      const line2Dates = line2 && !isBulletLine(line2) && looksLikeDatesLine(line2) ? canonicalizeDateRange(line2) : '';
+      const splitDates = line2Dates ? splitCanonicalDateRangeText(line2Dates) : {};
+      if (splitDates.start_date && splitDates.end_date) {
+        return {
+          header: { company: line1, roleTitle: headerCandidate0, dates: line2Dates },
+          consumed: 3,
+        };
+      }
+    }
+  }
+
   const single = parseExperienceHeaderLine(headerCandidate0) ?? parseRoleAtCompany(headerCandidate0);
   if (single) {
-    const line1 = trimToText(lines[startIndex + 1] ?? '');
     if (line1 && !isBulletLine(line1) && looksLikeDatesLine(line1)) {
       const dates = canonicalizeDateRange(line1);
       return {
@@ -432,7 +492,6 @@ function readExperienceHeaderAt(
     return null;
   }
 
-  const line1 = trimToText(lines[startIndex + 1] ?? '');
   if (line1 && !isBulletLine(line1)) {
     const inlineDates = parseCompanyWithInlineDates(headerCandidate0);
     if (inlineDates) {
@@ -481,7 +540,6 @@ function readExperienceHeaderAt(
       }
     }
 
-    const line2 = trimToText(lines[startIndex + 2] ?? '');
     const maybeDates = line2 && !isBulletLine(line2) && looksLikeDatesLine(line2) ? canonicalizeDateRange(line2) : null;
     const splitMaybeDates = maybeDates ? splitCanonicalDateRangeText(maybeDates) : {};
 

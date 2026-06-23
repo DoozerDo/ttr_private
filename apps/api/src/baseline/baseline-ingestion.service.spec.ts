@@ -105,6 +105,29 @@ describe('BaselineIngestionService', () => {
     expect(result.canonical.experience[0].evidence).toHaveLength(1);
   });
 
+  it('recovers split header work history blocks when the date line uses pipe separators', async () => {
+    const rawText = [
+      'Alex Candidate',
+      'alex.candidate@example.com | Seattle, WA',
+      '',
+      'EXPERIENCE',
+      'Acme Support',
+      'Senior Support Operations Manager',
+      '2021 | Present',
+      '- Led incident response and escalation handling across support operations.',
+    ].join('\n');
+
+    const result = await service.ingestFromText(rawText, 'docx');
+
+    expect(result.canonical.experience).toHaveLength(1);
+    expect(result.canonical.experience[0]).toMatchObject({
+      company: 'Acme Support',
+      role: 'Senior Support Operations Manager',
+      start_date: '2021',
+      end_date: 'Present',
+    });
+  });
+
   it('recovers split header work history blocks where role and company appear on adjacent lines', async () => {
     const rawText = [
       'Alex Candidate',

@@ -90,6 +90,26 @@ describe('structuredBaselineExtractor', () => {
     expect(structured.experience.every((entry) => entry.bullets.length > 0)).toBe(true);
   });
 
+  it('parses pipe-separated date ranges in structured experience headers', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Acme Support | Senior Support Operations Manager | 2021 | Present',
+          '- Led incident response and escalation handling across support operations.',
+        ].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    expect(structured.experience).toHaveLength(1);
+    expect(structured.experience[0]).toMatchObject({
+      company: 'Acme Support',
+      roleTitle: 'Senior Support Operations Manager',
+      dates: '2021 – Present',
+    });
+  });
+
   it('still rejects malformed split headers as unsafe', () => {
     const sections: any[] = [
       {
