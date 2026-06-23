@@ -469,7 +469,10 @@ export class BaselineService {
     const structured = extractStructuredBaselineFromSections(input.sections as any);
     const sourceText =
       input.sourceText || (input.sections ?? []).map((section) => section.content ?? '').join('\n');
-    const experience = normalizeVerifiedBaselineExperience(canonical?.experience ?? structured.experience);
+    const canonicalExperience = Array.isArray(canonical?.experience) && canonical.experience.length > 0
+      ? canonical.experience
+      : null;
+    const experience = normalizeVerifiedBaselineExperience(canonicalExperience ?? structured.experience);
     const skills = canonical?.skills ?? structured.skills.map((name) => ({ name, category: null }));
     const education = canonical?.education ?? structured.education.map((school) => ({
       school,
@@ -1429,6 +1432,12 @@ export class BaselineService {
     ingestion: BaselineIngestionResult,
   ) {
     const ingestedAt = new Date().toISOString();
+    const verificationSections = (baseline.sections ?? []) as BaselineSection[];
+    const verifiedBaseline = this.buildVerifiedBaseline({
+      sourceText: ingestion.rawText ?? '',
+      ingestion,
+      sections: verificationSections,
+    });
     let parsedBaseline: any;
     try {
       parsedBaseline = BaselineSchema.parse({
@@ -1439,6 +1448,14 @@ export class BaselineService {
         ingested_at: ingestedAt,
         user_verified: false,
       });
+      if (
+        Array.isArray(parsedBaseline?.experience) &&
+        parsedBaseline.experience.length === 0 &&
+        Array.isArray(verifiedBaseline?.experience) &&
+        verifiedBaseline.experience.length > 0
+      ) {
+        parsedBaseline.experience = verifiedBaseline.experience;
+      }
     } catch (error) {
       // Canonical parsed baseline must be valid for ResumeV2 generation; expose a stable typed error for repair flows.
       throw new UnprocessableEntityException({
@@ -1489,7 +1506,10 @@ export class BaselineService {
           // ignore
         }
       }
-      resumeV2Json = buildValidatedResumeV2FromParsedBaseline(parsedBaseline as any, ingestion.parsedSections as any) as any;
+      resumeV2Json = buildValidatedResumeV2FromParsedBaseline(
+        parsedBaseline as any,
+        (verificationSections.length ? verificationSections : ingestion.parsedSections) as any,
+      ) as any;
     } catch (error) {
       if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
         try {

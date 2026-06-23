@@ -215,6 +215,43 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     }
   });
 
+  it('surfaces thematic-field diagnostics when experience is empty but role evidence still exists outside the experience array', () => {
+    const parsedBaseline: Record<string, unknown> = {
+      baseline_id: 'baseline-thematic-empty-1',
+      identity: { full_name: 'Thematic Person', location: 'Thematic City' },
+      experience: [],
+      people_leadership: { direct_reports: 12, managers_led: true, global_teams: true },
+      operational_ownership: { functions_owned: ['incident management'], process_design: true, process_scaling: true },
+      tooling_and_platforms: { tools: ['ServiceNow'], ownership_level: 'owned' },
+      cross_functional_partnership: { product: true, engineering: true, sales_cs: true, executive: true },
+      customer_advocacy: { executive_escalations: true, voice_of_customer: true, post_incident_rca: true },
+      scale_and_scope: { customer_segment: 'enterprise', geo_scope: 'global', org_stage: 'growth' },
+      metrics_and_outcomes: { metrics_present: true, metrics: ['Reduced MTTR by 25%'] },
+      skills_and_tools: { tools: ['ServiceNow'], methodologies: ['ITIL'], domains: ['Enterprise IT'] },
+    };
+
+    expect(() => buildValidatedResumeV2FromParsedBaseline(parsedBaseline)).toThrow(
+      UnprocessableEntityException,
+    );
+    try {
+      buildValidatedResumeV2FromParsedBaseline(parsedBaseline);
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      const body = (error as UnprocessableEntityException).getResponse() as any;
+      expect(String(body?.error?.code ?? '')).toBe('baseline_resume_v2_ingestion_failed');
+      expect(body?.error?.details?.diagnostics?.experienceArrayEmpty).toBe(true);
+      expect(Array.isArray(body?.error?.details?.diagnostics?.thematicFields)).toBe(true);
+      expect(body?.error?.details?.diagnostics?.thematicFields).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'people_leadership', hasContent: true }),
+          expect.objectContaining({ field: 'operational_ownership', hasContent: true }),
+          expect.objectContaining({ field: 'tooling_and_platforms', hasContent: true }),
+          expect.objectContaining({ field: 'skills_and_tools', hasContent: true }),
+        ]),
+      );
+    }
+  });
+
   it('accepts nested field shapes (company.name, roleTitle.value) and does not drop usable experience entries', () => {
     const parsedBaseline: Record<string, unknown> = {
       baseline_id: 'baseline-nested-1',

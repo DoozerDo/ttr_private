@@ -9,6 +9,7 @@ import { BaselineSectionType } from './baseline-section.entity';
 import { BaselineSchemaCore, BaselineSchemaCoreShape } from './baseline-schema';
 import { BaselineParserService, ParsedSection } from './baseline-parser.service';
 import { BaselineTextExtractor } from './baseline-text-extractor.service';
+import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
 import {
   CriticalFlowEventType,
   CriticalFlowTrackerService,
@@ -46,6 +47,130 @@ function isStandaloneSectionHeadingLine(value: string): boolean {
   return /^(?:summary|professional summary|profile|experience|professional experience|work experience|skills|technical skills|key skills|education|academic background|training|projects?|programs?)\b$/i.test(
     text,
   );
+}
+
+function normalizeExperienceHeaderSeparatorText(value: string): string {
+  return String(value ?? '')
+    .replace(/\s*[\u2013\u2014]\s*/g, ' - ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isLikelyExperienceEntryTitle(value: string): boolean {
+  const text = normalizeExperienceHeaderSeparatorText(value);
+  if (!text) return false;
+  if (/^(?:summary|professional summary|profile|experience|professional experience|work experience|skills|technical skills|education|projects?)$/i.test(text)) {
+    return false;
+  }
+  if (text.includes('|')) return true;
+  if (/\s-\s/.test(text)) return true;
+  if (/\bat\b/i.test(text)) return true;
+  return false;
+}
+
+function shouldPromoteSectionTitleToExperienceContent(section: ParsedSection): boolean {
+  const title = normalizeExperienceHeaderSeparatorText(String(section?.title ?? ''));
+  if (!isLikelyExperienceEntryTitle(title)) return false;
+  const content = typeof section?.content === 'string' ? section.content.trim() : '';
+  if (!content) return true;
+  const firstContentLine = content
+    .split(/\r?\n/)
+    .map((line) => String(line ?? '').replace(/\s+/g, ' ').trim())
+    .find(Boolean) ?? '';
+  if (!firstContentLine) return true;
+  return normalizeExperienceHeaderSeparatorText(firstContentLine) !== title;
+}
+
+function mapStructuredExperienceToCanonical(
+  entries: Array<{ company: string; roleTitle: string; dates?: string; bullets: string[] }>,
+): BaselineSchemaCoreShape['experience'] {
+  const mapped = entries
+    .map((entry, index) => {
+      const company = String(entry.company ?? '').trim();
+      const role = String(entry.roleTitle ?? '').trim();
+      if (!company || !role) return null;
+      const bullets = Array.isArray(entry.bullets)
+        ? entry.bullets.map((bullet) => String(bullet ?? '').trim()).filter(Boolean)
+        : [];
+      if (!bullets.length) return null;
+      const evidence = bullets.map((text, evidenceIndex) => ({
+        id: `ingestion-structured-experience-${index}-evidence-${evidenceIndex}`,
+        text,
+        metrics: [] as Array<{ type: 'percentage' | 'currency' | 'count'; value: string }>,
+        tags: [role.toLowerCase()],
+      }));
+      const dates = String(entry.dates ?? '').trim();
+      const [startDate, endDate] = dates
+        ? (() => {
+            const normalized = normalizeExperienceHeaderSeparatorText(dates).replace(/\s+-\s+/g, ' - ');
+            const parts = normalized.split(' - ').map((part) => part.trim()).filter(Boolean);
+            if (parts.length >= 2) {
+              return [parts[0], parts.slice(1).join(' - ')] as const;
+            }
+            return [parts[0] ?? null, null] as const;
+          })()
+        : [null, null];
+      return {
+        company,
+        role,
+        ...(startDate ? { start_date: startDate } : {}),
+        ...(endDate ? { end_date: endDate } : {}),
+        evidence,
+        company_name: company,
+        role_title: role,
+        scope_summary: bullets.join(' '),
+        details_text: bullets.join('\n'),
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  return mapped as BaselineSchemaCoreShape['experience'];
+}
+
+function summarizeThematicEvidenceFields(canonical: Record<string, unknown>) {
+  const inspect = (field: string, value: unknown) => {
+    const hasContent =
+      Array.isArray(value)
+        ? value.length > 0
+        : value && typeof value === 'object'
+          ? Object.values(value as Record<string, unknown>).some((item) => {
+              if (Array.isArray(item)) return item.length > 0;
+              if (typeof item === 'string') return item.trim().length > 0;
+              return item !== null && item !== undefined && item !== false;
+            })
+          : typeof value === 'string'
+            ? value.trim().length > 0
+            : value !== null && value !== undefined && value !== false;
+
+    return {
+      field,
+      hasContent,
+      rejectionReason: hasContent ? 'missing_company_role_dates_bullets' : 'empty_thematic_field',
+      sample:
+        typeof value === 'string'
+          ? value.slice(0, 120)
+          : Array.isArray(value)
+            ? value
+                .map((item) => String(item ?? '').trim())
+                .filter(Boolean)
+                .slice(0, 3)
+                .join(' | ')
+                .slice(0, 120)
+            : value && typeof value === 'object'
+              ? JSON.stringify(Object.entries(value as Record<string, unknown>).slice(0, 4)).slice(0, 120)
+              : String(value ?? '').slice(0, 120),
+    };
+  };
+
+  return [
+    inspect('people_leadership', canonical.people_leadership),
+    inspect('operational_ownership', canonical.operational_ownership),
+    inspect('tooling_and_platforms', canonical.tooling_and_platforms),
+    inspect('cross_functional_partnership', canonical.cross_functional_partnership),
+    inspect('customer_advocacy', canonical.customer_advocacy),
+    inspect('scale_and_scope', canonical.scale_and_scope),
+    inspect('metrics_and_outcomes', canonical.metrics_and_outcomes),
+    inspect('skills_and_tools', canonical.skills_and_tools),
+  ];
 }
 
 @Injectable()
@@ -193,6 +318,41 @@ export class BaselineIngestionService {
     const tooling = this.buildToolingAndSkills(normalized);
     const education = this.buildEducation(parsedSections);
     const skills = this.buildSkills(parsedSections);
+    const peopleLeadership = this.buildPeopleLeadership(normalized, context);
+    const operationalOwnership = this.buildOperationalOwnership(normalized);
+    const crossFunctional = this.buildCrossFunctional(normalized);
+    const customerAdvocacy = this.buildCustomerAdvocacy(normalized);
+    const scaleAndScope = this.buildScaleAndScope(normalized);
+    const metrics = this.buildMetrics(normalized);
+    const skillsAndTools = this.buildSkillsAndTools(normalized, tooling.tools);
+    if (experience.length === 0) {
+      context.lowConfidence.push(
+        ...summarizeThematicEvidenceFields({
+          identity,
+          experience,
+          education,
+          skills,
+          people_leadership: peopleLeadership,
+          operational_ownership: operationalOwnership,
+          tooling_and_platforms: tooling,
+          cross_functional_partnership: crossFunctional,
+          customer_advocacy: customerAdvocacy,
+          scale_and_scope: scaleAndScope,
+          metrics_and_outcomes: metrics,
+          skills_and_tools: skillsAndTools,
+          system_generated_read_only: {
+            missing_fields: [],
+            ambiguity_flags: [],
+            low_confidence_extractions: [],
+          },
+        }).filter((entry) => entry.hasContent)
+          .map((entry) => ({
+            path: `thematic.${entry.field}`,
+            reason: entry.rejectionReason,
+            snippet: entry.sample,
+          })),
+      );
+    }
 
     return BaselineSchemaCore.parse({
       identity,
@@ -200,14 +360,14 @@ export class BaselineIngestionService {
       experience,
       education,
       skills,
-      people_leadership: this.buildPeopleLeadership(normalized, context),
-      operational_ownership: this.buildOperationalOwnership(normalized),
+      people_leadership: peopleLeadership,
+      operational_ownership: operationalOwnership,
       tooling_and_platforms: tooling,
-      cross_functional_partnership: this.buildCrossFunctional(normalized),
-      customer_advocacy: this.buildCustomerAdvocacy(normalized),
-      scale_and_scope: this.buildScaleAndScope(normalized),
-      metrics_and_outcomes: this.buildMetrics(normalized),
-      skills_and_tools: this.buildSkillsAndTools(normalized, tooling.tools),
+      cross_functional_partnership: crossFunctional,
+      customer_advocacy: customerAdvocacy,
+      scale_and_scope: scaleAndScope,
+      metrics_and_outcomes: metrics,
+      skills_and_tools: skillsAndTools,
       system_generated_read_only: {
         missing_fields: context.missingFields,
         ambiguity_flags: context.ambiguityFlags,
@@ -303,6 +463,30 @@ export class BaselineIngestionService {
       }
     }
     const experience = blocks.flatMap((block) => this.parseExperienceBlock(block, context));
+    if (experience.length > 0) {
+      return experience;
+    }
+
+    const promotedSections = parsedSections.map((section) => {
+      if (!shouldPromoteSectionTitleToExperienceContent(section)) return section;
+      const title = normalizeExperienceHeaderSeparatorText(String(section?.title ?? ''));
+      const content = typeof section.content === 'string' ? section.content.trim() : '';
+      return {
+        ...section,
+        sectionType: BaselineSectionType.EXPERIENCE,
+        content: content ? `${title}\n${content}` : title,
+      };
+    });
+
+    const structured = extractStructuredBaselineFromSections(promotedSections as any);
+    const structuredExperience = mapStructuredExperienceToCanonical(
+      Array.isArray((structured as any)?.experience)
+        ? ((structured as any).experience as Array<{ company: string; roleTitle: string; dates?: string; bullets: string[] }>)
+        : [],
+    );
+    if (structuredExperience.length > 0) {
+      return structuredExperience;
+    }
     return experience;
   }
 

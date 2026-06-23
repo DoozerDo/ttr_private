@@ -965,6 +965,58 @@ function normalizeParsedExperienceSource(
   return { entries: [], experienceType, experienceKeys, rejectionReasons };
 }
 
+function summarizeThematicEvidenceDiagnostics(parsedBaseline: Record<string, unknown>) {
+  const thematicFieldNames = [
+    'people_leadership',
+    'operational_ownership',
+    'tooling_and_platforms',
+    'cross_functional_partnership',
+    'customer_advocacy',
+    'scale_and_scope',
+    'metrics_and_outcomes',
+    'skills_and_tools',
+  ] as const;
+
+  const summarizeValue = (value: unknown): string => {
+    if (typeof value === 'string') return value.slice(0, 120);
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => String(item ?? '').trim())
+        .filter(Boolean)
+        .slice(0, 4)
+        .join(' | ')
+        .slice(0, 120);
+    }
+    if (value && typeof value === 'object') {
+      return JSON.stringify(Object.entries(value as Record<string, unknown>).slice(0, 4)).slice(0, 120);
+    }
+    return String(value ?? '').slice(0, 120);
+  };
+
+  return thematicFieldNames.map((field) => {
+    const value = parsedBaseline[field];
+    const hasContent =
+      Array.isArray(value)
+        ? value.length > 0
+        : value && typeof value === 'object'
+          ? Object.values(value as Record<string, unknown>).some((item) => {
+              if (Array.isArray(item)) return item.length > 0;
+              if (typeof item === 'string') return item.trim().length > 0;
+              return item !== null && item !== undefined && item !== false;
+            })
+          : typeof value === 'string'
+            ? value.trim().length > 0
+            : value !== null && value !== undefined && value !== false;
+
+    return {
+      field,
+      hasContent,
+      rejectionReason: hasContent ? 'missing_company_role_dates_bullets' : 'empty_thematic_field',
+      sample: summarizeValue(value),
+    };
+  });
+}
+
 function normalizeExperienceHeaderSeparatorText(value: string): string {
   return trimToText(value)
     .replace(/Ã¢â‚¬â€œ|Ã¢â‚¬â€”|â€“|â€”|[—–]/g, ' - ')
@@ -1254,6 +1306,7 @@ export function buildValidatedResumeV2FromParsedBaseline(
   const inspectedKeys = Object.keys(parsedBaseline).slice(0, 40);
   const rawExperienceSource = parsedBaseline['experience'] ?? parsedBaseline['work_history'];
   const parsedExperienceSourcePresent = rawExperienceSource !== undefined && rawExperienceSource !== null;
+  const parsedExperienceArrayEmpty = Array.isArray(rawExperienceSource) && rawExperienceSource.length === 0;
   const parsedExperienceType = Array.isArray(rawExperienceSource)
     ? 'array'
     : rawExperienceSource === null
@@ -1309,6 +1362,7 @@ export function buildValidatedResumeV2FromParsedBaseline(
         parsedWorkHistoryCount: Array.isArray(parsedBaseline['work_history'])
           ? (parsedBaseline['work_history'] as any[]).length
           : null,
+        experienceArrayEmpty: parsedExperienceArrayEmpty,
       });
     } catch {
       // ignore
@@ -1666,6 +1720,8 @@ export function buildValidatedResumeV2FromParsedBaseline(
               parsedExperienceType,
               parsedExperienceKeys,
               parsedExperienceCount: lastParsedExperienceCount,
+              experienceArrayEmpty: parsedExperienceArrayEmpty,
+              thematicFields: summarizeThematicEvidenceDiagnostics(parsedBaseline),
               mapping: lastMappingStats,
             },
           },

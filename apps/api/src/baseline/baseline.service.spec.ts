@@ -682,6 +682,57 @@ const ingestionResult = {
     expect(validateNormalizedResumeDocument(created.resumeV2Json).valid).toBe(true);
   });
 
+  it('prefers structured experience when canonical experience is empty but the sections still contain role-linked evidence', () => {
+    const verifiedBaseline = (service as any).buildVerifiedBaseline({
+      sourceText: 'Test Resume',
+      ingestion: {
+        rawText: 'Test Resume',
+        parsedSections: [],
+        canonical: {
+          identity: { full_name: 'Theme Person', location: 'Theme City', current_title: null, current_company: null, summary: null },
+          summary: null,
+          experience: [],
+          education: [],
+          skills: [],
+          people_leadership: { direct_reports: 12, managers_led: true, global_teams: true },
+          operational_ownership: { functions_owned: ['incident management'], process_design: true, process_scaling: true },
+          tooling_and_platforms: { tools: ['ServiceNow'], ownership_level: 'owned' },
+          cross_functional_partnership: { product: true, engineering: true, sales_cs: true, executive: true },
+          customer_advocacy: { executive_escalations: true, voice_of_customer: true, post_incident_rca: true },
+          scale_and_scope: { customer_segment: 'enterprise', geo_scope: 'global', org_stage: 'growth' },
+          metrics_and_outcomes: { metrics_present: true, metrics: ['Reduced MTTR by 25%'] },
+          skills_and_tools: { tools: ['ServiceNow'], methodologies: ['ITIL'], domains: ['Enterprise IT'] },
+          system_generated_read_only: { missing_fields: [], ambiguity_flags: [], low_confidence_extractions: [] },
+        },
+        sourceFormat: 'docx',
+      } as any,
+      sections: [
+        {
+          id: 'exp-1',
+          baselineId: 'baseline-structured-1',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: [
+            'Senior Manager, Customer Operations - SentinelOne',
+            'Remote Dec 2022 - Aug 2025',
+            '- Led incident response and escalation handling.',
+            '- Improved reporting workflows.',
+          ].join('\n'),
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as any,
+      ],
+    });
+
+    expect(verifiedBaseline).toBeTruthy();
+    expect(verifiedBaseline?.experience).toHaveLength(1);
+    expect(String(verifiedBaseline?.experience?.[0]?.company ?? '')).toBe('SentinelOne');
+    expect(String(verifiedBaseline?.experience?.[0]?.role ?? '')).toContain('Senior Manager, Customer Operations');
+    expect(verifiedBaseline?.experience?.[0]?.evidence?.length).toBeGreaterThan(0);
+  });
+
   it('surfaces a structured error payload when ResumeV2 build fails during baseline ingestion', async () => {
     const baselineForTest = { ...baseline, id: '00000000-0000-0000-0000-000000000000' };
     const manager = {
