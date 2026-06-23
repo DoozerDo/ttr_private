@@ -14,6 +14,16 @@ function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+function isContactLikeText(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return true;
+  return (
+    /\b(?:https?:\/\/|www\.|linkedin\.com|github\.com|mailto:)\b/i.test(text) ||
+    /@/.test(text) ||
+    /\+?\d[\d\s().-]{7,}\d/.test(text)
+  );
+}
+
 function isObviousNonWorkHistoryCompany(value: string): boolean {
   const text = trimToText(value);
   if (!text) return true;
@@ -41,6 +51,7 @@ function shouldKeepStructuredExperienceEntry(input: {
   const company = trimToText(input.company);
   const roleTitle = trimToText(input.roleTitle);
   if (!company || !roleTitle) return false;
+  if (isContactLikeText(company) || isContactLikeText(roleTitle)) return false;
   if (isObviousNonWorkHistoryCompany(company) || isObviousNonWorkHistoryCompany(roleTitle)) return false;
   if (!Array.isArray(input.detailLines)) return false;
   return true;
@@ -157,6 +168,8 @@ function classifyStructuredExperienceKeepDrop(input: {
   const company = trimToText(input.company);
   const roleTitle = trimToText(input.roleTitle);
   if (!company || !roleTitle) return { kept: false, dropReason: 'missing_company_or_role' };
+  if (isContactLikeText(company)) return { kept: false, dropReason: 'obvious_non_work_history_company' };
+  if (isContactLikeText(roleTitle)) return { kept: false, dropReason: 'obvious_non_work_history_role' };
   if (isObviousNonWorkHistoryCompany(company)) return { kept: false, dropReason: 'obvious_non_work_history_company' };
   if (isObviousNonWorkHistoryCompany(roleTitle)) return { kept: false, dropReason: 'obvious_non_work_history_role' };
   if (!Array.isArray(input.detailLines)) return { kept: false, dropReason: 'missing_detail_lines' };
@@ -330,6 +343,7 @@ export function buildValidatedResumeV2FromParsedBaseline(
 ): BaselineFileRecord {
   const shouldLog = process.env.RESUME_V2_INGEST_DEBUG === 'true';
   const baselineId = String(parsedBaseline['baseline_id'] ?? '');
+  const inspectedKeys = Object.keys(parsedBaseline).slice(0, 40);
   let lastParsedExperienceCount: number | null = null;
   let lastMappingStats:
     | {
@@ -701,16 +715,19 @@ export function buildValidatedResumeV2FromParsedBaseline(
         code: 'baseline_resume_v2_ingestion_failed',
         message:
           'Baseline ingestion did not produce any usable experience entries for Resume V2. Please re-upload or reprocess your baseline resume.',
-        details: {
-          missing: ['experience'],
-          hint:
-            'No experience entries survived mapping. This often means the parsed baseline schema uses different field names for company/title/bullets, or the resume parser returned empty work history.',
-          diagnostics: {
-            parsedExperienceCount: lastParsedExperienceCount,
-            mapping: lastMappingStats,
+          details: {
+            missing: ['experience'],
+            hint:
+              'No experience entries survived mapping. This often means the parsed baseline schema uses different field names for company/title/bullets, or the resume parser returned empty work history.',
+            diagnostics: {
+              inspectedKeys,
+              parsedExperiencePresent: Array.isArray(parsedBaseline['experience']),
+              parsedWorkHistoryPresent: Array.isArray(parsedBaseline['work_history']),
+              parsedExperienceCount: lastParsedExperienceCount,
+              mapping: lastMappingStats,
+            },
           },
         },
-      },
     });
   }
 

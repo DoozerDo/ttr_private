@@ -191,6 +191,10 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
       expect(String(body?.error?.code ?? '')).toBe('baseline_resume_v2_ingestion_failed');
       expect(String(body?.error?.message ?? '')).toMatch(/did not produce any usable experience entries/i);
       expect(String(body?.error?.details?.hint ?? '')).toMatch(/resume parser returned empty work history/i);
+      expect(Array.isArray(body?.error?.details?.diagnostics?.inspectedKeys)).toBe(true);
+      expect(body?.error?.details?.diagnostics?.inspectedKeys).toEqual(
+        expect.arrayContaining(['baseline_id', 'identity']),
+      );
     }
   });
 
@@ -342,7 +346,7 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
   });
 
-  it('preserves structured experience entries when bullets are empty and still rejects obvious non-work-history labels', () => {
+  it('fails closed when parsed experience entries do not contain usable bullets', () => {
     const parsedBaseline: Record<string, unknown> = {
       baseline_id: 'baseline-empty-bullets-structured-1',
       identity: { full_name: 'Empty Bullets Structured', location: 'Preserve City' },
@@ -374,22 +378,16 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
       ],
     };
 
-    const resumeV2 = buildValidatedResumeV2FromParsedBaseline(parsedBaseline);
-    const experience = ((resumeV2 as any).experience as any[]).map((entry) => ({
-      company: String(entry?.company ?? ''),
-      roleTitle: String(entry?.roleTitle ?? ''),
-      bullets: Array.isArray(entry?.bullets) ? entry.bullets : [],
-    }));
-
-    expect(experience).toHaveLength(3);
-    expect(experience.map((entry) => entry.company)).toEqual(
-      expect.arrayContaining([
-        'Of Fates Games LLC',
-        'AMS DataSerfs, Inc.',
-        'Biblioso',
-      ]),
+    expect(() => buildValidatedResumeV2FromParsedBaseline(parsedBaseline)).toThrow(
+      UnprocessableEntityException,
     );
-    expect(experience.some((entry) => entry.company.includes('TECHNOLOGY & TOOLS'))).toBe(false);
-    expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
+    try {
+      buildValidatedResumeV2FromParsedBaseline(parsedBaseline);
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      const body = (error as UnprocessableEntityException).getResponse() as any;
+      expect(String(body?.error?.code ?? '')).toBe('baseline_resume_v2_ingestion_failed');
+      expect(String(body?.error?.message ?? '')).toMatch(/did not produce any usable experience entries/i);
+    }
   });
 });

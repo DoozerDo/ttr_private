@@ -31,6 +31,23 @@ type ParsingContext = {
 
 type Metric = { type: 'percentage' | 'currency' | 'count'; value: string };
 
+function isContactLikeText(value: string): boolean {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!text) return true;
+  return (
+    /\b(?:https?:\/\/|www\.|linkedin\.com|github\.com|mailto:)\b/i.test(text) ||
+    /@/.test(text) ||
+    /\+?\d[\d\s().-]{7,}\d/.test(text)
+  );
+}
+
+function isStandaloneSectionHeadingLine(value: string): boolean {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return /^(?:summary|professional summary|profile|experience|professional experience|work experience|skills|technical skills|key skills|education|academic background|training|projects?|programs?)\b$/i.test(
+    text,
+  );
+}
+
 @Injectable()
 export class BaselineIngestionService {
   private readonly logger = new Logger(BaselineIngestionService.name);
@@ -235,11 +252,21 @@ export class BaselineIngestionService {
     parsedSections: ParsedSection[],
     context: ParsingContext,
   ): BaselineSchemaCoreShape['experience'] {
-    const content = parsedSections
-      .filter((section) => section.sectionType === BaselineSectionType.EXPERIENCE)
+    const experienceSections = parsedSections.filter(
+      (section) => section.sectionType === BaselineSectionType.EXPERIENCE,
+    );
+    const content = experienceSections
       .map((section) => section.content)
-      .join('\n');
-    if (!content.trim()) {
+      .join('\n')
+      .trim();
+
+    const selectedContents = content
+      ? [content]
+      : parsedSections
+          .map((section) => String(section.content ?? '').trim())
+          .filter(Boolean);
+
+    if (!selectedContents.length) {
       if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
         try {
           const titles = parsedSections
@@ -249,7 +276,8 @@ export class BaselineIngestionService {
           // eslint-disable-next-line no-console
           console.warn('[BASELINE_INGEST][EXPERIENCE_EMPTY_AFTER_PARSE]', {
             parsedSectionCount: parsedSections.length,
-            parsedExperienceSectionCount: parsedSections.filter((s) => s.sectionType === BaselineSectionType.EXPERIENCE).length,
+            parsedExperienceSectionCount: experienceSections.length,
+            usedFallbackExperienceContent: false,
             detectedHeadings: titles,
           });
         } catch {
@@ -259,12 +287,14 @@ export class BaselineIngestionService {
       context.missingFields.push('experience');
       return [];
     }
-    const blocks = this.groupExperienceBlocks(content);
+    const blocks = selectedContents.flatMap((sectionContent) => this.groupExperienceBlocks(sectionContent));
     if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
       try {
         // eslint-disable-next-line no-console
         console.log('[BASELINE_INGEST][EXPERIENCE_BLOCKS]', {
-          experienceChars: content.length,
+          sectionContentCount: selectedContents.length,
+          usedFallbackExperienceContent: !content,
+          explicitExperienceSectionCount: experienceSections.length,
           blockCount: blocks.length,
           firstBlockPreview: blocks[0]?.slice(0, 160) ?? null,
         });
@@ -298,6 +328,10 @@ export class BaselineIngestionService {
     };
 
     for (const line of lines) {
+      if (isStandaloneSectionHeadingLine(line)) {
+        flushCurrentBlock();
+        continue;
+      }
       const header = this.parseExperienceHeader(line);
       const isHeaderLine = Boolean(header.company && header.role);
 
@@ -330,6 +364,10 @@ export class BaselineIngestionService {
     const header = lines[0];
     const parsedHeader = this.parseExperienceHeader(header);
     if (!parsedHeader.company || !parsedHeader.role) {
+      context.missingFields.push('experience.company_or_role');
+      return [];
+    }
+    if (isContactLikeText(parsedHeader.company) || isContactLikeText(parsedHeader.role)) {
       context.missingFields.push('experience.company_or_role');
       return [];
     }
