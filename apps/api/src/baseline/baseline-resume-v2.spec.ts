@@ -50,6 +50,38 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
   });
 
+  it('normalizes a non-array experience section payload into canonical ResumeV2 experience entries', () => {
+    const parsedBaseline: Record<string, unknown> = {
+      baseline_id: 'baseline-section-payload-1',
+      identity: { full_name: 'Section Person', location: 'Section City' },
+      experience: {
+        sectionType: 'EXPERIENCE',
+        sections: [
+          {
+            title: 'Experience',
+            content: [
+              'Senior Manager, Customer Operations – SentinelOne',
+              'Remote Dec 2022 – Aug 2025',
+              '- Owned incident operations and escalation handling.',
+              '',
+              'Senior Manager, Technology Operations Excellence – Starbucks',
+              'Seattle, WA Dec 2018 – Oct 2019',
+              '- Improved operational workflows and reliability.',
+            ].join('\n'),
+          },
+        ],
+      },
+    };
+
+    const resumeV2 = buildValidatedResumeV2FromParsedBaseline(parsedBaseline);
+    expect(Array.isArray((resumeV2 as any).experience)).toBe(true);
+    expect((resumeV2 as any).experience.length).toBeGreaterThan(0);
+    const companies = ((resumeV2 as any).experience as any[]).map((entry) => String(entry?.company ?? '')).join(' | ');
+    expect(companies).toMatch(/SentinelOne/);
+    expect(companies).toMatch(/Starbucks/);
+    expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
+  });
+
   it('fails closed instead of promoting summary-only fallback experience into bullets', () => {
     const parsedBaseline: Record<string, unknown> = {
       baseline_id: 'baseline-summary-only-1',
@@ -75,6 +107,43 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
       const body = (error as UnprocessableEntityException).getResponse() as any;
       expect(String(body?.error?.code ?? '')).toBe('baseline_resume_v2_ingestion_failed');
       expect(String(body?.error?.message ?? '')).toMatch(/did not produce any usable experience entries/i);
+    }
+  });
+
+  it('reports experienceType, experienceKeys, and rejection reasons when a non-array experience object has no usable experience', () => {
+    const parsedBaseline: Record<string, unknown> = {
+      baseline_id: 'baseline-non-array-empty-1',
+      identity: { full_name: 'Non Array Empty', location: 'No City' },
+      experience: {
+        company_name: 'Acme Support',
+        role_title: 'Customer Operations Manager',
+        content: 'Professional Summary',
+      },
+    };
+
+    expect(() => buildValidatedResumeV2FromParsedBaseline(parsedBaseline)).toThrow(
+      UnprocessableEntityException,
+    );
+    try {
+      buildValidatedResumeV2FromParsedBaseline(parsedBaseline);
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      const body = (error as UnprocessableEntityException).getResponse() as any;
+      expect(String(body?.error?.code ?? '')).toBe('baseline_resume_v2_ingestion_failed');
+      expect(String(body?.error?.message ?? '')).toMatch(/did not produce any usable experience entries/i);
+      expect(body?.error?.details?.diagnostics?.parsedExperienceCount).toBeGreaterThan(0);
+      expect(body?.error?.details?.diagnostics?.parsedExperienceType).toBe('object');
+      expect(Array.isArray(body?.error?.details?.diagnostics?.parsedExperienceKeys)).toBe(true);
+      expect(body?.error?.details?.diagnostics?.parsedExperienceKeys).toEqual(
+        expect.arrayContaining(['company_name', 'role_title', 'content']),
+      );
+      expect(body?.error?.details?.diagnostics?.mapping).not.toBeNull();
+      expect(Array.isArray(body?.error?.details?.diagnostics?.mapping?.rejectionReasons)).toBe(true);
+      expect(body?.error?.details?.diagnostics?.mapping?.rejectionReasons).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ reason: 'missing_details_bullets' }),
+        ]),
+      );
     }
   });
 

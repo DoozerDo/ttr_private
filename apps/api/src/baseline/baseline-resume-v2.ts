@@ -43,6 +43,56 @@ function isObviousNonWorkHistoryCompany(value: string): boolean {
   return false;
 }
 
+function looksLikeRoleTitle(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  return /\b(?:engineer|architect|administrator|sysadmin|developer|technician|specialist|founder|co-?founder|webmaster|assistant|manager|director|analyst)\b/i.test(
+    text,
+  );
+}
+
+function isLikelyCompanyName(value: string): boolean {
+  const text = trimToText(value);
+  if (!text) return false;
+  if (
+    /\b(?:program\s+manager|project\s+manager|product\s+manager|support\s+operations|operations|customer\s+experience|customer\s+success|engineer|architect|administrator|sysadmin|developer|technician|specialist|founder|co-?founder|webmaster|assistant|manager|director|analyst|contractor|consultant)\b/i.test(
+      text,
+    ) &&
+    !/\b(?:inc|inc\.|llc|l\.l\.c\.|co|co\.|corp|corp\.|ltd|ltd\.|pllc|pllc\.)\b/i.test(text)
+  ) {
+    return false;
+  }
+  if (/\b(?:professional\s+experience|experience|project|projects|skills|education|summary)\b/i.test(text)) {
+    return false;
+  }
+  if (
+    /\b(?:automation\s*&\s*monitoring|datacenter\s+operations|internal\s+web\s+applications|internal\s+tooling\s*&\s+software\s+development|earlier\s+career)\b/i.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+  if (/\b(?:vue|react|angular|frontend|back\s*end|full[-\s]*stack|builder)\b/i.test(text)) {
+    return false;
+  }
+  if (/^\p{Ll}[\s\S]*$/u.test(text) || /^[,;:)\-]/.test(text) || /[,:;]\s*$/.test(text)) {
+    return false;
+  }
+  const openParens = (text.match(/\(/g) ?? []).length;
+  const closeParens = (text.match(/\)/g) ?? []).length;
+  if (openParens !== closeParens) return false;
+  const stateSuffixMatch = text.match(
+    /^(?:[A-Za-z][A-Za-z .'-]+),\s*(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b\.?$/i,
+  );
+  const locationLike =
+    Boolean(stateSuffixMatch) ||
+    /^(?:Seattle|San Francisco|New York|Los Angeles|Austin|Chicago|Boston|Denver|Portland|Miami|Dallas|Houston|Phoenix|San Diego|San Jose)\b/i.test(
+      text,
+    );
+  if (locationLike && text.split(/\s+/).length <= 4) return false;
+  return true;
+}
+
 function shouldKeepStructuredExperienceEntry(input: {
   company: string;
   roleTitle: string;
@@ -55,6 +105,642 @@ function shouldKeepStructuredExperienceEntry(input: {
   if (isObviousNonWorkHistoryCompany(company) || isObviousNonWorkHistoryCompany(roleTitle)) return false;
   if (!Array.isArray(input.detailLines)) return false;
   return true;
+}
+
+function isRecordLike(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function firstNonEmptyString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const candidate = value as Record<string, unknown>;
+      const nested = firstNonEmptyString(candidate.name, candidate.value, candidate.text, candidate.content, candidate.rawContent);
+      if (nested) return nested;
+    }
+  }
+  return '';
+}
+
+function splitCanonicalDateRangeText(value: string): { start_date?: string; end_date?: string } {
+  const text = trimToText(value).replace(/\s*[\u2013\u2014]\s*/g, ' - ');
+  if (!text) return {};
+  const parts = text.split(/\s+-\s+/).map((part) => trimToText(part)).filter(Boolean);
+  if (parts.length >= 2) {
+    return { start_date: parts[0], end_date: parts.slice(1).join(' - ') };
+  }
+  if (parts.length === 1) {
+    return { start_date: parts[0] };
+  }
+  return {};
+}
+
+function isTextBulletLine(line: string): boolean {
+  return /^[-•*]\s+/.test(trimToText(line));
+}
+
+function looksLikeDatesLineText(line: string): boolean {
+  const text = trimToText(line);
+  if (!text) return false;
+  const normalized = text.replace(/\s*[\u2013\u2014]\s*/g, ' - ');
+  const yearMatches = normalized.match(/\b(?:19|20)\d{2}\b/g) ?? [];
+  return (
+    yearMatches.length >= 2 ||
+    (normalized.includes(' - ') || /\b(?:present|current)\b/i.test(normalized))
+  );
+}
+
+function isImplicitBulletCandidate(line: string): boolean {
+  const text = trimToText(line);
+  if (!text) return false;
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  if (wordCount > 28 || text.length > 180) return false;
+  return /^(?:designed|built|led|managed|created|implemented|developed|owned|improved|reduced|increased|delivered|supported|maintained|coordinated|partnered|collaborated|architected|automated|migrated|troubleshot|resolved)\b/i.test(
+    text,
+  );
+}
+
+function stripTrailingDateFragment(value: string): string {
+  const text = trimToText(value).replace(/\s*[\u2013\u2014]\s*/g, ' - ');
+  if (!text) return '';
+  return text
+    .replace(
+      /\s+(?:[A-Za-z]{3,9}\s+)?(?:19|20)\d{2}(?:\s*-\s*(?:[A-Za-z]{3,9}\s+)?(?:19|20)\d{2}|\s*-\s*(?:present|current))?$/i,
+      '',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseSimpleExperienceHeaderLine(line: string): { company: string; roleTitle: string; dates?: string } | null {
+  const raw = trimToText(line);
+  if (!raw) return null;
+  if (looksLikeDatesLineText(raw)) return null;
+
+  if (raw.includes('|')) {
+    const parts = raw.split('|').map((part) => trimToText(part)).filter(Boolean);
+    if (parts.length < 2) return null;
+    let [company, roleTitle, dates] = parts;
+    if (!company || !roleTitle) return null;
+    if (!isLikelyCompanyName(company) && isLikelyCompanyName(roleTitle)) {
+      [company, roleTitle] = [roleTitle, company];
+    }
+    company = stripTrailingDateFragment(company);
+    roleTitle = trimToText(roleTitle);
+    if (!company || !roleTitle) return null;
+    return { company, roleTitle, ...(dates ? { dates } : {}) };
+  }
+
+  const dashParts = raw.split(/\s[—–-]\s/).map((part) => trimToText(part)).filter(Boolean);
+  if (dashParts.length >= 2) {
+    if (dashParts.length === 2 && looksLikeDatesLineText(dashParts[1])) return null;
+    let [left, right, dates] = dashParts;
+    if (!left || !right) return null;
+    if (!isLikelyCompanyName(left) && isLikelyCompanyName(right)) {
+      [left, right] = [right, left];
+    }
+    if (looksLikeRoleTitle(left) && isLikelyCompanyName(right)) {
+      [left, right] = [right, left];
+    }
+    left = stripTrailingDateFragment(left);
+    right = trimToText(right);
+    if (!left || !right) return null;
+    return { company: left, roleTitle: right, ...(dates ? { dates } : {}) };
+  }
+
+  const atMatch = raw.match(/^(.+?)\s+at\s+(.+?)(?:\s*\(([^()]*)\))?\s*$/i);
+  if (atMatch) {
+    const roleTitle = trimToText(atMatch[1]);
+    const company = trimToText(atMatch[2]);
+    const dates = trimToText(atMatch[3]);
+    if (company && roleTitle) return { company, roleTitle, ...(dates ? { dates } : {}) };
+  }
+
+  return null;
+}
+
+function parseExperienceTextIntoEntries(text: string): Array<Record<string, unknown>> {
+  const lines = String(text ?? '')
+    .split(/\r?\n/)
+    .map((line) => trimToText(line))
+    .filter(Boolean)
+    .filter((line) => !isFallbackExperienceNoiseLine(line) || isTextBulletLine(line) || looksLikeDatesLineText(line) || Boolean(parseSimpleExperienceHeaderLine(line)));
+
+  const entries: Array<Record<string, unknown>> = [];
+  let current:
+    | {
+        company: string;
+        roleTitle: string;
+        dates?: string;
+        bullets: string[];
+      }
+    | null = null;
+
+  const flush = () => {
+    if (!current) return;
+    if (!current.company || !current.roleTitle || current.bullets.length === 0) {
+      current = null;
+      return;
+    }
+    entries.push({
+      company: current.company,
+      role_title: current.roleTitle,
+      ...(current.dates ? { dates: current.dates } : {}),
+      ...(current.dates ? splitCanonicalDateRangeText(current.dates) : {}),
+      details_text: current.bullets.join('\n'),
+    });
+    current = null;
+  };
+
+  for (let idx = 0; idx < lines.length; idx += 1) {
+    const line = lines[idx];
+    const header = parseSimpleExperienceHeaderLine(line);
+    if (header) {
+      flush();
+      current = {
+        company: header.company,
+        roleTitle: header.roleTitle,
+        ...(header.dates ? { dates: header.dates } : {}),
+        bullets: [],
+      };
+      const nextLine = lines[idx + 1] ?? '';
+      if (!current.dates && looksLikeDatesLineText(nextLine)) {
+        current.dates = trimToText(nextLine);
+        idx += 1;
+      }
+      continue;
+    }
+
+    if (!current) continue;
+
+    if (!current.dates && looksLikeDatesLineText(line)) {
+      current.dates = trimToText(line);
+      continue;
+    }
+
+    if (isTextBulletLine(line)) {
+      const bullet = trimToText(line.replace(/^[-•*]\s+/, ''));
+      if (bullet) current.bullets.push(bullet);
+      continue;
+    }
+
+    if (isImplicitBulletCandidate(line)) {
+      current.bullets.push(line);
+    }
+  }
+
+  flush();
+  return entries;
+}
+
+function buildSyntheticExperienceSectionsFromSource(
+  source: unknown,
+  baselineId: string,
+  depth = 0,
+  seen = new Set<object>(),
+): Array<Record<string, unknown>> {
+  if (depth > 4 || source === null || source === undefined) return [];
+  if (Array.isArray(source)) {
+    return source.flatMap((item) => buildSyntheticExperienceSectionsFromSource(item, baselineId, depth + 1, seen));
+  }
+  if (typeof source === 'string') {
+    const content = trimToText(source);
+    if (!content) return [];
+    return [
+      {
+        id: 'ingestion-experience-synthetic',
+        baselineId,
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 0,
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+      },
+    ];
+  }
+  if (!isRecordLike(source)) return [];
+  if (seen.has(source)) return [];
+  seen.add(source);
+
+  const record = source as Record<string, unknown>;
+  const sections: Array<Record<string, unknown>> = [];
+  const directContent = firstNonEmptyString(
+    record.content,
+    record.rawContent,
+    record.text,
+    record.value,
+    record.body,
+    record.details_text,
+    record.detailsText,
+    record.description,
+  );
+  if (directContent) {
+    sections.push({
+      id: 'ingestion-experience-content',
+      baselineId,
+      sectionType: BaselineSectionType.EXPERIENCE,
+      title: firstNonEmptyString(record.title, record.sectionTitle) || 'Experience',
+      content: directContent,
+      includePolicy: BaselineIncludePolicy.ALWAYS,
+      order: 0,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    });
+  }
+
+  const nestedSectionCandidates = [
+    record.section,
+    record.sections,
+    record.entries,
+    record.items,
+    record.blocks,
+    record.experience,
+    record.work_history,
+  ];
+  for (const candidate of nestedSectionCandidates) {
+    if (!candidate) continue;
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) {
+        sections.push(...buildSyntheticExperienceSectionsFromSource(item, baselineId, depth + 1, seen));
+      }
+      continue;
+    }
+    if (isRecordLike(candidate)) {
+      sections.push(...buildSyntheticExperienceSectionsFromSource(candidate, baselineId, depth + 1, seen));
+    }
+  }
+
+  const directFieldsPresent = Boolean(
+    firstNonEmptyString(
+      record.company,
+      record.company_name,
+      record.companyName,
+      record.employer,
+      record.organization,
+      record.organization_name,
+      record.org,
+      record.role,
+      record.role_title,
+      record.roleTitle,
+      record.title,
+      record.position,
+      record.position_title,
+      record.positionTitle,
+      record.job_title,
+      record.jobTitle,
+    ),
+  );
+  if (directFieldsPresent) {
+    const company = firstNonEmptyString(
+      record.company,
+      record.company_name,
+      record.companyName,
+      record.employer,
+      record.organization,
+      record.organization_name,
+      record.org,
+      isRecordLike(record.company) ? (record.company as Record<string, unknown>).name : undefined,
+    );
+    const roleTitle = firstNonEmptyString(
+      record.role_title,
+      record.roleTitle,
+      record.title,
+      record.position,
+      record.position_title,
+      record.positionTitle,
+      record.job_title,
+      record.jobTitle,
+      record.role,
+    );
+    const dates = firstNonEmptyString(record.dates, record.date_range, record.dateRange, record.start_date, record.end_date);
+    const bulletLines = [
+      record.details_text,
+      record.detailsText,
+      record.responsibilities_text,
+      record.responsibilitiesText,
+      record.description,
+    ]
+      .flatMap((value) => {
+        if (typeof value === 'string') return value.split(/\r?\n/);
+        if (Array.isArray(value)) return value.flatMap((item) => (typeof item === 'string' ? item.split(/\r?\n/) : []));
+        return [];
+      })
+      .map((line) => trimToText(line))
+      .filter(Boolean);
+    const arrayBullets = [
+      record.bullets,
+      record.highlights,
+      record.responsibilities,
+      record.details,
+      record.items,
+      record.lines,
+      record.paragraphs,
+    ]
+      .flatMap((value) => {
+        if (!Array.isArray(value)) return [];
+        return value.flatMap((item) => {
+          if (typeof item === 'string') return item.split(/\r?\n/);
+          if (isRecordLike(item)) return [firstNonEmptyString(item.text, item.value, item.content, item.rawContent)];
+          return [trimToText(item)];
+        });
+      })
+      .map((line) => trimToText(line))
+      .filter(Boolean);
+    const allLines = [...bulletLines, ...arrayBullets].filter(Boolean);
+    sections.push({
+      ...record,
+      company,
+      role_title: roleTitle,
+      ...(company ? { company } : {}),
+      ...(roleTitle ? { role_title: roleTitle } : {}),
+      ...(dates ? { dates } : {}),
+      ...(dates ? splitCanonicalDateRangeText(dates) : {}),
+      ...(allLines.length ? { details_text: allLines.join('\n') } : {}),
+    });
+  }
+
+  return sections;
+}
+
+function normalizeParsedExperienceSource(
+  source: unknown,
+  baselineId: string,
+): {
+  entries: Array<Record<string, unknown>>;
+  experienceType: string;
+  experienceKeys: string[];
+  rejectionReasons: Array<{ reason: string; count: number; sampleKeys: string[] }>;
+} {
+  const experienceType = Array.isArray(source) ? 'array' : source === null ? 'null' : typeof source;
+  const experienceKeys = isRecordLike(source) ? Object.keys(source).slice(0, 40) : [];
+  const rejectionReasons: Array<{ reason: string; count: number; sampleKeys: string[] }> = [];
+
+  const addReason = (reason: string, sampleSource: unknown) => {
+    const sampleKeys =
+      sampleSource && typeof sampleSource === 'object' && !Array.isArray(sampleSource)
+        ? Object.keys(sampleSource as Record<string, unknown>).slice(0, 12)
+        : [];
+    const existing = rejectionReasons.find((entry) => entry.reason === reason);
+    if (existing) {
+      existing.count += 1;
+      return;
+    }
+    rejectionReasons.push({ reason, count: 1, sampleKeys });
+  };
+
+  const normalizeEntryRecord = (entry: Record<string, unknown>): Record<string, unknown> => {
+    const company = firstNonEmptyString(
+      entry.company_name,
+      entry.companyName,
+      entry.company,
+      entry.employer,
+      entry.organization,
+      entry.organization_name,
+      entry.org,
+      isRecordLike(entry.company) ? (entry.company as Record<string, unknown>).name : undefined,
+    );
+    const role = firstNonEmptyString(
+      entry.role_title,
+      entry.roleTitle,
+      entry.title,
+      entry.position,
+      entry.position_title,
+      entry.positionTitle,
+      entry.job_title,
+      entry.jobTitle,
+      entry.role,
+    );
+    const dates = firstNonEmptyString(entry.dates, entry.date_range, entry.dateRange, entry.start_date, entry.end_date);
+    const bulletSources = [
+      entry.details_text,
+      entry.detailsText,
+      entry.responsibilities_text,
+      entry.responsibilitiesText,
+      entry.description,
+    ];
+    const arrayBulletSources = [
+      entry.bullets,
+      entry.highlights,
+      entry.responsibilities,
+      entry.details,
+      entry.lines,
+      entry.paragraphs,
+    ];
+    const detailsText = [
+      ...bulletSources.flatMap((value) => {
+        if (typeof value === 'string') return value.split(/\r?\n/);
+        if (Array.isArray(value)) {
+          return value.flatMap((item) => {
+            if (typeof item === 'string') return item.split(/\r?\n/);
+            if (isRecordLike(item)) return [firstNonEmptyString(item.text, item.value, item.content, item.rawContent)];
+            return [trimToText(item)];
+          });
+        }
+        return [];
+      }),
+      ...arrayBulletSources.flatMap((value) => {
+        if (!Array.isArray(value)) return [];
+        return value.flatMap((item) => {
+          if (typeof item === 'string') return item.split(/\r?\n/);
+          if (isRecordLike(item)) return [firstNonEmptyString(item.text, item.value, item.content, item.rawContent)];
+          return [trimToText(item)];
+        });
+      }),
+      ...[
+        entry.content,
+        entry.rawContent,
+        entry.text,
+        entry.body,
+      ].flatMap((value) => (typeof value === 'string' ? value.split(/\r?\n/) : [])),
+    ]
+      .map((line) => trimToText(line))
+      .filter(Boolean)
+      .filter((line) => !isFallbackExperienceNoiseLine(line));
+
+    const normalized: Record<string, unknown> = { ...entry };
+    if (company) normalized.company = company;
+    if (role) normalized.role_title = role;
+    if (dates) {
+      normalized.dates = dates;
+      const splitDates = splitCanonicalDateRangeText(dates);
+      if (splitDates.start_date) normalized.start_date = splitDates.start_date;
+      if (splitDates.end_date) normalized.end_date = splitDates.end_date;
+    }
+    if (detailsText.length) normalized.details_text = detailsText.join('\n');
+    return normalized;
+  };
+
+  const parseTextSource = (text: string): Array<Record<string, unknown>> => {
+    const manualEntries = parseExperienceTextIntoEntries(text);
+    if (manualEntries.length) return manualEntries;
+    const sections = buildSyntheticExperienceSectionsFromSource(text, baselineId);
+    const structured = sections.length ? extractStructuredBaselineFromSections(sections as any) : null;
+    const structuredEntries = Array.isArray((structured as any)?.experience)
+      ? ((structured as any).experience as Array<Record<string, unknown>>)
+      : [];
+    if (structuredEntries.length > 0) {
+      return structuredEntries
+        .map((entry) => {
+          const dates = firstNonEmptyString(entry.dates);
+          const splitDates = dates ? splitCanonicalDateRangeText(dates) : {};
+          return {
+            company: firstNonEmptyString(entry.company),
+            role_title: firstNonEmptyString(entry.roleTitle),
+            ...(dates ? { dates } : {}),
+            ...(splitDates.start_date ? { start_date: splitDates.start_date } : {}),
+            ...(splitDates.end_date ? { end_date: splitDates.end_date } : {}),
+            ...(Array.isArray(entry.bullets) && entry.bullets.length
+              ? { details_text: entry.bullets.map((bullet) => trimToText(bullet)).filter(Boolean).join('\n') }
+              : {}),
+          };
+        })
+        .filter((entry) => Boolean(entry.company && entry.role_title));
+    }
+
+    addReason('structured_extraction_returned_no_experience', { text });
+    return [];
+  };
+
+  if (Array.isArray(source)) {
+    const entries = source.flatMap((item) => {
+      if (!isRecordLike(item)) return [];
+      const directFieldsPresent = Boolean(
+        firstNonEmptyString(
+          item.company,
+          item.company_name,
+          item.companyName,
+          item.employer,
+          item.organization,
+          item.organization_name,
+          item.org,
+          item.role_title,
+          item.roleTitle,
+          item.position,
+          item.position_title,
+          item.positionTitle,
+          item.job_title,
+          item.jobTitle,
+        ),
+      );
+      const hasSectionPayloadShape = Boolean(
+        firstNonEmptyString(item.content, item.rawContent, item.text, item.body) ||
+          item.sectionType ||
+          item.type ||
+          item.title ||
+          item.sectionTitle ||
+          item.sections ||
+          item.section ||
+          item.entries ||
+          item.items ||
+          item.blocks,
+      );
+      if (hasSectionPayloadShape && !directFieldsPresent) {
+        const sections = buildSyntheticExperienceSectionsFromSource(item, baselineId);
+        if (sections.length) {
+          const structured = extractStructuredBaselineFromSections(sections as any);
+          const structuredEntries = Array.isArray((structured as any)?.experience)
+            ? ((structured as any).experience as Array<Record<string, unknown>>)
+            : [];
+          if (structuredEntries.length) {
+            return structuredEntries.map((entry) => {
+              const dates = firstNonEmptyString(entry.dates);
+              const splitDates = dates ? splitCanonicalDateRangeText(dates) : {};
+              return {
+                company: firstNonEmptyString(entry.company),
+                role_title: firstNonEmptyString(entry.roleTitle),
+                ...(dates ? { dates } : {}),
+                ...(splitDates.start_date ? { start_date: splitDates.start_date } : {}),
+                ...(splitDates.end_date ? { end_date: splitDates.end_date } : {}),
+                ...(Array.isArray(entry.bullets) && entry.bullets.length
+                  ? { details_text: entry.bullets.map((bullet) => trimToText(bullet)).filter(Boolean).join('\n') }
+                  : {}),
+              };
+            });
+          }
+        }
+      }
+      return [normalizeEntryRecord(item)];
+    });
+    if (entries.length === 0) addReason('array_experience_source_had_no_object_entries', source);
+    return { entries, experienceType, experienceKeys, rejectionReasons };
+  }
+
+  if (typeof source === 'string') {
+    const entries = parseTextSource(source);
+    if (entries.length === 0) addReason('string_experience_source_unusable', source);
+    return { entries, experienceType, experienceKeys, rejectionReasons };
+  }
+
+  if (!isRecordLike(source)) {
+    if (source !== null && source !== undefined) addReason('experience_source_not_record_like', source);
+    return { entries: [], experienceType, experienceKeys, rejectionReasons };
+  }
+
+  const record = source as Record<string, unknown>;
+  const directFieldsPresent = Boolean(
+    firstNonEmptyString(
+      record.company,
+      record.company_name,
+      record.companyName,
+      record.employer,
+      record.organization,
+      record.organization_name,
+      record.org,
+      record.role_title,
+      record.roleTitle,
+      record.position,
+      record.position_title,
+      record.positionTitle,
+      record.job_title,
+      record.jobTitle,
+    ),
+  );
+  if (directFieldsPresent) {
+    const entry = normalizeEntryRecord(record);
+    if (firstNonEmptyString(entry.company, entry.role_title, entry.details_text, entry.content, entry.rawContent, entry.text)) {
+      return { entries: [entry], experienceType, experienceKeys, rejectionReasons };
+    }
+    addReason('direct_experience_fields_unusable', record);
+    return { entries: [], experienceType, experienceKeys, rejectionReasons };
+  }
+
+  const nestedSources = [
+    record.experience,
+    record.work_history,
+    record.sections,
+    record.section,
+    record.entries,
+    record.items,
+    record.blocks,
+  ];
+  const nestedEntries = nestedSources.flatMap((nested) => normalizeParsedExperienceSource(nested, baselineId).entries);
+  if (nestedEntries.length) {
+    return { entries: nestedEntries, experienceType, experienceKeys, rejectionReasons };
+  }
+
+  const textEntries = parseTextSource(
+    [
+      record.content,
+      record.rawContent,
+      record.text,
+      record.body,
+      record.details_text,
+      record.detailsText,
+      record.description,
+    ]
+      .map((value) => (typeof value === 'string' ? value : ''))
+      .filter(Boolean)
+      .join('\n\n'),
+  );
+  if (textEntries.length) {
+    return { entries: textEntries, experienceType, experienceKeys, rejectionReasons };
+  }
+
+  addReason('no_usable_experience_shape_found', record);
+  return { entries: [], experienceType, experienceKeys, rejectionReasons };
 }
 
 function normalizeExperienceHeaderSeparatorText(value: string): string {
@@ -344,6 +1030,14 @@ export function buildValidatedResumeV2FromParsedBaseline(
   const shouldLog = process.env.RESUME_V2_INGEST_DEBUG === 'true';
   const baselineId = String(parsedBaseline['baseline_id'] ?? '');
   const inspectedKeys = Object.keys(parsedBaseline).slice(0, 40);
+  const rawExperienceSource = parsedBaseline['experience'] ?? parsedBaseline['work_history'];
+  const parsedExperienceSourcePresent = rawExperienceSource !== undefined && rawExperienceSource !== null;
+  const parsedExperienceType = Array.isArray(rawExperienceSource)
+    ? 'array'
+    : rawExperienceSource === null
+      ? 'null'
+      : typeof rawExperienceSource;
+  const parsedExperienceKeys = isRecordLike(rawExperienceSource) ? Object.keys(rawExperienceSource).slice(0, 40) : [];
   let lastParsedExperienceCount: number | null = null;
   let lastMappingStats:
     | {
@@ -353,6 +1047,8 @@ export function buildValidatedResumeV2FromParsedBaseline(
         entriesMissingHeader: number;
         entriesMissingDetails: number;
         survivingBlocks: number;
+        experienceType: string;
+        experienceKeys: string[];
         rejectionReasons: Array<{ reason: string; count: number; sampleKeys: string[] }>;
       }
     | null = null;
@@ -372,10 +1068,15 @@ export function buildValidatedResumeV2FromParsedBaseline(
         baselineId,
         schemaVersion: String(parsedBaseline['schema_version'] ?? ''),
         sourceFormat: String(parsedBaseline['source_format'] ?? ''),
+        parsedExperiencePresent: parsedExperienceSourcePresent,
+        parsedExperienceType,
+        parsedExperienceKeys,
         parsedExperienceIsArray: Array.isArray(parsedBaseline['experience']),
         parsedWorkHistoryIsArray: Array.isArray(parsedBaseline['work_history']),
-        parsedExperienceCount: Array.isArray(parsedBaseline['experience'])
-          ? (parsedBaseline['experience'] as any[]).length
+        parsedExperienceCount: parsedExperienceSourcePresent
+          ? Array.isArray(parsedBaseline['experience'])
+            ? (parsedBaseline['experience'] as any[]).length
+            : 0
           : null,
         parsedWorkHistoryCount: Array.isArray(parsedBaseline['work_history'])
           ? (parsedBaseline['work_history'] as any[]).length
@@ -447,14 +1148,18 @@ export function buildValidatedResumeV2FromParsedBaseline(
     sections[0].content = structuredExperienceBlocks.join('\n\n');
   }
 
-  const experience = (parsedBaseline['experience'] ?? parsedBaseline['work_history']) as
-    | Array<Record<string, unknown>>
-    | undefined;
-  if (!sections[0].content.trim() && Array.isArray(experience) && experience.length) {
+  const normalizedExperienceSource = normalizeParsedExperienceSource(rawExperienceSource, baselineId);
+  const experience = normalizedExperienceSource.entries;
+  if (!sections[0].content.trim() && parsedExperienceSourcePresent) {
     lastParsedExperienceCount = experience.length;
     const rejectionReasons = new Map<string, { count: number; sampleKeys: string[] }>();
+    for (const reason of normalizedExperienceSource.rejectionReasons) {
+      rejectionReasons.set(reason.reason, {
+        count: reason.count,
+        sampleKeys: reason.sampleKeys,
+      });
+    }
     const recordRejection = (reason: string, entry: unknown) => {
-      if (!shouldLog) return;
       const keys =
         entry && typeof entry === 'object' && !Array.isArray(entry)
           ? Object.keys(entry as Record<string, unknown>)
@@ -525,7 +1230,9 @@ export function buildValidatedResumeV2FromParsedBaseline(
     if (shouldLog) {
       // eslint-disable-next-line no-console
       console.log(
-        parsedBaseline['experience'] ? '[RESUME_V2_INGEST][USING_EXPERIENCE_ARRAY]' : '[RESUME_V2_INGEST][USING_WORK_HISTORY_FALLBACK]',
+        parsedExperienceType === 'array'
+          ? '[RESUME_V2_INGEST][USING_EXPERIENCE_ARRAY]'
+          : '[RESUME_V2_INGEST][USING_WORK_HISTORY_FALLBACK]',
         {
           baselineId,
           selectedCount: experience.length,
@@ -676,6 +1383,8 @@ export function buildValidatedResumeV2FromParsedBaseline(
       entriesMissingHeader: rejectedMissingHeaderCount,
       entriesMissingDetails: rejectedMissingDetailsCount,
       survivingBlocks: blocks.length,
+      experienceType: parsedExperienceType,
+      experienceKeys: parsedExperienceKeys,
       rejectionReasons: Array.from(rejectionReasons.entries()).map(([reason, payload]) => ({
         reason,
         count: payload.count,
@@ -704,8 +1413,8 @@ export function buildValidatedResumeV2FromParsedBaseline(
       // eslint-disable-next-line no-console
       console.warn('[RESUME_V2_INGEST][FAILED_NO_USABLE_EXPERIENCE]', {
         baselineId,
-        parsedExperiencePresent: Array.isArray(experience),
-        parsedExperienceCount: Array.isArray(experience) ? experience.length : null,
+        parsedExperiencePresent: parsedExperienceSourcePresent,
+        parsedExperienceCount: parsedExperienceSourcePresent ? experience.length : null,
         identityFullNamePresent: Boolean(fullName && String(fullName).trim()),
         identityLocationPresent: Boolean(location && String(location).trim()),
       });
@@ -721,8 +1430,10 @@ export function buildValidatedResumeV2FromParsedBaseline(
               'No experience entries survived mapping. This often means the parsed baseline schema uses different field names for company/title/bullets, or the resume parser returned empty work history.',
             diagnostics: {
               inspectedKeys,
-              parsedExperiencePresent: Array.isArray(parsedBaseline['experience']),
+              parsedExperiencePresent: parsedExperienceSourcePresent,
               parsedWorkHistoryPresent: Array.isArray(parsedBaseline['work_history']),
+              parsedExperienceType,
+              parsedExperienceKeys,
               parsedExperienceCount: lastParsedExperienceCount,
               mapping: lastMappingStats,
             },
@@ -842,5 +1553,6 @@ export function buildValidatedResumeV2FromParsedBaseline(
 
   return baselineFile;
 }
+
 
 
