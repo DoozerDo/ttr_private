@@ -128,6 +128,44 @@ describe('BaselineIngestionService', () => {
     });
   });
 
+  it('records redacted candidate diagnostics for experience.date_range rejections', async () => {
+    const rawText = [
+      'Alex Candidate',
+      'alex.candidate@example.com | Seattle, WA',
+      '',
+      'EXPERIENCE',
+      'Acme Support',
+      'Senior Support Operations Manager',
+      'Dec 2022',
+      '- Led incident response and escalation handling across support operations at https://example.com.',
+    ].join('\n');
+
+    const result = await service.ingestFromText(rawText, 'docx');
+
+    expect(result.canonical.experience).toHaveLength(0);
+    expect(result.trace?.baselineIngestion?.rejectionReasons).toEqual(
+      expect.arrayContaining(['experience.date_range']),
+    );
+    expect(result.trace?.baselineIngestion?.dateRangeRejections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          candidateBlockIndex: 0,
+          redactedHeaderLines: expect.arrayContaining([
+            'Acme Support',
+            'Senior Support Operations Manager',
+            'Dec 2022',
+          ]),
+          detectedDateLikeFragments: expect.arrayContaining(['Dec 2022']),
+          normalizedDateCandidate: expect.stringContaining('Dec 2022'),
+          dateParserRejectionReason: 'experience.date_range',
+          companyDetected: true,
+          roleDetected: true,
+        }),
+      ]),
+    );
+    expect((result.trace?.baselineIngestion?.dateRangeRejections?.[0]?.redactedHeaderLines ?? []).length).toBeLessThanOrEqual(4);
+  });
+
   it('recovers split header work history blocks where role and company appear on adjacent lines', async () => {
     const rawText = [
       'Alex Candidate',

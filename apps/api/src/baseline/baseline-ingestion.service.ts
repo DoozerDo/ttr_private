@@ -62,6 +62,15 @@ export type BaselineUploadTrace = {
     mappedExperienceCount: number;
     rejectedBlockCount: number;
     rejectionReasons: string[];
+    dateRangeRejections?: Array<{
+      candidateBlockIndex: number;
+      redactedHeaderLines: string[];
+      detectedDateLikeFragments: string[];
+      normalizedDateCandidate: string;
+      dateParserRejectionReason: string;
+      companyDetected: boolean;
+      roleDetected: boolean;
+    }>;
   };
 };
 
@@ -73,6 +82,16 @@ type ParsingContext = {
 
 type Metric = { type: 'percentage' | 'currency' | 'count'; value: string };
 
+type DateRangeRejectionDiagnostic = {
+  candidateBlockIndex: number;
+  redactedHeaderLines: string[];
+  detectedDateLikeFragments: string[];
+  normalizedDateCandidate: string;
+  dateParserRejectionReason: string;
+  companyDetected: boolean;
+  roleDetected: boolean;
+};
+
 function isContactLikeText(value: string): boolean {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim();
   if (!text) return true;
@@ -82,6 +101,63 @@ function isContactLikeText(value: string): boolean {
     /@/.test(text) ||
     (digitCount >= 10 && /\+?\d[\d\s().-]{7,}\d/.test(text))
   );
+}
+
+function redactSensitiveText(value: string): string {
+  return String(value ?? '')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted-email]')
+    .replace(/\b(?:https?:\/\/|www\.)\S+\b/gi, '[redacted-url]')
+    .replace(/\+?\d[\d\s().-]{7,}\d/g, '[redacted-phone]')
+    .replace(
+      /\b\d{1,6}\s+[A-Za-z0-9][A-Za-z0-9\s.'-]{1,60}\b/g,
+      (match) => (/\d/.test(match) && /(?:street|st\.|road|rd\.|ave|avenue|blvd|lane|ln\.|drive|dr\.)/i.test(match) ? '[redacted-address]' : match),
+    )
+    .trim();
+}
+
+function containsDateLikeFragment(value: string): boolean {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!text) return false;
+  return Boolean(
+    text.match(
+      /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|19|20)\b/i,
+    ) || /\b(?:present|current)\b/i.test(text) || /[-–—|]/.test(text),
+  );
+}
+
+function collectDateLikeFragments(lines: string[]): string[] {
+  const fragments = lines
+    .filter((line) => containsDateLikeFragment(line))
+    .map((line) => redactSensitiveText(line))
+    .filter(Boolean);
+  return Array.from(new Set(fragments)).slice(0, 4);
+}
+
+function buildDateRangeRejectionDiagnostic(
+  blockLines: string[],
+  parsedHeader: { company: string; role: string; start: string | null; end: string | null },
+  candidateBlockIndex: number,
+  headerConsumed: number,
+): DateRangeRejectionDiagnostic {
+  const redactedHeaderLines = blockLines.slice(0, 4).map((line) => redactSensitiveText(line)).filter(Boolean);
+  const detectedDateLikeFragments = collectDateLikeFragments(blockLines.slice(0, 4));
+  const dateCandidateLine =
+    blockLines
+      .slice(0, Math.max(4, headerConsumed + 2))
+      .find((line) => containsDateLikeFragment(line)) ?? '';
+  const normalizedDateCandidate = dateCandidateLine
+    ? redactSensitiveText(sharedNormalizeDateRangeSeparators(dateCandidateLine))
+    : '';
+
+  return {
+    candidateBlockIndex,
+    redactedHeaderLines,
+    detectedDateLikeFragments,
+    normalizedDateCandidate,
+    dateParserRejectionReason: 'experience.date_range',
+    companyDetected: Boolean(parsedHeader.company),
+    roleDetected: Boolean(parsedHeader.role),
+  };
 }
 
 function isStandaloneSectionHeadingLine(value: string): boolean {
@@ -693,6 +769,7 @@ export class BaselineIngestionService {
         mappedExperienceCount: 0,
         rejectedBlockCount: 0,
         rejectionReasons: [],
+        dateRangeRejections: [],
       };
     }
     if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
@@ -709,7 +786,7 @@ export class BaselineIngestionService {
         // ignore
       }
     }
-    const experience = blocks.flatMap((block) => this.parseExperienceBlock(block, context, trace));
+    const experience = blocks.flatMap((block, index) => this.parseExperienceBlock(block, context, trace, index));
     if (trace?.baselineIngestion) {
       trace.baselineIngestion.mappedExperienceCount = experience.length;
       trace.baselineIngestion.rejectedBlockCount = Math.max(0, blocks.length - experience.length);
@@ -822,6 +899,7 @@ export class BaselineIngestionService {
     block: string,
     context: ParsingContext,
     trace?: BaselineUploadTrace,
+    candidateBlockIndex = 0,
   ): BaselineSchemaCoreShape['experience'] {
     const lines = block.split(/\n/).map((line) => line.trim()).filter(Boolean);
     if (!lines.length) return [];
@@ -840,6 +918,11 @@ export class BaselineIngestionService {
     if (!parsedHeader.start || !parsedHeader.end) {
       context.missingFields.push('experience.date_range');
       if (trace?.baselineIngestion) trace.baselineIngestion.rejectionReasons.push('experience.date_range');
+      if (trace?.baselineIngestion) {
+        trace.baselineIngestion.dateRangeRejections?.push(
+          buildDateRangeRejectionDiagnostic(lines, parsedHeader, candidateBlockIndex, headerRead.consumed),
+        );
+      }
       return [];
     }
     if (isContactLikeText(parsedHeader.company) || isContactLikeText(parsedHeader.role)) {
