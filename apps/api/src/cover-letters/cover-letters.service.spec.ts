@@ -218,7 +218,15 @@ const buildService = (options?: {
     applicationsService,
     baselineResumeV2BackfillService,
   );
-  return { service, complianceService, coverRepo, workflowIdempotencyService, studioArtifactsService, fitRepo };
+  return {
+    service,
+    complianceService,
+    coverRepo,
+    workflowIdempotencyService,
+    studioArtifactsService,
+    fitRepo,
+    baselineResumeV2BackfillService,
+  };
 };
 
 const request = {
@@ -455,6 +463,79 @@ describe('CoverLettersService contract', () => {
       ];
 
       const result = await service.generateCoverLetter('user-1', request as any);
+      expect(result.status).toBe('success');
+      expect(result.generationAuthority).toBe('baseline_file');
+      expect(result.baselineFileUsable).toBe(true);
+      expect(result.exportReady).toBe(true);
+      expect(result.exports).toEqual({ docx: true, pdf: true });
+      expect((result as any)?.actions?.canExport).toBe(true);
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsed;
+    }
+  });
+
+  it('backfills persisted Resume V2 before resolving cover-letter authority when the loaded baseline record is missing it', async () => {
+    const { service, baselineResumeV2BackfillService } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+
+    baseline.sections = [];
+    baseline.parsedRecords = [
+      {
+        id: 'parsed-1',
+        baselineId: 'baseline-1',
+        sourceFileId: 'source-file-1',
+        schemaVersion: '1',
+        sourceFormat: 'docx',
+        ingestedAt: new Date(),
+        parsedJson: {
+          experience: [
+            {
+              company: 'Example SaaS',
+              role_title: 'Support Operations Director',
+              start_date: '2019-01',
+              end_date: '2022-12',
+              details_text:
+                '- Owned the support operations operating model and support workflow design for a high-volume SaaS support team.\n' +
+                '- Built dashboards and KPIs for executive communication and weekly operating reviews.',
+            },
+          ],
+        },
+        resumeV2Json: null,
+        flagsJson: {},
+        createdAt: new Date(),
+      } as any,
+    ];
+
+    (baselineResumeV2BackfillService.backfillLatestIfMissing as jest.Mock).mockResolvedValue({
+      id: 'parsed-1',
+      baselineId: 'baseline-1',
+      resumeV2Json: {
+        heading: { name: 'Alex Candidate', contactLine: 'Seattle, WA' },
+        summary: 'Support leader with verified impact.',
+        experience: [
+          {
+            company: 'Example SaaS',
+            roleTitle: 'Support Operations Director',
+            dates: '2019 - 2022',
+            bullets: [
+              'Owned the support operations operating model and support workflow design for a high-volume SaaS support team.',
+              'Built dashboards and KPIs for executive communication and weekly operating reviews.',
+            ],
+          },
+        ],
+        education: [],
+        certifications: [],
+        skills: ['Support Operations'],
+      },
+    } as any);
+
+    try {
+      const result = await service.generateCoverLetter('user-1', request as any);
+      expect(baselineResumeV2BackfillService.backfillLatestIfMissing).toHaveBeenCalledWith({
+        baselineId: 'baseline-1',
+      });
       expect(result.status).toBe('success');
       expect(result.generationAuthority).toBe('baseline_file');
       expect(result.baselineFileUsable).toBe(true);

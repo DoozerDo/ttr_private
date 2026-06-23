@@ -2080,6 +2080,60 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
     });
   });
 
+  it('allows canonical ResumeV2 resume artifacts with structured experience to persist even when internal evidence ids are absent', async () => {
+    const createQueryBuilder = jest.fn(() => ({
+      insert: () => createQueryBuilder.mock.results[0].value,
+      into: () => createQueryBuilder.mock.results[0].value,
+      values: jest.fn((values) => {
+        createQueryBuilder.mock.results[0].value.valuesArg = values;
+        return createQueryBuilder.mock.results[0].value;
+      }),
+      onConflict: () => createQueryBuilder.mock.results[0].value,
+      returning: () => createQueryBuilder.mock.results[0].value,
+      execute: jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-1' }] }),
+      update: () => createQueryBuilder.mock.results[0].value,
+      set: () => createQueryBuilder.mock.results[0].value,
+      where: () => createQueryBuilder.mock.results[0].value,
+    })) as any;
+    const service = buildServiceWithRepo({ createQueryBuilder, findOne: jest.fn() } as any);
+
+    await expect(
+      service.recordResumeSuccess({
+        userId: 'u-1',
+        baselineId: 'b-1',
+        jobId: 'j-1',
+        baselineVersionId: 'bv-1',
+        baselineVersionHash: 'hash-1',
+        jobFingerprint: 'job-fp-1',
+        inputsHash: 'inputs-1',
+        analysisId: 'analysis-1',
+        responseBody: {
+          internal: {
+            generationPipeline: 'v2',
+            generationMode: 'structured_baseline_template',
+          },
+          preview: {
+            resume: {
+              summary:
+                'Support operations leader with experience leading reliable execution. Delivers measurable improvements through disciplined follow through.',
+              experience: [
+                {
+                  company: 'Acme SaaS',
+                  roleTitle: 'Support Operations Director',
+                  bullets: [
+                    { text: 'Led incident response and improved SLA adherence across queues.', sourceEvidenceIds: [] },
+                  ],
+                },
+              ],
+            },
+          },
+        } as any,
+        content: 'resume-content',
+        metadata: {},
+      }),
+    ).resolves.toBe('artifact-1');
+  });
+
   it('rejects generic cover letter content before marking cover letter current', async () => {
     const service = buildServiceWithRepo({ createQueryBuilder: jest.fn(), findOne: jest.fn() } as any);
     await expect(
@@ -2451,6 +2505,9 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
         stored.coverLetterInputsHash = 'hash-1';
         stored.coverLetterResponseBody = {
           status: 'success',
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          actions: { canExport: true, canRegenerate: true, canSaveToOpportunities: true },
           preview: { coverLetter: { paragraphs: ['Dear Hiring Team,', 'Recovered cover letter.'] } },
         };
         stored.coverLetterContent = 'cover-content';
@@ -2480,6 +2537,7 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
     expect(state.coverLetter).not.toBeNull();
     expect(state.coverLetter?.usableCurrent).toBe(true);
     expect(state.coverLetter?.responseBody).not.toBeNull();
+    expect(state.coverLetter?.actions?.canExport).toBe(true);
   });
 });
 

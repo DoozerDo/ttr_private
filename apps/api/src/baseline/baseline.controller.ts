@@ -203,6 +203,9 @@ export class BaselineController {
         },
       };
     } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
       const exceptionName = error instanceof Error ? error.name : 'Error';
       const exceptionMessage =
         error instanceof Error ? error.message : String(error ?? 'Unknown error');

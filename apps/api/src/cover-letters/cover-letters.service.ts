@@ -880,12 +880,17 @@ export class CoverLettersService {
             }
           : {}),
         ...savedCoverLetter,
-        baselineVersionId: draft.baselineVersion.id,
-        exportReady,
-        exports,
-        preview: {
-          coverLetter: draft.generation.document,
-        },
+      baselineVersionId: draft.baselineVersion.id,
+      exportReady,
+      exports,
+      actions: {
+        canExport: exportReady,
+        canRegenerate: true,
+        canSaveToOpportunities: exportReady,
+      },
+      preview: {
+        coverLetter: draft.generation.document,
+      },
         internalTrace: draft.generation.internalTrace,
         paragraphEvidence: draft.generation.paragraphEvidence,
         compliance_flags: draft.complianceResult.complianceFlags,
@@ -1575,7 +1580,7 @@ export class CoverLettersService {
     );
     const closingTemplate = resolveClosingTemplate(closingTemplateKey);
 
-    const persistedResumeV2 = (() => {
+    let persistedResumeV2 = (() => {
       try {
         const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) as any;
         if (!persisted || typeof persisted !== 'object') return null;
@@ -1595,7 +1600,22 @@ export class CoverLettersService {
         return null;
       }
     })();
-    const baselineFileUsable = Boolean(persistedResumeV2);
+    if (!persistedResumeV2 && this.baselineResumeV2BackfillService) {
+      const backfilled = await this.baselineResumeV2BackfillService.backfillLatestIfMissing({ baselineId: baseline.id });
+      const backfilledResumeV2 = backfilled?.resumeV2Json;
+      if (backfilledResumeV2 && typeof backfilledResumeV2 === 'object') {
+        const parsedRecords = Array.isArray(baseline.parsedRecords) ? baseline.parsedRecords : [];
+        if (parsedRecords.length > 0) {
+          baseline.parsedRecords = parsedRecords.map((record: any, index: number) =>
+            index === 0 ? { ...record, resumeV2Json: backfilledResumeV2 } : record,
+          );
+        } else {
+          baseline.parsedRecords = [backfilled as any];
+        }
+        persistedResumeV2 = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) as any;
+      }
+    }
+    let baselineFileUsable = Boolean(persistedResumeV2) || Boolean(evidenceBundle.usableWorkHistoryEvidence);
     const baselineFileVersionHash = baselineVersion.hash ?? null;
     const sourceSections = baselineFileUsable ? [] : resolveBaselineSectionsForGeneration(baseline);
     const sections = baselineFileUsable ? [] : this.applyPoliciesToSections(sourceSections, policies);
@@ -1614,7 +1634,14 @@ export class CoverLettersService {
     });
     const structuredBaseline = baselineFileUsable
       ? normalizeNormalizedResumeDocument(persistedResumeV2 as any)
-      : evidenceSignals.structuredBaseline;
+      : extractStructuredBaselineFromSections(sourceSections as any);
+    if (
+      !baselineFileUsable &&
+      Array.isArray((structuredBaseline as any)?.experience) &&
+      (structuredBaseline as any).experience.length > 0
+    ) {
+      baselineFileUsable = true;
+    }
     const templateReadiness = evaluateBaselineTemplateReadiness(structuredBaseline as any);
     const interpretedEvidence = evidenceSignals.interpretedEvidence ?? [];
     const interpretedEligibility = evaluateInterpretedEvidenceEligibility(interpretedEvidence);

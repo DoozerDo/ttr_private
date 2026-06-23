@@ -111,7 +111,7 @@ function extractWorkHistoryFromResumeV2(params: {
       const company = normalizeLine(String(entry?.company ?? ''));
       const roleTitle = normalizeLine(String(entry?.roleTitle ?? ''));
       const bullets = normalizeBullets(entry?.bullets);
-      if (!company || !roleTitle || bullets.length === 0) return null;
+      if (!company || !roleTitle) return null;
       return {
         company,
         roleTitle,
@@ -213,6 +213,12 @@ export function resolveGenerationEvidence(params: {
     baselineParsedRecordCreatedAt: parsedRecord?.createdAt instanceof Date ? parsedRecord.createdAt : null,
   });
   warnings.push(...v2.warnings);
+  const structured = extractWorkHistoryFromBaselineSections({
+    baseline,
+    baselineVersionId,
+    sections: sourceSections as any,
+  });
+  const canonicalAuthorityAvailable = baselineFileUsable || v2.items.length > 0 || structured.items.length > 0;
 
   if (v2.items.length > 0) {
     return {
@@ -222,19 +228,13 @@ export function resolveGenerationEvidence(params: {
       workHistory: v2.items,
       usableWorkHistoryEvidence: true,
       resumePlainText: v2.resumeText,
-      structuredBaselineExperienceCount: 0,
-      generationAuthority: baselineFileUsable && baselineVerified ? 'baseline_file' : 'fallback',
-      baselineFileUsable,
+      structuredBaselineExperienceCount: structured.structuredExperienceCount,
+      generationAuthority: canonicalAuthorityAvailable ? 'baseline_file' : 'fallback',
+      baselineFileUsable: canonicalAuthorityAvailable,
       baselineVerified,
       baselineFileVersionHash,
     };
   }
-
-  const structured = extractWorkHistoryFromBaselineSections({
-    baseline,
-    baselineVersionId,
-    sections: sourceSections as any,
-  });
 
   if (structured.items.length > 0) {
     return {
@@ -245,8 +245,8 @@ export function resolveGenerationEvidence(params: {
       usableWorkHistoryEvidence: true,
       resumePlainText: buildConservativeRawBaselineText(sourceSections as any),
       structuredBaselineExperienceCount: structured.structuredExperienceCount,
-      generationAuthority: 'fallback',
-      baselineFileUsable,
+      generationAuthority: canonicalAuthorityAvailable ? 'baseline_file' : 'fallback',
+      baselineFileUsable: canonicalAuthorityAvailable,
       baselineVerified,
       baselineFileVersionHash,
     };
@@ -262,7 +262,7 @@ export function resolveGenerationEvidence(params: {
     resumePlainText: rawText,
     structuredBaselineExperienceCount: 0,
     generationAuthority: 'fallback',
-    baselineFileUsable,
+    baselineFileUsable: canonicalAuthorityAvailable,
     baselineVerified,
     baselineFileVersionHash,
   };

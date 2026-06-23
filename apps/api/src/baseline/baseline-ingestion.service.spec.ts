@@ -80,4 +80,46 @@ describe('BaselineIngestionService', () => {
     expect(evidenceTexts).toContain('Drove $120,000 in savings');
     expect(evidenceTexts).not.toMatch(/jane\.doe@example\.com|Seattle, WA|Professional Summary|Remote Dec 2022/i);
   });
+
+  it('preserves line-oriented experience blocks from DOCX-style extraction into canonical ResumeV2 experience', async () => {
+    const rawText = [
+      'Alex Candidate',
+      'alex.candidate@example.com | Seattle, WA | (555) 555-1234',
+      '',
+      'SUMMARY',
+      'Support operations leader with verified impact across incident management, automation, and executive reporting.',
+      '',
+      'EXPERIENCE',
+      'Acme Support | Senior Support Operations Manager | 2021 - Present',
+      '- Led incident response for Sev1 and Sev2 outages and reduced escalation friction.',
+      '',
+      '- Built runbooks, routing automation, and reporting dashboards that improved SLA adherence and lowered MTTR.',
+      '',
+      'Beta Support | Support Operations Manager | 2018 - 2021',
+      '- Owned support queue health, staffing tradeoffs, and recurring issue follow-up.',
+      '',
+      '- Improved reporting, routing, and workflow automation to reduce manual toil.',
+      '',
+      'SKILLS',
+      'Jira Service Management, ServiceNow, incident response, automation',
+    ].join('\n');
+
+    const result = await service.ingestFromText(rawText, 'docx');
+
+    expect(result.canonical.experience).toHaveLength(2);
+    expect(result.canonical.experience[0]).toMatchObject({
+      company: 'Acme Support',
+      role: 'Senior Support Operations Manager',
+    });
+    expect(result.canonical.experience[1]).toMatchObject({
+      company: 'Beta Support',
+      role: 'Support Operations Manager',
+    });
+    const evidenceTexts = result.canonical.experience
+      .flatMap((entry) => entry.evidence.map((item) => item.text))
+      .join(' | ');
+    expect(evidenceTexts).not.toMatch(/alex\.candidate@example\.com|Seattle, WA|SUMMARY|SKILLS/i);
+    expect(evidenceTexts).toContain('Led incident response for Sev1 and Sev2 outages');
+    expect(evidenceTexts).toContain('Improved reporting, routing, and workflow automation');
+  });
 });

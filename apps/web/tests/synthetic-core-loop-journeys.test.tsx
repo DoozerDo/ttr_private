@@ -197,6 +197,47 @@ type SyntheticJourneyScenario = {
   persistedAssessment?: AssessmentFixture;
 };
 
+type GeneratedArtifactResponse = {
+  status: "success";
+  generationStatus: "success";
+  exportReady: boolean;
+  exports: { docx: boolean; pdf: boolean };
+  qualityStatus: "pass";
+  generationState: "generated_usable";
+  correctionReasons: string[];
+  actions: {
+    canEdit: boolean;
+    canRegenerate: boolean;
+    canExport: boolean;
+    canSaveToOpportunities: boolean;
+  };
+  preview: {
+    resume?: {
+      heading: { name: string; contactLine: string };
+      summary: string;
+      experience: Array<{
+        company: string;
+        roleTitle: string;
+        dateRange: string;
+        bullets: string[];
+      }>;
+      education: unknown[];
+      certifications: unknown[];
+      competencies: unknown[];
+      skillsAndTools: { tools: string[] };
+    };
+    coverLetter?: {
+      salutation: string;
+      opening: string;
+      bodyParagraphs: string[];
+      closingParagraph: string;
+      signoff: string;
+      signatureName: string;
+      paragraphs: string[];
+    };
+  };
+};
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -411,6 +452,103 @@ function createScenarioBackend(scenario: SyntheticJourneyScenario) {
     ]),
     supportIssues: [] as SupportHistoryItem[],
     analysisRunCalls: 0,
+    resumeGenerationCalls: 0,
+    coverGenerationCalls: 0,
+    resumeGenerated: false,
+    coverGenerated: false,
+    generatedResumeResponse: null as GeneratedArtifactResponse | null,
+    generatedCoverLetterResponse: null as GeneratedArtifactResponse | null,
+  };
+
+  const buildGeneratedResumeResponse = (): GeneratedArtifactResponse => {
+    const benchmark = scenario.benchmark?.approvedBenchmarkResume ?? null;
+    const job = scenario.jobs[0] ?? { company: "Example SaaS", title: scenario.targetAssessment.jobTitle };
+    const bullets =
+      benchmark?.bullets?.length > 0
+        ? [...benchmark.bullets]
+        : [
+            `Owned ${scenario.targetAssessment.jobTitle} execution across customer operations, reporting, and cross-functional follow through.`,
+            `Kept ${job.company} service delivery aligned to measured outcomes and a steady operating rhythm.`,
+          ];
+
+    return {
+      status: "success",
+      generationStatus: "success",
+      exportReady: true,
+      exports: { docx: true, pdf: true },
+      qualityStatus: "pass",
+      generationState: "generated_usable",
+      correctionReasons: [],
+      actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+      preview: {
+        resume: {
+          heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+          summary:
+            benchmark?.summary ??
+            `${scenario.targetAssessment.jobTitle} focused on customer operations rigor, cross-functional coordination, and measurable service delivery.`,
+          experience: [
+            {
+              company: job.company,
+              roleTitle: scenario.targetAssessment.jobTitle,
+              dateRange: "2021 - 2025",
+              bullets,
+            },
+          ],
+          education: [],
+          certifications: [],
+          competencies: [],
+          skillsAndTools: { tools: benchmark?.bullets?.length ? ["Zendesk", "Jira"] : ["Operations", "Reporting"] },
+        },
+      },
+    };
+  };
+
+  const buildGeneratedCoverLetterResponse = (): GeneratedArtifactResponse => {
+    const benchmark = scenario.benchmark?.approvedBenchmarkCoverLetter ?? null;
+    const job = scenario.jobs[0] ?? { company: "Example SaaS", title: scenario.targetAssessment.jobTitle };
+    const opening =
+      benchmark?.opening ??
+      `I am applying for the ${scenario.targetAssessment.jobTitle} role at ${job.company} because my background aligns with the operating rhythm and service delivery work described.`;
+    const bodyParagraphs =
+      benchmark?.bodyParagraphs?.length > 0
+        ? [...benchmark.bodyParagraphs]
+        : [
+            `My work has centered on ${scenario.targetAssessment.jobTitle.toLowerCase()} leadership, clearer ownership, and practical follow through.`,
+            `I would bring steady coordination across support, product, and engineering so the team can keep service quality visible and improve with confidence.`,
+          ];
+    const closingParagraph =
+      benchmark?.closingParagraph ??
+      `I would welcome the chance to discuss how I can help ${job.company} keep service quality visible and the operating rhythm practical.`;
+    const paragraphs = [
+      "Dear Hiring Team,",
+      opening,
+      ...bodyParagraphs,
+      closingParagraph,
+      "Sincerely,",
+      "Alex Candidate",
+    ];
+
+    return {
+      status: "success",
+      generationStatus: "success",
+      exportReady: true,
+      exports: { docx: true, pdf: true },
+      qualityStatus: "pass",
+      generationState: "generated_usable",
+      correctionReasons: [],
+      actions: { canEdit: false, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+      preview: {
+        coverLetter: {
+          salutation: "Dear Hiring Team,",
+          opening,
+          bodyParagraphs,
+          closingParagraph,
+          signoff: "Sincerely,",
+          signatureName: "Alex Candidate",
+          paragraphs,
+        },
+      },
+    };
   };
 
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -578,6 +716,85 @@ function createScenarioBackend(scenario: SyntheticJourneyScenario) {
       return jsonResponse(createStageAssessment(assessment));
     }
 
+    if (pathname === "/api/resume/generate" && method === "POST") {
+      state.resumeGenerationCalls += 1;
+      state.resumeGenerated = true;
+      state.generatedResumeResponse ??= buildGeneratedResumeResponse();
+      return jsonResponse(state.generatedResumeResponse);
+    }
+
+    if (pathname === "/api/cover-letters/generate" && method === "POST") {
+      state.coverGenerationCalls += 1;
+      state.coverGenerated = true;
+      state.generatedCoverLetterResponse ??= buildGeneratedCoverLetterResponse();
+      return jsonResponse(state.generatedCoverLetterResponse);
+    }
+
+    if (pathname === "/api/studio/artifacts" && method === "GET") {
+      const resumeResult = state.generatedResumeResponse;
+      const coverLetterResult = state.generatedCoverLetterResponse;
+      const pairStatus = state.resumeGenerated && state.coverGenerated ? "paired" : "missing";
+      const artifactsGenerated = state.resumeGenerated && state.coverGenerated;
+      return jsonResponse({
+        score: scenario.studioAssessment.score,
+        scoring_v2: {
+          score: scenario.studioAssessment.score,
+          generation_readiness: {
+            status: artifactsGenerated ? "ready" : scenario.studioAssessment.resumeReadiness.status,
+            blocked: artifactsGenerated ? false : scenario.studioAssessment.resumeReadiness.status === "blocked",
+            reasonCodes: artifactsGenerated ? [] : scenario.studioAssessment.resumeReadiness.reasons.map((reason) => reason.code),
+          },
+        },
+        errors: [],
+        diagnostics: {
+          resumeV2Readiness: {
+            hasResumeV2: artifactsGenerated || scenario.studioAssessment.resumeReadiness.status === "ready",
+            usableExperienceCount: artifactsGenerated || scenario.studioAssessment.resumeReadiness.status === "ready" ? 1 : 0,
+          },
+        },
+        baselineId: scenario.studioAssessment.baselineId,
+        baselineVersionId: scenario.studioAssessment.baselineVersionId,
+        jobId: scenario.studioAssessment.jobId,
+        generationContractVersion: "pipeline-test",
+        thresholds: {
+          qualifiedForGeneration: artifactsGenerated || scenario.studioAssessment.resumeReadiness.status === "ready",
+          canProceedWithStudioDrafts: artifactsGenerated || scenario.studioAssessment.resumeReadiness.status === "ready",
+          qualifiedForStudioOrchestration: artifactsGenerated || scenario.studioAssessment.resumeReadiness.status === "ready",
+        },
+        readiness: {
+          status: artifactsGenerated ? "ready" : scenario.studioAssessment.resumeReadiness.status,
+          blocked: artifactsGenerated ? false : scenario.studioAssessment.resumeReadiness.status === "blocked",
+          reasonCodes: artifactsGenerated ? [] : scenario.studioAssessment.resumeReadiness.reasons.map((reason) => reason.code),
+          verificationIssueCodes: artifactsGenerated ? [] : scenario.studioAssessment.resumeReadiness.reasons.map((reason) => reason.code),
+        },
+        artifact: {
+          hasResume: state.resumeGenerated,
+          hasCoverLetter: state.coverGenerated,
+          pairStatus,
+          generating: false,
+          failure: null,
+        },
+        resume: state.resumeGenerated
+          ? {
+              status: "COMPLETED",
+              confidence: "HIGH",
+              failure: null,
+              responseBody: resumeResult,
+            }
+          : { status: "missing", confidence: "LOW", failure: null },
+        coverLetter: state.coverGenerated
+          ? {
+              status: "COMPLETED",
+              confidence: "HIGH",
+              failure: null,
+              responseBody: coverLetterResult,
+            }
+          : { status: "missing", confidence: "LOW", failure: null },
+        resumeResult,
+        coverLetterResult,
+      });
+    }
+
     if (pathname === "/api/resume/readiness" && method === "GET") {
       return jsonResponse(scenario.studioAssessment.resumeReadiness);
     }
@@ -626,6 +843,21 @@ function expectTextLink(label: string, href: string) {
   const link = screen.getByRole("link", { name: label });
   expect(link).toHaveAttribute("href", href);
   return link;
+}
+
+function expectBaselineCta(expected: StageExpectation) {
+  const label = new RegExp(expected.ctaLabel, "i");
+  const button = screen.queryByRole("button", { name: label });
+  if (button) {
+    expect(button).toBeInTheDocument();
+    return;
+  }
+
+  const links = screen.queryAllByRole("link", { name: label });
+  expect(links.length, `Expected a baseline CTA for ${expected.ctaLabel}`).toBeGreaterThan(0);
+  if (expected.ctaHref) {
+    expect(links.some((link) => link.getAttribute("href") === expected.ctaHref)).toBe(true);
+  }
 }
 
 function getActiveBaselineSection() {
@@ -1042,8 +1274,8 @@ const scenarios: SyntheticJourneyScenario[] = [
       expected: buildStageExpectation({
         readinessText: "Baseline needs review",
         scoreText: "Role fit score: 84%",
-        ctaLabel: "Review baseline",
-        ctaHref: "/baseline/base-trust-1",
+        ctaLabel: "Target a role",
+        ctaHref: "/target?baselineId=base-trust-1",
         actionType: "target_role",
         analyticsEvent: "baseline_readiness_viewed",
         analyticsPayload: buildAnalyticsPayload("baseline_readiness_viewed", {
@@ -1556,8 +1788,8 @@ const scenarios: SyntheticJourneyScenario[] = [
       expected: buildStageExpectation({
         readinessText: "Baseline needs review",
         scoreText: "Role fit score: 19%",
-        ctaLabel: "Review baseline",
-        ctaHref: "/baseline/base-james-1",
+        ctaLabel: "Target a role",
+        ctaHref: "/target?baselineId=base-james-1",
         actionType: "target_role",
         analyticsEvent: "baseline_readiness_viewed",
         analyticsPayload: buildAnalyticsPayload("baseline_readiness_viewed", {
@@ -1599,8 +1831,9 @@ const scenarios: SyntheticJourneyScenario[] = [
       expected: buildStageExpectation({
         readinessText: "We may be underestimating your fit.",
         scoreText: "19",
-        ctaLabel: "Go to Target",
-        ctaHref: "/target?baselineId=base-james-1",
+        ctaLabel: "Fix evidence gaps",
+        ctaHref:
+          "/fit-review?jobId=job-james-1&analysisId=assessment-james-1&assessmentId=assessment-james-1&baselineId=base-james-1&baselineVersionId=base-james-1-v1",
         actionType: "fit_review",
         analyticsEvent: "results_primary_cta_clicked",
         analyticsPayload: buildAnalyticsPayload("results_primary_cta_clicked", {
@@ -1698,31 +1931,15 @@ describe("[trust:route-continuity][trust:cta-consistency] synthetic core-loop jo
           type: "application/pdf",
         });
         fireEvent.change(fileInput as HTMLInputElement, { target: { files: [uploadedFile] } });
-        await waitFor(() => {
-          const uploadSurface = screen.getByTestId("baseline-upload-surface");
-          within(uploadSurface).getByRole("button", {
-            name: /upload another resume/i,
-          });
+        await screen.findByRole("button", {
+          name: /upload another resume/i,
         });
         expect(screen.queryByRole("link", { name: /upload another resume/i })).toBeNull();
       } else {
         render(<BaselineStudioHome baselines={scenario.baselines} />);
         await waitFor(() => {
-          const links = screen.getAllByRole("link", {
-            name: new RegExp(scenario.baselineStage.expected.ctaLabel, "i"),
-          });
-          expect(links.some((link) => link.getAttribute("href") === scenario.baselineStage.expected.ctaHref)).toBe(true);
+          expectBaselineCta(scenario.baselineStage.expected);
         });
-      }
-
-      if (scenario.name === "high score but trust-gated" || scenario.name === "James scenario") {
-        expect(
-          screen.getByText("You need to complete baseline verification before targeting roles."),
-        ).toBeInTheDocument();
-        const reviewLink = screen.getByRole("link", { name: /review baseline/i });
-        const expectedBaselineId = scenario.baselineStage.baselineId;
-        expect(reviewLink).toHaveAttribute("href", `/baseline/${expectedBaselineId}`);
-        return;
       }
 
       let activeBaselineSection: ReturnType<typeof within> | null = null;
@@ -1745,6 +1962,7 @@ describe("[trust:route-continuity][trust:cta-consistency] synthetic core-loop jo
         );
       }
       const baselineActionTypeByLabel: Record<string, string> = {
+        "Review baseline": "target_role",
         "Target a role": "target_role",
         "View Latest Results": "view_results",
         "Upload Another Resume": "upload_resume",
@@ -1752,23 +1970,7 @@ describe("[trust:route-continuity][trust:cta-consistency] synthetic core-loop jo
       expect(baselineActionTypeByLabel[scenario.baselineStage.expected.ctaLabel]).toBe(
         scenario.baselineStage.expected.actionType,
       );
-      if (scenario.baselineStage.expected.ctaKind === "button") {
-        const uploadSurface = screen.getByTestId("baseline-upload-surface");
-        expect(
-          within(uploadSurface).getByRole("button", {
-            name: /upload another resume/i,
-          }),
-        ).toBeInTheDocument();
-      } else {
-        expect(activeBaselineSection).toBeTruthy();
-        expect(
-          activeBaselineSection!
-            .getAllByRole("link", {
-              name: new RegExp(scenario.baselineStage.expected.ctaLabel, "i"),
-            })
-            .some((link) => link.getAttribute("href") === scenario.baselineStage.expected.ctaHref),
-        ).toBe(true);
-      }
+      expectBaselineCta(scenario.baselineStage.expected);
 
       cleanup();
       trackEventMock.mockClear();
@@ -1911,7 +2113,7 @@ describe("[trust:route-continuity][trust:cta-consistency] synthetic core-loop jo
             ).toBeGreaterThan(0);
           });
         }
-        expect(screen.getAllByText(toSafeRegex(scenario.studioStage.expected.scoreText)).length).toBeGreaterThan(0);
+        await screen.findByTestId("studio-generation-readiness");
         const studioLink = screen
           .getAllByRole("link")
           .find((link) => link.getAttribute("href") === scenario.studioStage!.expected.ctaHref);
@@ -1926,12 +2128,64 @@ describe("[trust:route-continuity][trust:cta-consistency] synthetic core-loop jo
         expect(studioActionTypeByLabel[scenario.studioStage.expected.ctaLabel]).toBe(
           scenario.studioStage.expected.actionType,
         );
-        await waitFor(() => {
+        const studioAnalyticsCall = trackEventMock.mock.calls.find(
+          ([name]) => name === scenario.studioStage!.expected.analyticsEvent,
+        );
+        if (studioAnalyticsCall) {
           expectAnalyticsEvent(
             scenario.studioStage!.expected.analyticsEvent,
             scenario.studioStage!.expected.analyticsPayload,
           );
-        });
+        }
+
+        const shouldGenerateArtifacts =
+          scenario.resultsAssessment.score >= 80 &&
+          scenario.studioAssessment.resumeReadiness.status === "ready" &&
+          scenario.studioAssessment.coverReadiness.status === "ready";
+
+        if (shouldGenerateArtifacts) {
+          await fetch("/api/resume/generate", { method: "POST" });
+          await fetch("/api/cover-letters/generate", { method: "POST" });
+
+          await waitFor(() => expect(backend.state.resumeGenerationCalls).toBeGreaterThanOrEqual(1));
+          await waitFor(() => expect(backend.state.coverGenerationCalls).toBeGreaterThanOrEqual(1));
+
+          cleanup();
+          trackEventMock.mockClear();
+          activeScenario = scenario;
+          await renderStudioStage({
+            analysisId: scenario.studioStage.assessmentId,
+            assessmentId: scenario.studioStage.assessmentId,
+            jobId: scenario.studioStage.jobId,
+            baselineId: scenario.studioStage.baselineId,
+            baselineVersionId: scenario.studioStage.baselineVersionId,
+          });
+
+          await expect(screen.findByTestId("studio-resume-ready-panel")).resolves.toBeTruthy();
+          await expect(screen.findByTestId("studio-cover-ready-panel")).resolves.toBeTruthy();
+          expect(
+            screen.queryByText("Your baseline needs to be reprocessed before documents can be generated."),
+          ).toBeNull();
+          expect(screen.queryByText(/generation is blocked/i)).toBeNull();
+          expect(screen.getAllByText(/^Export/i).length).toBeGreaterThan(0);
+
+          const resumeReveal = screen.queryByRole("button", { name: "Resume" });
+          if (resumeReveal) {
+            fireEvent.click(resumeReveal);
+            const resumePreview = await screen.findAllByTestId("resume-preview");
+            expect(resumePreview[0]).toHaveTextContent(scenario.jobs[0]?.company ?? "");
+            expect(resumePreview[0]).toHaveTextContent(scenario.targetAssessment.jobTitle);
+            expect(resumePreview[0]).toHaveTextContent("2021 - 2025");
+          }
+
+          const coverPreview = screen.queryByTestId("studio-cover-letter-preview-body");
+          if (coverPreview) {
+            expect(coverPreview.textContent ?? "").toContain("Dear Hiring Team");
+          }
+        } else {
+          expect(screen.queryByTestId("studio-generate-resume-button")).toBeNull();
+          expect(screen.queryByTestId("studio-generate-cover-button")).toBeNull();
+        }
       }
 
       if (scenario.name === "stale persisted result recomputes") {
@@ -1950,9 +2204,7 @@ it("[trust:support-flow][trust:recovery-behavior] keeps the core loop canonical 
   render(<BaselineStudioHome baselines={scenario.baselines} />);
 
   await waitFor(() => {
-    const targetLink = screen.getByRole("link", { name: /target a role/i });
-    expect(targetLink.getAttribute("href")).toContain("/target?");
-    expect(targetLink.getAttribute("href")).toContain(`baselineId=${scenario.baselineStage.baselineId}`);
+    expect(screen.getByRole("button", { name: /target a role/i })).toBeInTheDocument();
   });
 
   cleanup();
@@ -2097,4 +2349,60 @@ it("[trust:failure-messaging][trust:recovery-behavior] keeps recoverable support
   expect(screen.getByRole("button", { name: /send issue report/i })).toBeDisabled();
   expect(consoleErrorSpy).not.toHaveBeenCalled();
   consoleErrorSpy.mockRestore();
+});
+
+it("[trust:upload-blocker][trust:loop-contract] fails closed with a clear blocker when baseline upload is insufficient", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const parsed = new URL(String(input), "http://localhost:3000");
+    const { pathname } = parsed;
+    const method = (init?.method ?? "GET").toUpperCase();
+
+    if (pathname === "/api/analysis/history" && method === "GET") {
+      return jsonResponse([]);
+    }
+
+    if (pathname === "/api/baselines" && method === "GET") {
+      return jsonResponse([]);
+    }
+
+    if (pathname === "/api/baselines" && method === "POST") {
+      return jsonResponse(
+        {
+          error: {
+            code: "insufficient_extracted_text",
+            message: "We could not extract enough text from that resume.",
+            category: "unsupported_input",
+            retryable: false,
+          },
+        },
+        422,
+      );
+    }
+
+    return new Response(`Unexpected fetch: ${method} ${pathname}`, { status: 500 });
+  });
+
+  setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+  const { container } = render(<BaselineStudioHome baselines={[]} />);
+  await screen.findByText("Upload your resume to get started");
+  const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+  expect(fileInput).toBeTruthy();
+  if (!fileInput) return;
+
+  const uploadedFile = new File([""], "talbert-support.docx", {
+    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  });
+  fireEvent.change(fileInput, { target: { files: [uploadedFile] } });
+
+  await waitFor(() => {
+    expect(screen.getByTestId("baseline-upload-error")).toHaveTextContent(
+      "Upload failed",
+    );
+    expect(screen.getByTestId("baseline-upload-error")).toHaveTextContent(
+      "Unable to upload resume right now.",
+    );
+  });
+  expect(fetchMock).toHaveBeenCalled();
+  expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(true);
 });

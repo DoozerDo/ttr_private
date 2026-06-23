@@ -259,7 +259,7 @@ export class BaselineIngestionService {
       context.missingFields.push('experience');
       return [];
     }
-    const blocks = content.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+    const blocks = this.groupExperienceBlocks(content);
     if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {
       try {
         // eslint-disable-next-line no-console
@@ -274,6 +274,54 @@ export class BaselineIngestionService {
     }
     const experience = blocks.flatMap((block) => this.parseExperienceBlock(block, context));
     return experience;
+  }
+
+  private groupExperienceBlocks(content: string): string[] {
+    const lines = content
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (!lines.length) return [];
+
+    const groupedBlocks: string[] = [];
+    let currentBlock: string[] = [];
+
+    const flushCurrentBlock = () => {
+      const block = currentBlock.join('\n').trim();
+      if (block) {
+        groupedBlocks.push(block);
+      }
+      currentBlock = [];
+    };
+
+    for (const line of lines) {
+      const header = this.parseExperienceHeader(line);
+      const isHeaderLine = Boolean(header.company && header.role);
+
+      if (isHeaderLine) {
+        flushCurrentBlock();
+        currentBlock.push(line);
+        continue;
+      }
+
+      if (currentBlock.length > 0) {
+        currentBlock.push(line);
+      }
+    }
+
+    flushCurrentBlock();
+
+    if (groupedBlocks.length > 0) {
+      return groupedBlocks;
+    }
+
+    return content
+      .split(/\n{2,}/)
+      .map((block) => block.trim())
+      .filter(Boolean);
   }
 
   private parseExperienceBlock(block: string, context: ParsingContext): BaselineSchemaCoreShape['experience'] {

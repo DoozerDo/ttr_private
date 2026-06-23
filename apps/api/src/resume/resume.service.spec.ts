@@ -5490,6 +5490,16 @@ describe('ResumeService contract', () => {
         ok: true,
         status: 'success',
       });
+      // Temporary trace to understand the remaining export gate in the authoritative ResumeV2 lane.
+      // eslint-disable-next-line no-console
+      console.log('[RESUME_SERVICE_AUTHORITATIVE_TRACE]', JSON.stringify({
+        exportReady: (result as any)?.exportReady ?? null,
+        exports: (result as any)?.exports ?? null,
+        qualityGate: (result as any)?.qualityGate ?? null,
+        internalTailoringLimitations: (result as any)?.internal?.tailoringLimitations ?? null,
+        generationStatus: (result as any)?.generationStatus ?? null,
+        status: (result as any)?.status ?? null,
+      }));
       expect((result as any).auditId ?? (result as any).audit_id ?? null).not.toMatch(/^minimal:/);
       expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
       expect(studioArtifactsService.recordResumeFailure).not.toHaveBeenCalled();
@@ -5501,6 +5511,45 @@ describe('ResumeService contract', () => {
       if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
       else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     }
+  });
+
+  it('keeps ResumeV2 authority sections visible to structured extraction by emitting sectionType on generated baseline sections', () => {
+    const { service } = buildService();
+    const buildSections = (service as any).buildResumeV2AuthoritySectionsFromNormalizedDocument as (
+      resumeV2: any,
+      baselineId: string,
+    ) => any[];
+
+    const sections = buildSections(
+      {
+        heading: { name: 'Test Person', contactLine: 'test@example.com' },
+        summary: 'Verified summary.',
+        experience: [
+          {
+            company: 'Acme SaaS',
+            roleTitle: 'Support Operations Director',
+            dateRange: '2019 - 2022',
+            bullets: ['Led support operations and improved SLA adherence.'],
+          },
+        ],
+        education: [{ degree: 'B.S. Business Administration', institution: 'State University' }],
+      },
+      'baseline-structured-1',
+    );
+
+    const experienceSection = sections.find((section) => String(section?.title ?? '') === 'Experience');
+    expect(experienceSection).toMatchObject({
+      sectionType: BaselineSectionType.EXPERIENCE,
+      type: BaselineSectionType.EXPERIENCE,
+    });
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    expect(structured.experience).toHaveLength(1);
+    expect(structured.experience[0]).toMatchObject({
+      company: 'Acme SaaS',
+      roleTitle: 'Support Operations Director',
+      dates: '2019 - 2022',
+    });
   });
 
   it('still throws baseline_file_unavailable for a legacy path without ResumeV2 authority', async () => {

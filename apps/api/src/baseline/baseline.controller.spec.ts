@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { BaselineController } from './baseline.controller';
 
 describe('BaselineController - strengthening additions', () => {
@@ -209,6 +209,33 @@ describe('BaselineController - uploadBaseline', () => {
         lowConfidence: 0,
       },
     });
+  });
+
+  it('passes through clear upload blockers instead of wrapping them as internal server errors', async () => {
+    const baselineService = {
+      buildSectionsFromFile: jest.fn().mockRejectedValue(
+        new UnprocessableEntityException({
+          error: {
+            code: 'insufficient_extracted_text',
+            message: 'We could not extract enough text from that resume.',
+          },
+        }),
+      ),
+      createBaseline: jest.fn(),
+    } as any;
+    const controller = new BaselineController(
+      baselineService,
+      baselineVersionService,
+    );
+
+    await expect(
+      controller.uploadBaseline(
+        { originalname: 'TalbertSupport.docx', mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', path: '/tmp/TalbertSupport.docx' } as any,
+        { user: { id: 'user-1' } } as any,
+      ),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+
+    expect(baselineService.createBaseline).not.toHaveBeenCalled();
   });
 });
 

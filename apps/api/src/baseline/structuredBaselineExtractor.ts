@@ -497,7 +497,7 @@ function extractSectionByType(sections: BaselineSection[], type: string): Baseli
       ? new Set(['EXPERIENCE', 'PROFESSIONAL_EXPERIENCE', 'WORK_EXPERIENCE'])
       : new Set([normalized]);
   return sections.filter((section) => {
-    const sectionType = String((section as any).sectionType ?? '').toUpperCase();
+    const sectionType = String((section as any).sectionType ?? (section as any).type ?? '').toUpperCase();
     return synonyms.has(sectionType);
   });
 }

@@ -2005,6 +2005,7 @@ export class ResumeService {
     if (summary) {
       sections.push({
         id: `${baselineId}:resume-v2:summary`,
+        sectionType: BaselineSectionType.SUMMARY,
         type: BaselineSectionType.SUMMARY,
         title: 'Summary',
         order: 0,
@@ -2026,6 +2027,7 @@ export class ResumeService {
       const content = skills.join(', ');
       sections.push({
         id: `${baselineId}:resume-v2:skills`,
+        sectionType: BaselineSectionType.SKILLS,
         type: BaselineSectionType.SKILLS,
         title: 'Skills',
         order: 1,
@@ -2057,6 +2059,7 @@ export class ResumeService {
       const content = experienceText.join('\n\n');
       sections.push({
         id: `${baselineId}:resume-v2:experience`,
+        sectionType: BaselineSectionType.EXPERIENCE,
         type: BaselineSectionType.EXPERIENCE,
         title: 'Experience',
         order: 2,
@@ -2082,6 +2085,7 @@ export class ResumeService {
       const content = educationText.join('\n');
       sections.push({
         id: `${baselineId}:resume-v2:education`,
+        sectionType: BaselineSectionType.EDUCATION,
         type: BaselineSectionType.EDUCATION,
         title: 'Education',
         order: 3,
@@ -2105,6 +2109,7 @@ export class ResumeService {
       const content = [title, ...items.map((item) => `- ${item}`)].join('\n').trim();
       sections.push({
         id: `${baselineId}:resume-v2:additional:${index}`,
+        sectionType: BaselineSectionType.OTHER,
         type: BaselineSectionType.OTHER,
         title,
         order: 4 + index,

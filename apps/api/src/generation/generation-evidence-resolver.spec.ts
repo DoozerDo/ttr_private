@@ -60,6 +60,8 @@ describe('resolveGenerationEvidence', () => {
     const bundle = resolveGenerationEvidence({ baseline, baselineVersionId: 'baseline-version-1' });
     expect(bundle.primarySource).toBe('baseline_sections_structured');
     expect(bundle.usableWorkHistoryEvidence).toBe(true);
+    expect(bundle.generationAuthority).toBe('baseline_file');
+    expect(bundle.baselineFileUsable).toBe(true);
     expect(bundle.workHistory[0]).toEqual(
       expect.objectContaining({
         company: 'Acme',
@@ -83,4 +85,3 @@ describe('resolveGenerationEvidence', () => {
     expect(['baseline_raw_text', 'fit_analysis']).toContain(bundle.primarySource);
   });
 });
-

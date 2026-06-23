@@ -368,6 +368,22 @@ function sanitizeResumeResponseBodyForEvidenceContract(
   const resume = normalizeRecord(preview?.resume);
   if (!preview || !resume) return normalized;
 
+  const internal = normalizeRecord((normalized as any).internal);
+  const canonicalResumeV2 =
+    safeText(internal?.generationPipeline) === 'v2' ||
+    safeText(internal?.generationMode) === 'structured_baseline_template';
+  const structuredExperiencePresent = Array.isArray((resume as any).experience)
+    ? (resume as any).experience.some((employer: any) => {
+        const employerRecord = normalizeRecord(employer);
+        if (!employerRecord) return false;
+        const company = safeText((employerRecord as any).company);
+        const roleTitle = safeText((employerRecord as any).roleTitle);
+        const bullets = Array.isArray((employerRecord as any).bullets) ? (employerRecord as any).bullets : [];
+        return Boolean(company && roleTitle && bullets.length > 0);
+      })
+    : false;
+  const allowCanonicalResumeV2WithoutBulletEvidence = canonicalResumeV2 && structuredExperiencePresent;
+
   const experience = Array.isArray((resume as any).experience) ? (resume as any).experience : [];
   const nextExperience: unknown[] = [];
   const usedEvidenceIds = new Set<string>();
@@ -388,7 +404,7 @@ function sanitizeResumeResponseBodyForEvidenceContract(
           ? (bulletRecord as any).source.sourceEvidenceIds.filter(Boolean)
           : [];
 
-      if (!text || looksLikeGenericResumeFiller(text) || sourceEvidenceIds.length === 0) {
+      if (!text || looksLikeGenericResumeFiller(text) || (sourceEvidenceIds.length === 0 && !allowCanonicalResumeV2WithoutBulletEvidence)) {
         continue;
       }
 
@@ -546,8 +562,18 @@ export class StudioArtifactsService {
       const preview = normalizeRecord((responseBody as any)?.preview)?.resume ?? null;
       const summary = this.cleanEvidenceText((preview as any)?.summary);
       const experiences = Array.isArray((preview as any)?.experience) ? (preview as any).experience : [];
+      const generationPipeline = String((responseBody as any)?.internal?.generationPipeline ?? '').trim().toLowerCase();
+      const generationMode = String((responseBody as any)?.internal?.generationMode ?? '').trim().toLowerCase();
+      const authoritativeResumeV2 =
+        generationPipeline === 'v2' || generationMode === 'structured_baseline_template';
+      const hasStructuredExperience = experiences.some((entry) => {
+        const company = this.cleanEvidenceText((entry as any)?.company);
+        const roleTitle = this.cleanEvidenceText((entry as any)?.roleTitle);
+        const bullets = Array.isArray((entry as any)?.bullets) ? (entry as any).bullets : [];
+        return Boolean(company && roleTitle && bullets.length > 0);
+      });
       const seenBullets = new Map<string, string>();
-      let hasEvidence = usedEvidenceIds.length > 0;
+      let hasEvidence = usedEvidenceIds.length > 0 || (authoritativeResumeV2 && hasStructuredExperience);
 
       if (!summary || this.detectGenericFiller(summary)) {
         blockers.push({
@@ -582,7 +608,7 @@ export class StudioArtifactsService {
             });
             continue;
           }
-          if (evidenceIds.length === 0 && usedEvidenceIds.length === 0) {
+          if (evidenceIds.length === 0 && usedEvidenceIds.length === 0 && !authoritativeResumeV2) {
             blockers.push({
               code: 'resume_missing_evidence',
               message: 'Resume bullet is missing verified baseline evidence references.',
@@ -1508,6 +1534,25 @@ export class StudioArtifactsService {
 
     const resumeResultRaw = this.buildCanonicalResultFromRecord('resume', resumeRecordForResult);
     const coverLetterResult = this.buildCanonicalResultFromRecord('cover_letter', coverRecord);
+    const coverRecordForResult =
+      coverRecord && coverLetterResult
+        ? {
+            ...coverRecord,
+            actions: {
+              ...normalizeRecord((coverRecord as any).actions),
+              canExport: Boolean(
+                (coverRecord as any)?.exportReady ??
+                  (coverRecord as any)?.responseBody?.exportReady ??
+                  (coverLetterResult as any)?.exportReady,
+              ),
+              canSaveToOpportunities: Boolean(
+                (coverRecord as any)?.exportReady ??
+                  (coverRecord as any)?.responseBody?.exportReady ??
+                  (coverLetterResult as any)?.exportReady,
+              ),
+            },
+          }
+        : coverRecord;
 
     if (resumeHydrationDebug) {
       const resumeHydrationDebugObject =
@@ -1700,7 +1745,7 @@ export class StudioArtifactsService {
         ? { artifactReadiness, artifactReadinessReasons, artifactReadinessReasonDetails }
         : {}),
       resume: resumeRecordForResult,
-      coverLetter: coverRecord,
+      coverLetter: coverRecordForResult,
       resumeResult,
       coverLetterResult,
       ...(resumeFailureDiagnostics ? { resumeFailureDiagnostics } : {}),
