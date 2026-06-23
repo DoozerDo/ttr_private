@@ -166,6 +166,41 @@ describe('BaselineIngestionService', () => {
     expect((result.trace?.baselineIngestion?.dateRangeRejections?.[0]?.redactedHeaderLines ?? []).length).toBeLessThanOrEqual(4);
   });
 
+  it('splits flattened experience text into separate candidate blocks and maps entries without dates', () => {
+    const content = [
+      'Acme Support | Senior Support Operations Manager',
+      '- Led incident response and escalation handling across support operations.',
+      '- Built runbooks and workflow automation to improve SLA adherence.',
+      '',
+      'Beta Support | Support Operations Manager',
+      '- Owned support queue health, staffing tradeoffs, and recurring issue follow-up.',
+      '- Improved reporting and automation to reduce manual toil.',
+      '',
+      'CERTIFICATIONS',
+      '- AWS Certified Solutions Architect',
+    ].join('\n');
+
+    const blocks = (service as any).groupExperienceBlocks(content);
+    expect(blocks).toHaveLength(2);
+
+    const context = { missingFields: [], ambiguityFlags: [], lowConfidence: [] };
+    const mapped = blocks.flatMap((block: string, index: number) =>
+      (service as any).parseExperienceBlock(block, context, undefined, index),
+    );
+
+    expect(mapped).toHaveLength(2);
+    expect(mapped.map((entry: any) => `${entry.company}::${entry.role}`)).toEqual(
+      expect.arrayContaining([
+        'Acme Support::Senior Support Operations Manager',
+        'Beta Support::Support Operations Manager',
+      ]),
+    );
+    expect(mapped.every((entry: any) => !entry.start_date && !entry.end_date)).toBe(true);
+    expect(mapped.every((entry: any) => Array.isArray(entry.evidence) && entry.evidence.length > 0)).toBe(true);
+    const evidenceText = mapped.flatMap((entry: any) => entry.evidence.map((item: any) => String(item?.text ?? ''))).join(' | ');
+    expect(evidenceText).not.toMatch(/AWS Certified Solutions Architect/i);
+  });
+
   it('recovers split header work history blocks where role and company appear on adjacent lines', async () => {
     const rawText = [
       'Alex Candidate',

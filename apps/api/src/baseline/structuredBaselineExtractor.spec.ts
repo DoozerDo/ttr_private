@@ -90,6 +90,41 @@ describe('structuredBaselineExtractor', () => {
     expect(structured.experience.every((entry) => entry.bullets.length > 0)).toBe(true);
   });
 
+  it('splits flattened experience text into multiple entries without treating certifications as experience', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Acme Support | Senior Support Operations Manager',
+          '- Led incident response and escalation handling across support operations.',
+          '- Built runbooks and workflow automation to improve SLA adherence.',
+          '',
+          'Beta Support | Support Operations Manager',
+          '- Owned support queue health, staffing tradeoffs, and recurring issue follow-up.',
+          '- Improved reporting and automation to reduce manual toil.',
+          '',
+          'CERTIFICATIONS',
+          '- AWS Certified Solutions Architect',
+        ].join('\n'),
+      },
+      {
+        sectionType: 'CERTIFICATIONS',
+        content: ['AWS Certified Solutions Architect'].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    expect(structured.experience).toHaveLength(2);
+    expect(structured.experience.map((entry) => `${entry.company}::${entry.roleTitle}`)).toEqual(
+      expect.arrayContaining([
+        'Acme Support::Senior Support Operations Manager',
+        'Beta Support::Support Operations Manager',
+      ]),
+    );
+    expect(structured.experience.every((entry) => !String(entry.dates ?? '').trim())).toBe(true);
+    expect(structured.experience.every((entry) => entry.bullets.length > 0)).toBe(true);
+  });
+
   it('parses pipe-separated date ranges in structured experience headers', () => {
     const sections: any[] = [
       {

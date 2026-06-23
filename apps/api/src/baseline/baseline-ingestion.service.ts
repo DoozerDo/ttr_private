@@ -162,7 +162,7 @@ function buildDateRangeRejectionDiagnostic(
 
 function isStandaloneSectionHeadingLine(value: string): boolean {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim();
-  return /^(?:summary|professional summary|profile|experience|professional experience|work experience|skills|technical skills|key skills|education|academic background|training|projects?|programs?)\b$/i.test(
+  return /^(?:summary|professional summary|profile|experience|professional experience|work experience|skills|technical skills|key skills|education|academic background|training|certifications?|projects?|programs?)\b$/i.test(
     text,
   );
 }
@@ -915,16 +915,6 @@ export class BaselineIngestionService {
       if (trace?.baselineIngestion) trace.baselineIngestion.rejectionReasons.push('experience.company_or_role');
       return [];
     }
-    if (!parsedHeader.start || !parsedHeader.end) {
-      context.missingFields.push('experience.date_range');
-      if (trace?.baselineIngestion) trace.baselineIngestion.rejectionReasons.push('experience.date_range');
-      if (trace?.baselineIngestion) {
-        trace.baselineIngestion.dateRangeRejections?.push(
-          buildDateRangeRejectionDiagnostic(lines, parsedHeader, candidateBlockIndex, headerRead.consumed),
-        );
-      }
-      return [];
-    }
     if (isContactLikeText(parsedHeader.company) || isContactLikeText(parsedHeader.role)) {
       context.missingFields.push('experience.company_or_role');
       if (trace?.baselineIngestion) trace.baselineIngestion.rejectionReasons.push('experience.company_or_role');
@@ -956,8 +946,8 @@ export class BaselineIngestionService {
     return [{
       company: parsedHeader.company,
       role: parsedHeader.role,
-      start_date: parsedHeader.start,
-      end_date: parsedHeader.end,
+      start_date: parsedHeader.start ?? null,
+      end_date: parsedHeader.end ?? null,
       evidence,
       company_name: parsedHeader.company,
       role_title: parsedHeader.role,
@@ -982,6 +972,12 @@ export class BaselineIngestionService {
     const line0LooksLikeCompany = isLikelyCompanyName(headerCandidate0);
     const line0LooksLikeRole = looksLikeRoleTitle(headerCandidate0);
     const line1LooksLikeCompany = isLikelyCompanyName(line1);
+    const hasExperienceContinuation = (consumed: number): boolean => {
+      const nextLine = String(lines[startIndex + consumed] ?? '').trim();
+      if (!nextLine) return false;
+      if (isTextBulletLine(nextLine)) return true;
+      return Boolean(this.readExperienceHeaderAt(lines, startIndex + consumed));
+    };
 
     if (line1 && !isTextBulletLine(line1)) {
       const inlineDates = parseCompanyWithInlineDates(headerCandidate0);
@@ -994,6 +990,17 @@ export class BaselineIngestionService {
               role: line1,
               start: splitDates.start_date ?? null,
               end: splitDates.end_date ?? null,
+            },
+            consumed: 2,
+          };
+        }
+        if (hasExperienceContinuation(2)) {
+          return {
+            header: {
+              company: inlineDates.company,
+              role: line1,
+              start: null,
+              end: null,
             },
             consumed: 2,
           };
@@ -1012,6 +1019,17 @@ export class BaselineIngestionService {
               end: splitDates.end_date ?? null,
             },
             consumed: 3,
+          };
+        }
+        if (hasExperienceContinuation(2)) {
+          return {
+            header: {
+              company: headerCandidate0,
+              role: line1,
+              start: null,
+              end: null,
+            },
+            consumed: 2,
           };
         }
       }
@@ -1072,15 +1090,18 @@ export class BaselineIngestionService {
         }
         const line1Dates = line1 && looksLikeDatesLine(line1) ? canonicalizeDateRange(line1) : null;
         const splitDates = line1Dates ? splitCanonicalDateRangeText(line1Dates) : {};
-        return {
-          header: {
-            company: swapped.company,
-            role: swapped.role,
-            start: splitDates.start_date ?? swapped.start,
-            end: splitDates.end_date ?? swapped.end,
-          },
-          consumed: line1Dates ? 2 : 1,
-        };
+        if (line1Dates || hasExperienceContinuation(1)) {
+          return {
+            header: {
+              company: swapped.company,
+              role: swapped.role,
+              start: splitDates.start_date ?? swapped.start ?? null,
+              end: splitDates.end_date ?? swapped.end ?? null,
+            },
+            consumed: line1Dates ? 2 : 1,
+          };
+        }
+        return null;
       }
 
       if (line1 && !isTextBulletLine(line1) && looksLikeDatesLine(line1)) {
@@ -1095,15 +1116,18 @@ export class BaselineIngestionService {
           consumed: 2,
         };
       }
-      return {
-        header: {
-          company: single.company,
-          role: single.role,
-          start: single.start,
-          end: single.end,
-        },
-        consumed: 1,
-      };
+      if (hasExperienceContinuation(1)) {
+        return {
+          header: {
+            company: single.company,
+            role: single.role,
+            start: single.start,
+            end: single.end,
+          },
+          consumed: 1,
+        };
+      }
+      return null;
     }
 
     if (looksLikeDatesLine(line0)) return null;
@@ -1172,42 +1196,81 @@ export class BaselineIngestionService {
           const splitDates = companyWithDates.dates
             ? splitCanonicalDateRangeText(companyWithDates.dates)
             : {};
-          return {
-            header: {
-              company: companyWithDates.company,
-              role: line1,
-              start: splitDates.start_date ?? single.start,
-              end: splitDates.end_date ?? single.end,
-            },
-            consumed: 2,
-          };
+          if (splitDates.start_date && splitDates.end_date) {
+            return {
+              header: {
+                company: companyWithDates.company,
+                role: line1,
+                start: splitDates.start_date ?? single.start,
+                end: splitDates.end_date ?? single.end,
+              },
+              consumed: 2,
+            };
+          }
+          if (hasExperienceContinuation(2)) {
+            return {
+              header: {
+                company: companyWithDates.company,
+                role: line1,
+                start: null,
+                end: null,
+              },
+              consumed: 2,
+            };
+          }
         }
       }
 
       const maybeDates = line2 && !isTextBulletLine(line2) && looksLikeDatesLine(line2) ? canonicalizeDateRange(line2) : null;
       const splitMaybeDates = maybeDates ? splitCanonicalDateRangeText(maybeDates) : {};
       if ((!line0LooksLikeCompany || line0LooksLikeRole) && line1LooksLikeCompany) {
-        return {
-          header: {
-            company: line1,
-            role: headerCandidate0,
-            start: splitMaybeDates.start_date ?? null,
-            end: splitMaybeDates.end_date ?? null,
-          },
-          consumed: maybeDates ? 3 : 2,
-        };
+        if (splitMaybeDates.start_date && splitMaybeDates.end_date) {
+          return {
+            header: {
+              company: line1,
+              role: headerCandidate0,
+              start: splitMaybeDates.start_date ?? null,
+              end: splitMaybeDates.end_date ?? null,
+            },
+            consumed: maybeDates ? 3 : 2,
+          };
+        }
+        if (hasExperienceContinuation(2)) {
+          return {
+            header: {
+              company: line1,
+              role: headerCandidate0,
+              start: null,
+              end: null,
+            },
+            consumed: 2,
+          };
+        }
       }
 
       if (line0LooksLikeCompany && looksLikeRoleTitle(line1)) {
-        return {
-          header: {
-            company: headerCandidate0,
-            role: line1,
-            start: splitMaybeDates.start_date ?? null,
-            end: splitMaybeDates.end_date ?? null,
-          },
-          consumed: maybeDates ? 3 : 2,
-        };
+        if (splitMaybeDates.start_date && splitMaybeDates.end_date) {
+          return {
+            header: {
+              company: headerCandidate0,
+              role: line1,
+              start: splitMaybeDates.start_date ?? null,
+              end: splitMaybeDates.end_date ?? null,
+            },
+            consumed: maybeDates ? 3 : 2,
+          };
+        }
+        if (hasExperienceContinuation(2)) {
+          return {
+            header: {
+              company: headerCandidate0,
+              role: line1,
+              start: null,
+              end: null,
+            },
+            consumed: 2,
+          };
+        }
       }
     }
 

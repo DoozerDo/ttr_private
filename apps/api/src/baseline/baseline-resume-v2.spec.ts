@@ -270,6 +270,52 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     }
   });
 
+  it('returns baseline_experience_dates_missing when recovered experience entries have bullets but no dates', () => {
+    const parsedBaseline: Record<string, unknown> = {
+      baseline_id: 'baseline-dates-missing-1',
+      identity: { full_name: 'Date Missing Person', location: 'Date Missing City' },
+      experience: [
+        {
+          company: 'Acme Support',
+          roleTitle: 'Senior Support Operations Manager',
+          bullets: [
+            'Led incident response and escalation handling across support operations.',
+            'Built runbooks and workflow automation to improve SLA adherence.',
+          ],
+        },
+        {
+          company: 'Beta Support',
+          roleTitle: 'Support Operations Manager',
+          bullets: [
+            'Owned support queue health, staffing tradeoffs, and recurring issue follow-up.',
+            'Improved reporting and automation to reduce manual toil.',
+          ],
+        },
+      ],
+    };
+
+    expect(() => buildValidatedResumeV2FromParsedBaseline(parsedBaseline)).toThrow(
+      UnprocessableEntityException,
+    );
+    try {
+      buildValidatedResumeV2FromParsedBaseline(parsedBaseline);
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      const body = (error as UnprocessableEntityException).getResponse() as any;
+      expect(String(body?.error?.code ?? '')).toBe('baseline_experience_dates_missing');
+      expect(body?.error?.details?.experienceArrayEmpty).toBe(false);
+      expect(body?.error?.details?.requiredExperienceFields).toEqual([
+        'company',
+        'roleTitle',
+        'dateRange',
+        'bullets',
+      ]);
+      expect(body?.error?.details?.trace?.blockerCode).toBe('baseline_experience_dates_missing');
+      expect(body?.error?.details?.trace?.selectedEntries).toBe(2);
+      expect(String(body?.error?.details?.nextAction ?? '')).toMatch(/work history dates/i);
+    }
+  });
+
   it('accepts nested field shapes (company.name, roleTitle.value) and does not drop usable experience entries', () => {
     const parsedBaseline: Record<string, unknown> = {
       baseline_id: 'baseline-nested-1',

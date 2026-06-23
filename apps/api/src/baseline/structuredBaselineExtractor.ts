@@ -356,7 +356,7 @@ function isBulletPrefixedExperienceHeader(line: string): boolean {
 function readExperienceHeaderAt(
   lines: string[],
   startIndex: number,
-): { header: { company: string; roleTitle: string; dates: string }; consumed: number } | null {
+): { header: { company: string; roleTitle: string; dates?: string }; consumed: number } | null {
   const line0 = trimToText(lines[startIndex] ?? '');
   if (!line0) return null;
 
@@ -370,6 +370,13 @@ function readExperienceHeaderAt(
   const line0LooksLikeCompany = isLikelyCompanyName(headerCandidate0);
   const line0LooksLikeRole = looksLikeRoleTitle(headerCandidate0);
   const line1LooksLikeCompany = isLikelyCompanyName(line1);
+  const hasExperienceContinuation = (consumed: number): boolean => {
+    const nextLine = trimToText(lines[startIndex + consumed] ?? '');
+    if (!nextLine) return false;
+    if (isBulletLine(nextLine) || isImplicitBulletCandidate(nextLine)) return true;
+    if (isBulletPrefixedExperienceHeader(nextLine)) return true;
+    return Boolean(readExperienceHeaderAt(lines, startIndex + consumed));
+  };
 
   if (line1 && !isBulletLine(line1)) {
     const inlineDates = parseCompanyWithInlineDates(headerCandidate0);
@@ -378,6 +385,12 @@ function readExperienceHeaderAt(
       if (splitDates.start_date && splitDates.end_date) {
         return {
           header: { company: inlineDates.company, roleTitle: line1, dates: inlineDates.dates },
+          consumed: 2,
+        };
+      }
+      if (hasExperienceContinuation(2)) {
+        return {
+          header: { company: inlineDates.company, roleTitle: line1 },
           consumed: 2,
         };
       }
@@ -390,6 +403,12 @@ function readExperienceHeaderAt(
         return {
           header: { company: headerCandidate0, roleTitle: line1, dates: line2Dates },
           consumed: 3,
+        };
+      }
+      if (hasExperienceContinuation(2)) {
+        return {
+          header: { company: headerCandidate0, roleTitle: line1 },
+          consumed: 2,
         };
       }
     }
@@ -412,6 +431,12 @@ function readExperienceHeaderAt(
         return {
           header: { company: line1, roleTitle: headerCandidate0, dates: line2Dates },
           consumed: 3,
+        };
+      }
+      if (hasExperienceContinuation(2)) {
+        return {
+          header: { company: line1, roleTitle: headerCandidate0 },
+          consumed: 2,
         };
       }
     }
@@ -444,6 +469,15 @@ function readExperienceHeaderAt(
         };
       }
     }
+    if (hasExperienceContinuation(1)) {
+      return {
+        header: {
+          company: single.company,
+          roleTitle: single.roleTitle,
+        },
+        consumed: 1,
+      };
+    }
     return null;
   }
 
@@ -456,11 +490,18 @@ function readExperienceHeaderAt(
     const inlineDates = parseCompanyWithInlineDates(headerCandidate0);
     if (inlineDates) {
       const splitDates = splitCanonicalDateRangeText(inlineDates.dates);
-      if (!splitDates.start_date || !splitDates.end_date) return null;
-      return {
-        header: { company: inlineDates.company, roleTitle: line1, dates: inlineDates.dates },
-        consumed: 2,
-      };
+      if (splitDates.start_date && splitDates.end_date) {
+        return {
+          header: { company: inlineDates.company, roleTitle: line1, dates: inlineDates.dates },
+          consumed: 2,
+        };
+      }
+      if (hasExperienceContinuation(2)) {
+        return {
+          header: { company: inlineDates.company, roleTitle: line1 },
+          consumed: 2,
+        };
+      }
     }
 
     const monthYearOnly = MONTH_YEAR_RE;
@@ -488,17 +529,25 @@ function readExperienceHeaderAt(
       }
     }
 
-    const companyWithDates = parseCompanyWithDates(headerCandidate0);
-    if (companyWithDates) {
-      const dates = companyWithDates.dates ? canonicalizeDateRange(companyWithDates.dates) : '';
-      const splitDates = dates ? splitCanonicalDateRangeText(dates) : {};
-      if (splitDates.start_date && splitDates.end_date && looksLikeRoleTitle(line1)) {
-        return {
-          header: { company: companyWithDates.company, roleTitle: line1, dates },
-          consumed: 2,
-        };
+      const companyWithDates = parseCompanyWithDates(headerCandidate0);
+      if (companyWithDates) {
+        const dates = companyWithDates.dates ? canonicalizeDateRange(companyWithDates.dates) : '';
+        const splitDates = dates ? splitCanonicalDateRangeText(dates) : {};
+        if (looksLikeRoleTitle(line1)) {
+          if (splitDates.start_date && splitDates.end_date) {
+            return {
+              header: { company: companyWithDates.company, roleTitle: line1, dates },
+              consumed: 2,
+            };
+          }
+          if (hasExperienceContinuation(2)) {
+            return {
+              header: { company: companyWithDates.company, roleTitle: line1 },
+              consumed: 2,
+            };
+          }
+        }
       }
-    }
 
     const maybeDates = line2 && !isBulletLine(line2) && looksLikeDatesLine(line2) ? canonicalizeDateRange(line2) : null;
     const splitMaybeDates = maybeDates ? splitCanonicalDateRangeText(maybeDates) : {};
@@ -512,19 +561,33 @@ function readExperienceHeaderAt(
     const line1LooksLikeCompany = isLikelyCompanyName(line1);
     const line0LooksLikeRole = looksLikeRoleTitle(headerCandidate0);
     if ((!line0LooksLikeCompany || line0LooksLikeRole) && line1LooksLikeCompany) {
-      if (!splitMaybeDates.start_date || !splitMaybeDates.end_date) return null;
-      return {
-        header: { company: line1, roleTitle: headerCandidate0, dates: maybeDates ?? '' },
-        consumed: maybeDates ? 3 : 2,
-      };
+      if (splitMaybeDates.start_date && splitMaybeDates.end_date) {
+        return {
+          header: { company: line1, roleTitle: headerCandidate0, dates: maybeDates ?? '' },
+          consumed: maybeDates ? 3 : 2,
+        };
+      }
+      if (hasExperienceContinuation(2)) {
+        return {
+          header: { company: line1, roleTitle: headerCandidate0 },
+          consumed: 2,
+        };
+      }
     }
 
     if (line0LooksLikeCompany && looksLikeRoleTitle(line1)) {
-      if (!splitMaybeDates.start_date || !splitMaybeDates.end_date) return null;
-      return {
-        header: { company: headerCandidate0, roleTitle: line1, dates: maybeDates ?? '' },
-        consumed: maybeDates ? 3 : 2,
-      };
+      if (splitMaybeDates.start_date && splitMaybeDates.end_date) {
+        return {
+          header: { company: headerCandidate0, roleTitle: line1, dates: maybeDates ?? '' },
+          consumed: maybeDates ? 3 : 2,
+        };
+      }
+      if (hasExperienceContinuation(2)) {
+        return {
+          header: { company: headerCandidate0, roleTitle: line1 },
+          consumed: 2,
+        };
+      }
     }
 
     if (line0LooksLikeCompany && line1 && looksLikeDatesLine(line1)) {
