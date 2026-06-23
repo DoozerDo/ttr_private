@@ -81,6 +81,115 @@ describe('BaselineIngestionService', () => {
     expect(evidenceTexts).not.toMatch(/jane\.doe@example\.com|Seattle, WA|Professional Summary|Remote Dec 2022/i);
   });
 
+  it('recovers split header work history blocks where company, role, and dates are on adjacent lines', async () => {
+    const rawText = [
+      'Alex Candidate',
+      'alex.candidate@example.com | Seattle, WA',
+      '',
+      'EXPERIENCE',
+      'Acme Support',
+      'Senior Support Operations Manager',
+      'Remote Dec 2022 - Aug 2025',
+      '- Led incident response and escalation handling across support operations.',
+    ].join('\n');
+
+    const result = await service.ingestFromText(rawText, 'docx');
+
+    expect(result.canonical.experience).toHaveLength(1);
+    expect(result.canonical.experience[0]).toMatchObject({
+      company: 'Acme Support',
+      role: 'Senior Support Operations Manager',
+      start_date: 'Dec 2022',
+      end_date: 'Aug 2025',
+    });
+    expect(result.canonical.experience[0].evidence).toHaveLength(1);
+  });
+
+  it('recovers split header work history blocks where role and company appear on adjacent lines', async () => {
+    const rawText = [
+      'Alex Candidate',
+      'alex.candidate@example.com | Seattle, WA',
+      '',
+      'EXPERIENCE',
+      'Senior Support Operations Manager',
+      'Acme Support',
+      'Dec 2022 - Aug 2025',
+      '- Led incident response and escalation handling across support operations.',
+    ].join('\n');
+
+    const result = await service.ingestFromText(rawText, 'docx');
+
+    expect(result.canonical.experience).toHaveLength(1);
+    expect(result.canonical.experience[0]).toMatchObject({
+      company: 'Acme Support',
+      role: 'Senior Support Operations Manager',
+      start_date: 'Dec 2022',
+      end_date: 'Aug 2025',
+    });
+  });
+
+  it('recovers split header work history blocks where role and company share one line and dates follow on the next line', async () => {
+    const rawText = [
+      'Alex Candidate',
+      'alex.candidate@example.com | Seattle, WA',
+      '',
+      'EXPERIENCE',
+      'Senior Support Operations Manager - Acme Support',
+      'Dec 2022 - Aug 2025',
+      '- Led incident response and escalation handling across support operations.',
+    ].join('\n');
+
+    const result = await service.ingestFromText(rawText, 'docx');
+
+    expect(result.canonical.experience).toHaveLength(1);
+    expect(result.canonical.experience[0]).toMatchObject({
+      company: 'Acme Support',
+      role: 'Senior Support Operations Manager',
+      start_date: 'Dec 2022',
+      end_date: 'Aug 2025',
+    });
+  });
+
+  it('recovers split header work history blocks where company and dates share one line and role follows on the next line', async () => {
+    const rawText = [
+      'Alex Candidate',
+      'alex.candidate@example.com | Seattle, WA',
+      '',
+      'EXPERIENCE',
+      'Acme Support October 2021 - March 2024',
+      'Senior Support Operations Manager',
+      '- Led incident response and escalation handling across support operations.',
+    ].join('\n');
+
+    const result = await service.ingestFromText(rawText, 'docx');
+
+    expect(result.canonical.experience).toHaveLength(1);
+    expect(result.canonical.experience[0]).toMatchObject({
+      company: 'Acme Support',
+      role: 'Senior Support Operations Manager',
+      start_date: 'October 2021',
+      end_date: 'March 2024',
+    });
+  });
+
+  it('fails closed on malformed split blocks that still do not identify a safe company/role/date header', async () => {
+    const rawText = [
+      'Alex Candidate',
+      'alex.candidate@example.com | Seattle, WA',
+      '',
+      'EXPERIENCE',
+      '2021 - Present',
+      '- Led incident response and escalation handling across support operations.',
+    ].join('\n');
+
+    const result = await service.ingestFromText(rawText, 'docx');
+
+    expect(result.canonical.experience).toHaveLength(0);
+    expect(result.canonical.system_generated_read_only.missing_fields).toEqual(
+      expect.arrayContaining(['experience']),
+    );
+  });
+
   it('preserves line-oriented experience blocks from DOCX-style extraction into canonical ResumeV2 experience', async () => {
     const rawText = [
       'Alex Candidate',
