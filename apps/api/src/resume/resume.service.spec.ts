@@ -367,6 +367,7 @@ const buildService = (options?: {
   return {
     service,
     baselineRepo,
+    assessmentRepo,
     complianceService,
     applicationsService,
     opportunitiesService,
@@ -3885,6 +3886,57 @@ describe('ResumeService contract', () => {
       compliance_flags: expect.any(Array),
       reasons: expect.any(Array),
     });
+  });
+
+  it('resolves the latest assessment by baselineId instead of treating the baseline as an assessmentId', async () => {
+    const { service, assessmentRepo } = buildService();
+    const observed: { clauses: string[] } = { clauses: [] };
+    const qb: Record<string, jest.Mock> = {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockImplementation((clause: string) => {
+        observed.clauses.push(clause);
+        return qb;
+      }),
+      orderBy: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockImplementation(async () => {
+        const usesAssessmentIdFilter = observed.clauses.some((clause) =>
+          clause.includes('assessment.id = :assessmentId'),
+        );
+        if (usesAssessmentIdFilter) return null;
+        return {
+          assessment_id: assessment.id,
+          assessment_userId: assessment.userId,
+          assessment_jobId: assessment.jobId,
+          assessment_baselineId: assessment.baselineId,
+          assessment_baselineVersion: assessment.baselineVersion,
+          assessment_overallScore: assessment.overallScore,
+          assessment_verdict: assessment.verdict,
+          assessment_dimensionScores: assessment.dimensionScores,
+          assessment_strengths: assessment.strengths,
+          assessment_gaps: assessment.gaps,
+          assessment_complianceFlags: assessment.complianceFlags,
+          assessment_confidenceScore: assessment.confidenceScore,
+          assessment_confidenceReasons: assessment.confidenceReasons,
+          assessment_scoringReliability: assessment.scoringReliability,
+          assessment_scoringReliabilityReason: assessment.scoringReliabilityReason,
+          assessment_scoringV2: assessment.scoringV2,
+          assessment_inputsHash: assessment.inputsHash,
+          assessment_createdAt: assessment.createdAt,
+        };
+      }),
+    };
+    assessmentRepo.createQueryBuilder = jest.fn().mockReturnValue(qb) as any;
+
+    const latestAssessment = await (service as any).findLatestAssessment(
+      'user-1',
+      'job-1',
+      baseline.id,
+    );
+
+    expect(observed.clauses).toContain('assessment.baselineId = :baselineId');
+    expect(observed.clauses).not.toContain('assessment.id = :assessmentId');
+    expect(latestAssessment?.overallScore).toBe(assessment.overallScore);
   });
 
   it('does not block Studio readiness when a valid persisted ResumeV2 has usable experience even if structured template readiness is empty', async () => {

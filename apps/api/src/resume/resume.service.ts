@@ -837,7 +837,12 @@ export class ResumeService {
     jobId: string,
     baselineId?: string,
   ) {
-    return this.loadCanonicalFitAssessmentRawModel(userId, jobId, baselineId);
+    return this.loadCanonicalFitAssessmentRawModel(
+      userId,
+      jobId,
+      undefined,
+      baselineId,
+    );
   }
 
   private async loadCanonicalFitAssessmentRawModel(
