@@ -3180,6 +3180,94 @@ const sampleScoringV2: CxFitV2Result = {
       expect(scoreCxFitV2).not.toHaveBeenCalled();
     });
 
+    it('recomputes a legacy zero-score assessment instead of reusing 0', async () => {
+      const staleZeroAssessment: FitAssessment = {
+        id: 'fit-zero',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'b-1',
+        baselineVersion: baseline.version,
+        overallScore: 0,
+        verdict: FitAssessmentVerdict.SKIP,
+        dimensionScores: {
+          experienceAlignment: 0,
+          leadershipLevel: 0,
+          technicalPlatformFit: 0,
+          industryContext: 0,
+          strategicTacticalFit: 0,
+        },
+        strengths: [],
+        gaps: [],
+        complianceFlags: [],
+        scoringV2: null,
+        inputsHash: expectedHash,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      let savedAssessment: FitAssessment | null = null;
+      fitAssessmentRepository.save.mockImplementation(async (payload) => {
+        savedAssessment = {
+          ...payload,
+          id: 'fresh-fit-zero',
+          createdAt: new Date(),
+        } as FitAssessment;
+        return savedAssessment;
+      });
+
+      fitAssessmentRepository.findOne.mockImplementation(({ where }) => {
+        if (where?.id) {
+          return Promise.resolve(savedAssessment);
+        }
+        return Promise.resolve(staleZeroAssessment);
+      });
+
+      fitAssessmentQueryBuilder.getOne.mockImplementation(() =>
+        Promise.resolve(
+          savedAssessment ?? {
+            id: 'fresh-fit-zero',
+            userId: 'user-1',
+            jobId: 'job-1',
+            baselineId: 'b-1',
+            baselineVersion: baseline.version,
+            overallScore: sampleScoringV2.score,
+            verdict: FitAssessmentVerdict.APPLY,
+            dimensionScores: {
+              experienceAlignment: 90,
+              leadershipLevel: 90,
+              technicalPlatformFit: 90,
+              industryContext: 90,
+              strategicTacticalFit: 90,
+            },
+            strengths: ['leadership'],
+            gaps: [],
+            complianceFlags: [],
+            confidenceScore: 86,
+            confidenceReasons: [],
+            scoringReliability: 'ok',
+            scoringReliabilityReason: null,
+            scoringV2: sampleScoringV2,
+            jobAnalysis: null,
+            fitScore: null,
+            inputsHash: expectedHash,
+            createdAt: new Date(),
+          },
+        ),
+      );
+
+      const result = await service.getLatestAssessmentForBaseline(
+        'user-1',
+        'job-1',
+        'b-1',
+      );
+
+      expect(scoreCxFitV2).toHaveBeenCalled();
+      expect(result.overallScore).toBe(sampleScoringV2.score);
+      expect(result.fit_score).toBe(sampleScoringV2.score);
+      expect(result.score).toBe(sampleScoringV2.score);
+      expect(result.overallScore).not.toBe(0);
+    });
+
     it.skip('recomputes when the stored inputs hash is stale', async () => {
       const staleAssessment: FitAssessment = {
         id: 'fit-old',

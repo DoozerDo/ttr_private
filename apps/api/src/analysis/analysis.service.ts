@@ -4545,6 +4545,17 @@ export class AnalysisService {
     };
   }
 
+  private shouldRecomputeLatestAssessment(
+    assessment: FitAssessment,
+    expectedHash: string,
+  ) {
+    if (assessment.inputsHash !== expectedHash) {
+      return true;
+    }
+
+    return !assessment.scoringV2 && assessment.overallScore === 0;
+  }
+
   private async refreshToolingCoverageForAssessment(
     assessment: FitAssessment,
   ): Promise<CxFitV2Result | null> {
@@ -4687,7 +4698,7 @@ export class AnalysisService {
       baseline.version ?? null,
     );
 
-    if (assessment.inputsHash !== expectedHash) {
+    if (this.shouldRecomputeLatestAssessment(assessment, expectedHash)) {
       if (this.isDevMode()) {
         this.logger.log(
           `[fit-score] latest_assessment_stale_recompute jobId=${jobId} baselineId=${assessment.baselineId} persistedAssessmentId=${assessment.id} persistedInputsHash=${assessment.inputsHash} expectedInputsHash=${expectedHash}`,
@@ -4834,7 +4845,7 @@ export class AnalysisService {
       baseline.version ?? null,
     );
 
-    if (assessment.inputsHash !== expectedHash) {
+    if (this.shouldRecomputeLatestAssessment(assessment, expectedHash)) {
       if (this.isDevMode()) {
         this.logger.log(
           `[fit-score] latest_assessment_for_baseline_stale_recompute jobId=${jobId} baselineId=${baselineId} persistedAssessmentId=${assessment.id} persistedInputsHash=${assessment.inputsHash} expectedInputsHash=${expectedHash}`,
