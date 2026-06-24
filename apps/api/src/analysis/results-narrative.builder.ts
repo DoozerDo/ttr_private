@@ -24,11 +24,11 @@ const DIMENSION_KEYS: ScoringContractV1DimensionKey[] = [
 ];
 
 const PUBLIC_DIMENSION_LABELS: Record<ScoringContractV1DimensionKey, string> = {
-  role_scope_and_seniority: 'Leadership Level',
-  support_operations_and_process_rigor: 'Support Operations',
-  tooling_and_platform_experience: 'Tools and Systems',
-  domain_and_business_context: 'Industry Experience',
-  change_leadership_and_customer_advocacy: 'Change and Customer Impact',
+  role_scope_and_seniority: 'Experience Alignment',
+  support_operations_and_process_rigor: 'Leadership Level',
+  tooling_and_platform_experience: 'Technical and Platform Fit',
+  domain_and_business_context: 'Industry and Context Fit',
+  change_leadership_and_customer_advocacy: 'Strategic versus Tactical Balance',
 };
 
 const HEADLINES = {
@@ -180,11 +180,11 @@ export function buildResultsNarrative(args: BuildResultsNarrativeArgs): ResultsN
     | 'limited'
     | 'misaligned' = safeScore >= 90
     ? 'high'
-    : safeScore >= 70
+    : safeScore >= 85
     ? 'strong'
-    : safeScore >= 60
+    : safeScore >= 75
     ? 'range'
-    : safeScore >= 50
+    : safeScore >= 60
     ? 'limited'
     : 'misaligned';
 

@@ -88,6 +88,59 @@ describe('scoreCxFitV2', () => {
     expect(result.score).toBeLessThanOrEqual(82);
   });
 
+  it('uses the explicit Resume rubric weights and clears the apply-eligible band for a strong verified match', () => {
+    const strongBaselineSections = [
+      {
+        type: 'EXPERIENCE',
+        content:
+          `Senior Director of Customer Operations leading global support operations, incident management, escalations, automation, dashboards, KPI frameworks, and executive reporting.
+          Owned service delivery, cross-functional leadership, program ownership, customer advocacy, and operating model design for B2B SaaS and enterprise customers.
+          Drove change leadership, transformation, subscription billing alignment, and compliance-heavy workflows across regions.`,
+      },
+      {
+        type: 'SKILLS',
+        content:
+          'ServiceNow, Salesforce, Zendesk, automation, dashboards, KPI frameworks, executive reporting, incident management, operating model design, change leadership, compliance',
+      },
+    ];
+
+    const strongJob = {
+      rawDescription:
+        `Senior Director of Customer Operations responsible for service delivery, incident management, escalations, dashboards, KPI frameworks, automation, and executive stakeholder management.
+        Leads cross-functional operating rhythm design for B2B SaaS and enterprise customers while balancing strategy, execution, process rigor, and transformation.
+        Owns customer advocacy, operating model design, and subscription billing readiness across compliance-heavy workflows.`,
+      normalizedResponsibilities: [
+        'Lead service delivery, incident management, escalations, and operating rhythm design for B2B SaaS and enterprise customers',
+        'Own dashboards, KPI frameworks, automation, and executive stakeholder communication across cross-functional teams',
+        'Guide change leadership, transformation, and operating model design across compliance-heavy workflows',
+      ],
+      normalizedRequirements: [
+        'Experience with customer advocacy, program ownership, and modern support tooling such as ServiceNow, Salesforce, or Zendesk',
+        'Experience with subscription billing, compliance, and enterprise customer operations',
+      ],
+    };
+
+    const result = scoreCxFitV2({
+      job: strongJob,
+      baselineSections: strongBaselineSections,
+      metadata: { jobId: 'job-strong', baselineId: 'baseline-strong' },
+      jobTitle: 'Senior Director of Customer Operations',
+      normalizedJobResponsibilities: strongJob.normalizedResponsibilities,
+      normalizedJobRequirements: strongJob.normalizedRequirements,
+    });
+
+    expect(result.rubric.weights).toEqual({
+      role_scope_and_seniority: 30,
+      support_operations_and_process_rigor: 20,
+      tooling_and_platform_experience: 20,
+      domain_and_business_context: 15,
+      change_leadership_and_customer_advocacy: 15,
+    });
+    expect(result.rubric.dimensionPercents.role_scope_and_seniority).toBeGreaterThan(75);
+    expect(result.rubric.dimensionPercents.support_operations_and_process_rigor).toBeGreaterThan(60);
+    expect(result.score).toBeGreaterThanOrEqual(85);
+  });
+
   it('applies stretch dampening for an MSP scenario', () => {
     const result = scoreCxFitV2({
       job: stretchJob,

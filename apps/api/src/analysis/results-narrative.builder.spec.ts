@@ -15,8 +15,10 @@ describe('buildResultsNarrative', () => {
 
     expect(narrative.headline).toBe('Your background aligns very strongly with this role.');
     expect(narrative.gaps).toEqual([]);
-    expect(narrative.strengths).toEqual(['Leadership Level', 'Support Operations']);
-    expect(narrative.summary).toContain('Clear alignment appears in Leadership Level and Support Operations.');
+    expect(narrative.strengths).toEqual(['Experience Alignment', 'Leadership Level']);
+    expect(narrative.summary).toContain(
+      'Clear alignment appears in Experience Alignment and Leadership Level.',
+    );
   });
 
   it('builds the 60-69 narrative with gaps and the closer', () => {
@@ -31,14 +33,17 @@ describe('buildResultsNarrative', () => {
       },
     });
 
-    expect(narrative.headline).toBe('You are within range, but there are gaps to close.');
-    expect(narrative.strengths).toEqual(['Leadership Level']);
-    expect(narrative.gaps).toEqual(['Industry Experience', 'Support Operations']);
-    expect(narrative.summary).toContain('Clear alignment appears in Leadership Level.');
+    expect(narrative.headline).toBe('This role expects experience that is not clearly reflected yet.');
+    expect(narrative.strengths).toEqual(['Experience Alignment']);
+    expect(narrative.gaps).toEqual([
+      'Industry and Context Fit',
+      'Leadership Level',
+    ]);
+    expect(narrative.summary).toContain('Clear alignment appears in Experience Alignment.');
     expect(narrative.summary).toContain(
-      'However, Industry Experience and Support Operations are less emphasized relative to this role.',
+      'However, Industry and Context Fit and Leadership Level are less emphasized relative to this role.',
     );
-    expect(narrative.summary).toContain('These areas can often be improved through clearer positioning and emphasis.');
+    expect(narrative.summary).toContain('These areas may require meaningful repositioning to match this role.');
   });
 
   it('uses a limited alignment mention and neutral gaps when below 50', () => {
@@ -54,13 +59,16 @@ describe('buildResultsNarrative', () => {
     });
 
     expect(narrative.headline).toBe('There is significant misalignment for this role.');
-    expect(narrative.strengths).toEqual(['Leadership Level']);
-    expect(narrative.gaps).toEqual(['Change and Customer Impact', 'Industry Experience']);
+    expect(narrative.strengths).toEqual(['Experience Alignment']);
+    expect(narrative.gaps).toEqual([
+      'Strategic versus Tactical Balance',
+      'Industry and Context Fit',
+    ]);
     expect(narrative.summary).toContain(
-      'Some alignment appears in Leadership Level, but it is not the primary focus of the role.',
+      'Some alignment appears in Experience Alignment, but it is not the primary focus of the role.',
     );
     expect(narrative.summary).toContain(
-      'The thinnest alignment right now is in Change and Customer Impact and Industry Experience.',
+      'The thinnest alignment right now is in Strategic versus Tactical Balance and Industry and Context Fit.',
     );
   });
 });

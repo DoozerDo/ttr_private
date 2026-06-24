@@ -802,27 +802,27 @@ export class AnalysisService {
   }> = [
     {
       key: 'role_scope_and_seniority',
-      label: 'Role Scope and Seniority',
-      weight: 25,
+      label: 'Experience Alignment',
+      weight: 30,
     },
     {
       key: 'support_operations_and_process_rigor',
-      label: 'Support Operations and Process Rigor',
-      weight: 25,
+      label: 'Leadership Level',
+      weight: 20,
     },
     {
       key: 'tooling_and_platform_experience',
-      label: 'Tooling and Platform Experience',
+      label: 'Technical and Platform Fit',
       weight: 20,
     },
     {
       key: 'domain_and_business_context',
-      label: 'Domain and Business Context',
+      label: 'Industry and Context Fit',
       weight: 15,
     },
     {
       key: 'change_leadership_and_customer_advocacy',
-      label: 'Change Leadership and Customer Advocacy',
+      label: 'Strategic versus Tactical Balance',
       weight: 15,
     },
   ];
@@ -908,14 +908,14 @@ export class AnalysisService {
 
   private deriveFitAssessmentVerdictFromScore(score: number) {
     if (score >= 85) return FitAssessmentVerdict.APPLY;
-    if (score >= 70) return FitAssessmentVerdict.CONSIDER;
+    if (score >= 75) return FitAssessmentVerdict.CONSIDER;
     return FitAssessmentVerdict.SKIP;
   }
 
   private deriveFitScoreVerdictLabelFromScore(score: number) {
     // Contract uses uppercase verdict labels (mirrors FitAssessmentVerdict).
     if (score >= 85) return 'APPLY';
-    if (score >= 70) return 'CONSIDER';
+    if (score >= 75) return 'CONSIDER';
     return 'SKIP';
   }
 

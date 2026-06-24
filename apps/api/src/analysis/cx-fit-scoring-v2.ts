@@ -495,8 +495,8 @@ export type ScoreConfidenceClassification = {
 };
 
 const BASE_WEIGHTS: ScoringContractV1Weights = {
-  role_scope_and_seniority: 25,
-  support_operations_and_process_rigor: 25,
+  role_scope_and_seniority: 30,
+  support_operations_and_process_rigor: 20,
   tooling_and_platform_experience: 20,
   domain_and_business_context: 15,
   change_leadership_and_customer_advocacy: 15,
