@@ -45,7 +45,7 @@ function extractExperienceSectionsFromParsedJson(
           toStringValue(entry['title']) ||
           toStringValue(entry['position']);
         const start = toStringValue(entry['start_date']);
-        const end = toStringValue(entry['end_date']) || 'Present';
+        const end = toStringValue(entry['end_date']);
         const scopeSummary = toStringValue(entry['scope_summary']);
         const detailsText = toStringValue(entry['details_text']);
         const details = splitBodyLines(detailsText);

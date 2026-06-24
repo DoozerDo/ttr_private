@@ -270,7 +270,7 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     }
   });
 
-  it('returns baseline_experience_dates_missing when recovered experience entries have bullets but no dates', () => {
+  it('date-less baseline preserves omitted date fields and does not invent dates', () => {
     const parsedBaseline: Record<string, unknown> = {
       baseline_id: 'baseline-dates-missing-1',
       identity: { full_name: 'Date Missing Person', location: 'Date Missing City' },
@@ -294,26 +294,11 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
       ],
     };
 
-    expect(() => buildValidatedResumeV2FromParsedBaseline(parsedBaseline)).toThrow(
-      UnprocessableEntityException,
-    );
-    try {
-      buildValidatedResumeV2FromParsedBaseline(parsedBaseline);
-    } catch (error) {
-      expect(error).toBeInstanceOf(UnprocessableEntityException);
-      const body = (error as UnprocessableEntityException).getResponse() as any;
-      expect(String(body?.error?.code ?? '')).toBe('baseline_experience_dates_missing');
-      expect(body?.error?.details?.experienceArrayEmpty).toBe(false);
-      expect(body?.error?.details?.requiredExperienceFields).toEqual([
-        'company',
-        'roleTitle',
-        'dateRange',
-        'bullets',
-      ]);
-      expect(body?.error?.details?.trace?.blockerCode).toBe('baseline_experience_dates_missing');
-      expect(body?.error?.details?.trace?.selectedEntries).toBe(2);
-      expect(String(body?.error?.details?.nextAction ?? '')).toMatch(/work history dates/i);
-    }
+    const resumeV2 = buildValidatedResumeV2FromParsedBaseline(parsedBaseline);
+    expect(Array.isArray((resumeV2 as any).experience)).toBe(true);
+    expect((resumeV2 as any).experience).toHaveLength(2);
+    expect((resumeV2 as any).experience.every((entry: any) => !entry.dateRange && !entry.startDate && !entry.endDate)).toBe(true);
+    expect(validateNormalizedResumeDocument(resumeV2 as any).valid).toBe(true);
   });
 
   it('accepts nested field shapes (company.name, roleTitle.value) and does not drop usable experience entries', () => {

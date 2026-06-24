@@ -62,6 +62,7 @@ export type BaselineUploadTrace = {
     mappedExperienceCount: number;
     rejectedBlockCount: number;
     rejectionReasons: string[];
+    warningReasons?: string[];
     dateRangeRejections?: Array<{
       candidateBlockIndex: number;
       redactedHeaderLines: string[];
@@ -837,6 +838,7 @@ export class BaselineIngestionService {
         mappedExperienceCount: 0,
         rejectedBlockCount: 0,
         rejectionReasons: [],
+        warningReasons: [],
         dateRangeRejections: [],
       };
     }
@@ -858,6 +860,55 @@ export class BaselineIngestionService {
     if (trace?.baselineIngestion) {
       trace.baselineIngestion.mappedExperienceCount = experience.length;
       trace.baselineIngestion.rejectedBlockCount = Math.max(0, blocks.length - experience.length);
+    }
+    const dateLessExperienceEntries = experience.filter((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+      const company = String(
+        entry['company_name'] ??
+          entry['companyName'] ??
+          entry['company'] ??
+          (entry as any)?.company?.name ??
+          entry['employer'] ??
+          entry['organization'] ??
+          entry['organization_name'] ??
+          entry['org'] ??
+          '',
+      ).trim();
+      const role = String(
+        entry['role_title'] ??
+          entry['roleTitle'] ??
+          entry['title'] ??
+          entry['position'] ??
+          entry['position_title'] ??
+          entry['positionTitle'] ??
+          entry['job_title'] ??
+          entry['jobTitle'] ??
+          entry['role'] ??
+          '',
+      ).trim();
+      const evidence = Array.isArray((entry as any).evidence) ? ((entry as any).evidence as unknown[]) : [];
+      const hasDateText = Boolean(
+        String(
+          entry['start_date'] ??
+            entry['startDate'] ??
+            entry['start'] ??
+            entry['from'] ??
+            entry['end_date'] ??
+            entry['endDate'] ??
+            entry['end'] ??
+            entry['to'] ??
+            entry['dates'] ??
+            entry['date_range'] ??
+            entry['dateRange'] ??
+            '',
+        ).trim(),
+      );
+      return Boolean(company && role && evidence.length > 0 && !hasDateText);
+    });
+    if (trace?.baselineIngestion && dateLessExperienceEntries.length > 0) {
+      trace.baselineIngestion.warningReasons = Array.from(
+        new Set([...(trace.baselineIngestion.warningReasons ?? []), 'experience.date_range_missing']),
+      );
     }
     const promotedSections = parsedSections.map((section) => {
       if (!shouldPromoteSectionTitleToExperienceContent(section)) return section;

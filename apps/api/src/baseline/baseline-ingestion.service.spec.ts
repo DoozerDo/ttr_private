@@ -2,7 +2,6 @@ import { BaselineIngestionService } from './baseline-ingestion.service';
 import { BaselineParserService } from './baseline-parser.service';
 import { BaselineTextExtractor } from './baseline-text-extractor.service';
 import { buildValidatedResumeV2FromParsedBaseline } from './baseline-resume-v2';
-import { UnprocessableEntityException } from '@nestjs/common';
 import path from 'node:path';
 import type { Express } from 'express';
 
@@ -168,7 +167,7 @@ describe('BaselineIngestionService', () => {
     expect((result.trace?.baselineIngestion?.dateRangeRejections?.[0]?.redactedHeaderLines ?? []).length).toBeLessThanOrEqual(4);
   });
 
-  it('splits a single flattened text run and triggers baseline_experience_dates_missing', () => {
+  it('splits a single flattened text run with missing dates into candidate experience blocks and keeps them warning-only', async () => {
     const flattenedExperience = [
       'Company One | Role One• bullet one.• bullet two.Company Two | Role Two• bullet one.• bullet two.Company Three | Role Three• bullet one.CERTIFICATIONS• Example Certification',
     ].join('');
@@ -187,10 +186,24 @@ describe('BaselineIngestionService', () => {
     expect(mapped.every((entry: any) => Array.isArray(entry.evidence) && entry.evidence.length > 0)).toBe(true);
     expect(mapped.every((entry: any) => !entry.start_date && !entry.end_date)).toBe(true);
 
+    const rawText = [
+      'Flattened Candidate',
+      'flattened.candidate@example.com | Flattened City',
+      '',
+      'EXPERIENCE',
+      flattenedExperience,
+    ].join('\n');
+    const ingestionResult = await service.ingestFromText(rawText, 'docx');
+    expect(ingestionResult.canonical.experience).toHaveLength(3);
+    expect(ingestionResult.canonical.experience.every((entry: any) => !entry.start_date && !entry.end_date)).toBe(true);
+    expect(ingestionResult.trace?.baselineIngestion?.warningReasons).toEqual(
+      expect.arrayContaining(['experience.date_range_missing']),
+    );
+
     const parsedBaseline = {
       baseline_id: 'flattened-live-shape-1',
       identity: { full_name: 'Flattened Candidate', location: 'Flattened City' },
-      experience: mapped.map((entry: any) => ({
+      experience: ingestionResult.canonical.experience.map((entry: any) => ({
         company: entry.company,
         roleTitle: entry.role,
         bullets: entry.evidence.map((item: any) => item.text),
@@ -199,18 +212,10 @@ describe('BaselineIngestionService', () => {
       operational_ownership: { functions_owned: ['support operations'] },
     };
 
-    expect(() => buildValidatedResumeV2FromParsedBaseline(parsedBaseline as any)).toThrow(
-      UnprocessableEntityException,
-    );
-    try {
-      buildValidatedResumeV2FromParsedBaseline(parsedBaseline as any);
-    } catch (error) {
-      expect(error).toBeInstanceOf(UnprocessableEntityException);
-      const body = (error as UnprocessableEntityException).getResponse() as any;
-      expect(String(body?.error?.code ?? '')).toBe('baseline_experience_dates_missing');
-      expect(body?.error?.details?.trace?.blockerCode).toBe('baseline_experience_dates_missing');
-      expect(body?.error?.details?.trace?.selectedEntries).toBe(3);
-    }
+    const resumeV2 = buildValidatedResumeV2FromParsedBaseline(parsedBaseline as any);
+    expect(Array.isArray((resumeV2 as any).experience)).toBe(true);
+    expect((resumeV2 as any).experience).toHaveLength(3);
+    expect((resumeV2 as any).experience.every((entry: any) => !entry.dateRange && !entry.startDate && !entry.endDate)).toBe(true);
   });
 
   it('recovers split header work history blocks where role and company appear on adjacent lines', async () => {

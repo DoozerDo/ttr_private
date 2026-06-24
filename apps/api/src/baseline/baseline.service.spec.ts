@@ -635,8 +635,89 @@ const ingestionResult = {
     expect(validation.valid).toBe(true);
   });
 
+  it('missing dates warning does not block persistParsedBaseline for a date-less baseline', async () => {
+    const baselineForTest = { ...baseline, id: '11111111-1111-4111-8111-111111111111' };
+    const manager = {
+      create: jest.fn((_entity: any, value: any) => value),
+      save: jest.fn(async (value: any) => value),
+    } as any;
+
+    const ingestion = {
+      rawText: 'Test Resume',
+      parsedSections: [
+        {
+          sectionType: BaselineSectionType.EXPERIENCE,
+          content: [
+            'Acme Support | Senior Support Operations Manager',
+            '- Led incident response and escalation handling across support operations.',
+            '- Built runbooks and workflow automation to improve SLA adherence.',
+            '',
+            'Beta Support | Support Operations Manager',
+            '- Owned support queue health, staffing tradeoffs, and recurring issue follow-up.',
+            '- Improved reporting and automation to reduce manual toil.',
+          ].join('\n'),
+        },
+      ],
+      canonical: {
+        baseline_id: '11111111-1111-4111-8111-111111111111',
+        source_file_id: '11111111-1111-4111-8111-111111111111',
+        identity: { full_name: 'Date Less Person', location: 'Date Less City', current_title: null, current_company: null, summary: null },
+        summary: null,
+        experience: [
+          {
+            company: 'Acme Support',
+            role: 'Senior Support Operations Manager',
+            end_date: null,
+            evidence: [
+              { id: 'e1', text: 'Led incident response and escalation handling across support operations.', metrics: [], tags: ['support'] },
+              { id: 'e2', text: 'Built runbooks and workflow automation to improve SLA adherence.', metrics: [], tags: ['support'] },
+            ],
+            company_name: 'Acme Support',
+            role_title: 'Senior Support Operations Manager',
+            scope_summary: 'Led incident response and escalation handling across support operations. Built runbooks and workflow automation to improve SLA adherence.',
+            details_text: ['Led incident response and escalation handling across support operations.', 'Built runbooks and workflow automation to improve SLA adherence.'].join('\n'),
+          },
+          {
+            company: 'Beta Support',
+            role: 'Support Operations Manager',
+            end_date: null,
+            evidence: [
+              { id: 'e3', text: 'Owned support queue health, staffing tradeoffs, and recurring issue follow-up.', metrics: [], tags: ['support'] },
+              { id: 'e4', text: 'Improved reporting and automation to reduce manual toil.', metrics: [], tags: ['support'] },
+            ],
+            company_name: 'Beta Support',
+            role_title: 'Support Operations Manager',
+            scope_summary: 'Owned support queue health, staffing tradeoffs, and recurring issue follow-up. Improved reporting and automation to reduce manual toil.',
+            details_text: ['Owned support queue health, staffing tradeoffs, and recurring issue follow-up.', 'Improved reporting and automation to reduce manual toil.'].join('\n'),
+          },
+        ],
+        education: [],
+        skills: [],
+        people_leadership: { direct_reports: null, managers_led: null, global_teams: null },
+        operational_ownership: { functions_owned: [], process_design: null, process_scaling: null },
+        tooling_and_platforms: { tools: [], ownership_level: 'unknown' },
+        cross_functional_partnership: { product: null, engineering: null, sales_cs: null, executive: null },
+        customer_advocacy: { executive_escalations: null, voice_of_customer: null, post_incident_rca: null },
+        scale_and_scope: { customer_segment: 'unknown', geo_scope: 'unknown', org_stage: 'unknown' },
+        metrics_and_outcomes: { metrics_present: false, metrics: [] },
+        skills_and_tools: { tools: [], methodologies: [], domains: [] },
+        system_generated_read_only: { missing_fields: [], ambiguity_flags: [], low_confidence_extractions: [] },
+      } as any,
+      sourceFormat: 'docx' as const,
+    };
+
+    await expect((service as any).persistParsedBaseline(manager, baselineForTest, ingestion)).resolves.toBeUndefined();
+    expect(manager.create).toHaveBeenCalled();
+    const created = manager.create.mock.calls[0][1];
+    expect(Array.isArray(created.resumeV2Json?.experience)).toBe(true);
+    expect(created.resumeV2Json.experience.length).toBe(2);
+    expect(JSON.stringify(created.resumeV2Json)).not.toMatch(/\bPresent\b/);
+    expect(JSON.stringify(created.resumeV2Json)).not.toMatch(/\bbaseline_experience_dates_missing\b/);
+    expect(created.resumeV2Json?.diagnostics?.validationReasons ?? []).not.toContain('baseline_experience_dates_missing');
+  });
+
   it('preserves structured experience when the header lives in the section title during upload persistence', async () => {
-    const baselineForTest = { ...baseline, id: '00000000-0000-0000-0000-000000000000' };
+    const baselineForTest = { ...baseline, id: '11111111-1111-4111-8111-111111111112' };
     const manager = {
       create: jest.fn((_entity: any, value: any) => value),
       save: jest.fn(async (value: any) => value),
@@ -656,6 +737,8 @@ const ingestionResult = {
         },
       ],
       canonical: {
+        baseline_id: '11111111-1111-4111-8111-111111111112',
+        source_file_id: '11111111-1111-4111-8111-111111111112',
         identity: { full_name: 'Title Person', location: 'Title City', current_title: null, current_company: null, summary: null },
         summary: null,
         experience: [],

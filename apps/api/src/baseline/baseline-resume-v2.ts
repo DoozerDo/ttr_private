@@ -1556,81 +1556,6 @@ export function buildValidatedResumeV2FromParsedBaseline(
       });
     }
 
-    const dateLessExperienceEntries = experience.filter((entry) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
-      const company = readString(
-        entry['company_name'],
-        entry['companyName'],
-        entry['company'],
-        (entry as any)?.company?.name,
-        entry['employer'],
-        entry['organization'],
-        entry['organization_name'],
-        entry['org'],
-      );
-      const role = readString(
-        entry['role_title'],
-        entry['roleTitle'],
-        entry['title'],
-        entry['position'],
-        entry['position_title'],
-        entry['positionTitle'],
-        entry['job_title'],
-        entry['jobTitle'],
-        entry['role'],
-      );
-      const details = readDetailsLines(entry);
-      const hasDateText = Boolean(
-        readString(
-          entry['start_date'],
-          entry['startDate'],
-          entry['start'],
-          entry['from'],
-          entry['end_date'],
-          entry['endDate'],
-          entry['end'],
-          entry['to'],
-          entry['dates'],
-          entry['date_range'],
-          entry['dateRange'],
-        ),
-      );
-      return Boolean(company && role && details.length > 0 && !hasDateText);
-    });
-    if (experience.length > 0 && dateLessExperienceEntries.length === experience.length) {
-      throw new UnprocessableEntityException({
-        error: {
-          code: 'baseline_experience_dates_missing',
-          message:
-            'Useful resume evidence was found, but no work history date ranges were present for the recovered experience entries. Please upload a resume with dates for each work history entry before generating documents.',
-          details: {
-            experienceArrayEmpty: false,
-            requiredExperienceFields: ['company', 'roleTitle', 'dateRange', 'bullets'],
-            nextAction: 'Upload a resume with work history dates before generating documents.',
-            runtime: getBaselineRuntimeMarker(),
-            diagnostics: {
-              inspectedKeys,
-              parsedExperiencePresent: parsedExperienceSourcePresent,
-              parsedWorkHistoryPresent: Array.isArray(parsedBaseline['work_history']),
-              parsedExperienceType,
-              parsedExperienceKeys,
-              parsedExperienceCount: lastParsedExperienceCount,
-              experienceArrayEmpty: parsedExperienceArrayEmpty,
-              dateLessExperienceCount: dateLessExperienceEntries.length,
-              thematicFields: summarizeThematicEvidenceDiagnostics(parsedBaseline),
-            },
-            trace: {
-              selectedEntries: experience.length,
-              mappedEntries: 0,
-              survivingBlocks: 0,
-              finalExperienceCount: 0,
-              blockerCode: 'baseline_experience_dates_missing',
-            },
-          },
-        },
-      });
-    }
-
     let mappedCount = 0;
     let droppedEmptyCount = 0;
     let rejectedMissingHeaderCount = 0;
@@ -1664,10 +1589,11 @@ export function buildValidatedResumeV2FromParsedBaseline(
           entry['role'],
         );
         const start = readString(entry['start_date'], entry['startDate'], entry['start'], entry['from']);
-        const end = readString(entry['end_date'], entry['endDate'], entry['end'], entry['to']) || 'Present';
-        // `structuredBaselineExtractor.parseExperienceHeaderLine` expects: "Company | Role Title | Dates".
-        // This ordering matters; reversing it can cause experience entries to be rejected as unsafe/not-company-like.
-        const header = [company, role, [start, end].filter(Boolean).join(' - ')].filter(Boolean).join(' | ');
+        const end = readString(entry['end_date'], entry['endDate'], entry['end'], entry['to']);
+        const dateRange = [start, end].filter(Boolean).join(' - ');
+        // `structuredBaselineExtractor.parseExperienceHeaderLine` expects the company and role first.
+        // Dates are optional; when unavailable we omit them instead of synthesizing placeholders.
+        const header = [company, role, dateRange].filter(Boolean).join(' | ');
 
         const detailsText = typeof entry['details_text'] === 'string' ? entry['details_text'] : '';
         const details = detailsText
