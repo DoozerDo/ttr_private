@@ -3876,6 +3876,13 @@ describe('ResumeService contract', () => {
 
   it('does not 500 when resume readiness is called without analysisId (uses latest assessment fallback)', async () => {
     const { service } = buildService();
+    jest.spyOn(service as any, 'generateResume').mockResolvedValue({
+      status: 'ready',
+      blocked: false,
+      compliance_flags: [],
+      reasons: [],
+      canGenerateResume: true,
+    } as any);
     const readiness = await service.getGenerationReadiness('user-1', {
       ...baseRequest,
       analysisId: undefined as any,
@@ -3886,6 +3893,7 @@ describe('ResumeService contract', () => {
       compliance_flags: expect.any(Array),
       reasons: expect.any(Array),
     });
+    expect((service as any).generateResume).toHaveBeenCalled();
   });
 
   it('resolves the latest assessment by baselineId instead of treating the baseline as an assessmentId', async () => {
