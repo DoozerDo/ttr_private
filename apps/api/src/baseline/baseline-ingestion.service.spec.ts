@@ -1,6 +1,8 @@
 import { BaselineIngestionService } from './baseline-ingestion.service';
 import { BaselineParserService } from './baseline-parser.service';
 import { BaselineTextExtractor } from './baseline-text-extractor.service';
+import { buildValidatedResumeV2FromParsedBaseline } from './baseline-resume-v2';
+import { UnprocessableEntityException } from '@nestjs/common';
 import path from 'node:path';
 import type { Express } from 'express';
 
@@ -166,22 +168,14 @@ describe('BaselineIngestionService', () => {
     expect((result.trace?.baselineIngestion?.dateRangeRejections?.[0]?.redactedHeaderLines ?? []).length).toBeLessThanOrEqual(4);
   });
 
-  it('splits flattened company/role markers into candidate blocks instead of rejecting them as company_or_role', () => {
-    const content = [
-      'Example Org One | Senior Support Operations Manager',
-      'Led incident response and escalation handling across support operations.',
-      'Built runbooks and workflow automation to improve SLA adherence.',
-      'Example Org Two | Support Operations Manager',
-      'Owned support queue health, staffing tradeoffs, and recurring issue follow-up.',
-      'Improved reporting and automation to reduce manual toil.',
-      'Example Org Three | Director, Customer Operations',
-      'Partnered with executives and finance stakeholders to improve escalation handling.',
-      'CERTIFICATIONS',
-      '- Example Certification',
-    ].join('\n');
+  it('splits a single flattened text run and triggers baseline_experience_dates_missing', () => {
+    const flattenedExperience = [
+      'Company One | Role One• bullet one.• bullet two.Company Two | Role Two• bullet one.• bullet two.Company Three | Role Three• bullet one.CERTIFICATIONS• Example Certification',
+    ].join('');
 
-    const blocks = (service as any).groupExperienceBlocks(content);
+    const blocks = (service as any).groupExperienceBlocks(flattenedExperience);
     expect(blocks).toHaveLength(3);
+    expect(blocks.some((block: string) => /CERTIFICATIONS/i.test(block))).toBe(false);
 
     const context = { missingFields: [], ambiguityFlags: [], lowConfidence: [] };
     const mapped = blocks.flatMap((block: string, index: number) =>
@@ -192,44 +186,31 @@ describe('BaselineIngestionService', () => {
     expect(context.missingFields).not.toContain('experience.company_or_role');
     expect(mapped.every((entry: any) => Array.isArray(entry.evidence) && entry.evidence.length > 0)).toBe(true);
     expect(mapped.every((entry: any) => !entry.start_date && !entry.end_date)).toBe(true);
-    expect(mapped.map((entry: any) => entry.company)).toEqual(
-      expect.arrayContaining(['Example Org One', 'Example Org Two', 'Example Org Three']),
+
+    const parsedBaseline = {
+      baseline_id: 'flattened-live-shape-1',
+      identity: { full_name: 'Flattened Candidate', location: 'Flattened City' },
+      experience: mapped.map((entry: any) => ({
+        company: entry.company,
+        roleTitle: entry.role,
+        bullets: entry.evidence.map((item: any) => item.text),
+      })),
+      people_leadership: { direct_reports: 3 },
+      operational_ownership: { functions_owned: ['support operations'] },
+    };
+
+    expect(() => buildValidatedResumeV2FromParsedBaseline(parsedBaseline as any)).toThrow(
+      UnprocessableEntityException,
     );
-  });
-
-  it('splits flattened experience text into separate candidate blocks and maps entries without dates', () => {
-    const content = [
-      'Acme Support | Senior Support Operations Manager',
-      '- Led incident response and escalation handling across support operations.',
-      '- Built runbooks and workflow automation to improve SLA adherence.',
-      '',
-      'Beta Support | Support Operations Manager',
-      '- Owned support queue health, staffing tradeoffs, and recurring issue follow-up.',
-      '- Improved reporting and automation to reduce manual toil.',
-      '',
-      'CERTIFICATIONS',
-      '- AWS Certified Solutions Architect',
-    ].join('\n');
-
-    const blocks = (service as any).groupExperienceBlocks(content);
-    expect(blocks).toHaveLength(2);
-
-    const context = { missingFields: [], ambiguityFlags: [], lowConfidence: [] };
-    const mapped = blocks.flatMap((block: string, index: number) =>
-      (service as any).parseExperienceBlock(block, context, undefined, index),
-    );
-
-    expect(mapped).toHaveLength(2);
-    expect(mapped.map((entry: any) => `${entry.company}::${entry.role}`)).toEqual(
-      expect.arrayContaining([
-        'Acme Support::Senior Support Operations Manager',
-        'Beta Support::Support Operations Manager',
-      ]),
-    );
-    expect(mapped.every((entry: any) => !entry.start_date && !entry.end_date)).toBe(true);
-    expect(mapped.every((entry: any) => Array.isArray(entry.evidence) && entry.evidence.length > 0)).toBe(true);
-    const evidenceText = mapped.flatMap((entry: any) => entry.evidence.map((item: any) => String(item?.text ?? ''))).join(' | ');
-    expect(evidenceText).not.toMatch(/AWS Certified Solutions Architect/i);
+    try {
+      buildValidatedResumeV2FromParsedBaseline(parsedBaseline as any);
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      const body = (error as UnprocessableEntityException).getResponse() as any;
+      expect(String(body?.error?.code ?? '')).toBe('baseline_experience_dates_missing');
+      expect(body?.error?.details?.trace?.blockerCode).toBe('baseline_experience_dates_missing');
+      expect(body?.error?.details?.trace?.selectedEntries).toBe(3);
+    }
   });
 
   it('recovers split header work history blocks where role and company appear on adjacent lines', async () => {

@@ -171,16 +171,14 @@ function splitFlattenedExperienceRun(line: string): string[] {
   const text = String(line ?? '').replace(/\s+/g, ' ').trim();
   if (!text || !text.includes('|')) return [text].filter(Boolean);
 
-  const markerPattern = /(?:^|[\s.;:!?])([A-Z][^|\n]{1,120}\s*\|\s*[^|\n]{1,120})(?=\s|$)/g;
+  const markerPattern = /([A-Z][^|\n]{1,80}\|\s*[^|\n]{1,80}?)(?=•|$)/g;
   const markers: Array<{ start: number; end: number }> = [];
 
   for (const match of text.matchAll(markerPattern)) {
     const marker = String(match[1] ?? '').trim();
     if (!marker) continue;
     if (!marker.includes('|')) continue;
-    const prefix = String(match[0] ?? '');
-    const prefixOffset = prefix.indexOf(marker);
-    const start = (match.index ?? 0) + (prefixOffset >= 0 ? prefixOffset : 0);
+    const start = match.index ?? 0;
     markers.push({ start, end: start + marker.length });
   }
 
@@ -200,7 +198,19 @@ function splitFlattenedExperienceRun(line: string): string[] {
     const start = splitPoints[idx];
     const end = splitPoints[idx + 1] ?? text.length;
     const segment = text.slice(start, end).trim();
-    if (segment) segments.push(segment);
+    if (!segment) continue;
+    const certIndex = segment.search(/\bCERTIFICATIONS?\b/i);
+    const workingSegment = certIndex >= 0 ? segment.slice(0, certIndex).trim() : segment;
+    if (!workingSegment) continue;
+    const parts = workingSegment
+      .split(/[•\u2022]/)
+      .map((part) => part.replace(/^\s*[\.\-–—]+\s*/, '').trim())
+      .filter(Boolean);
+    if (parts.length === 0) continue;
+    segments.push(parts[0]);
+    for (const bullet of parts.slice(1)) {
+      segments.push(`- ${bullet}`);
+    }
   }
 
   return segments.length > 0 ? segments : [text];
