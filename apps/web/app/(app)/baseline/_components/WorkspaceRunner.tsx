@@ -283,7 +283,11 @@ export function resolveTargetScoreDisplayValue({
   showResult: boolean;
 }): number | null {
   if (!showResult) return null;
-  return revealedScoreValue ?? score ?? null;
+  if (score === 0) return 0;
+  if (typeof revealedScoreValue === "number" && revealedScoreValue > 0) {
+    return revealedScoreValue;
+  }
+  return score ?? null;
 }
 
 const PRE_REVEAL_MESSAGES = [
@@ -1567,7 +1571,9 @@ const showInterruptionState =
         while (current < numericScore) {
           const progress = Math.min(1, (Date.now() - animationStart) / COUNT_UP_MS);
           current = Math.round(numericScore * progress * 10) / 10;
-          setRevealedScoreValue(current);
+          if (current > 0) {
+            setRevealedScoreValue(current);
+          }
           if (progress >= 1) break;
           await delay(16);
         }

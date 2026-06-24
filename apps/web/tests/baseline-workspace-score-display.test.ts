@@ -13,13 +13,33 @@ describe("resolveTargetScoreDisplayValue", () => {
     ).toBeNull();
   });
 
-  it("returns the canonical score when the result is available", () => {
+  it("shows the canonical nonzero score instead of a false zero", () => {
     expect(
       resolveTargetScoreDisplayValue({
         score: 91,
-        revealedScoreValue: null,
+        revealedScoreValue: 0,
         showResult: true,
       }),
     ).toBe(91);
+  });
+
+  it("still shows a real zero score when the API score is truly zero", () => {
+    expect(
+      resolveTargetScoreDisplayValue({
+        score: 0,
+        revealedScoreValue: 17,
+        showResult: true,
+      }),
+    ).toBe(0);
+  });
+
+  it("can show a positive reveal value during the animation", () => {
+    expect(
+      resolveTargetScoreDisplayValue({
+        score: 91,
+        revealedScoreValue: 17,
+        showResult: true,
+      }),
+    ).toBe(17);
   });
 });
