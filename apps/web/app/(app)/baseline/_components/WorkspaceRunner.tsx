@@ -273,6 +273,19 @@ function formatScoreValue(score: number | null): string {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
+export function resolveTargetScoreDisplayValue({
+  score,
+  revealedScoreValue,
+  showResult,
+}: {
+  score: number | null;
+  revealedScoreValue: number | null;
+  showResult: boolean;
+}): number | null {
+  if (!showResult) return null;
+  return revealedScoreValue ?? score ?? null;
+}
+
 const PRE_REVEAL_MESSAGES = [
   "Analyzing role compatibility...",
   "Scanning experience signals...",
@@ -923,7 +936,13 @@ export function WorkspaceRunner({
   const competitiveContext = getCompetitiveContext(score);
   const isStrongScore = typeof score === "number" && score >= 80;
   const strongMatchSignals = sanitizeScoreExplanationList(visibleStrengthSignals, "supporting", 3);
-  const scoreDisplayValue = showResult ? formatScoreValue(revealedScoreValue ?? score) : "--";
+  const scoreDisplayValue = formatScoreValue(
+    resolveTargetScoreDisplayValue({
+      score,
+      revealedScoreValue,
+      showResult,
+    }),
+  );
   const scoreBand = typeof score === "number" ? resolveScoreBandPresentation(score) : null;
   const studioHref = buildStudioUrl({
     assessmentId: asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId) ?? null,
@@ -1302,7 +1321,7 @@ const showInterruptionState =
     setLatestBaselineId(null);
     setRunState(null);
     setShowUploadAgainCTA(false);
-    setRevealedScoreValue(0);
+    setRevealedScoreValue(null);
     setIsRevealAnalyzing(true);
     if (
       !options?.preserveInterruptionState &&
