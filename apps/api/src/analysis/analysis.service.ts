@@ -79,6 +79,7 @@ import type {
   BaselineCoverageDetails,
   FitScoreDebugBundle,
 } from './cx-fit-scoring-v2';
+import { CX_FIT_SCORER_VERSION } from './cx-fit-scoring-v2';
 import type { CxFitV2Result } from './fit-scoring.service';
 
 import {
@@ -4550,6 +4551,14 @@ export class AnalysisService {
     expectedHash: string,
   ) {
     if (assessment.inputsHash !== expectedHash) {
+      return true;
+    }
+
+    const scorerVersion =
+      typeof assessment.scoringV2?.scorerVersion === 'string'
+        ? assessment.scoringV2.scorerVersion.trim()
+        : null;
+    if (scorerVersion !== CX_FIT_SCORER_VERSION) {
       return true;
     }
 

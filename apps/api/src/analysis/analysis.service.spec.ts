@@ -34,7 +34,11 @@ import { ResumeService } from '../resume/resume.service';
 import { CoverLettersService } from '../cover-letters/cover-letters.service';
 import type { CalibrationProfile } from './calibration-profiles';
 import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
-import { scoreCxFitV2, type CxFitV2Result } from './cx-fit-scoring-v2';
+import {
+  CX_FIT_SCORER_VERSION,
+  scoreCxFitV2,
+  type CxFitV2Result,
+} from './cx-fit-scoring-v2';
 import { resetBetaAccessSchemaCompatForTests } from '../users/beta-access-schema-compat';
 
 jest.mock('./cx-fit-scoring-v2', () => ({
@@ -256,6 +260,7 @@ describe('AnalysisService - fit scores contract', () => {
 
 const sampleScoringV2: CxFitV2Result = {
   score: 90,
+  scorerVersion: CX_FIT_SCORER_VERSION,
   scoreConfidence: 0.85,
   scoreConfidenceReasons: [],
   scoreSanityFlags: [],
@@ -3060,7 +3065,6 @@ const sampleScoringV2: CxFitV2Result = {
     };
 
     let expectedHash: string;
-    let legacyExpectedHash: string;
 
     beforeEach(async () => {
       (scoreCxFitV2 as unknown as jest.Mock).mockClear();
@@ -3070,29 +3074,6 @@ const sampleScoringV2: CxFitV2Result = {
         refreshJobRecord,
         baseline,
       );
-      legacyExpectedHash = createHash('sha256')
-        .update(
-          JSON.stringify({
-            scoringVersion: 'cx-fit-v2-heuristics-2026-04-06',
-            normalizationVersion: 'job-normalization-sanitization-2026-04-06',
-            job: {
-              rawDescription: refreshJobRecord.rawDescription,
-              normalizedResponsibilities: refreshJobRecord.normalizedResponsibilities,
-              normalizedRequirements: refreshJobRecord.normalizedRequirements,
-              title: refreshJobRecord.title ?? null,
-              company: refreshJobRecord.company ?? null,
-            },
-            baseline: {
-              id: baseline.id,
-              version: baseline.version ?? null,
-              sections: service['buildSectionPayload'](
-                service['getIncludedSections'](baseline.sections),
-              ),
-            },
-            calibration: dimensionWeights,
-          }),
-        )
-        .digest('hex');
     });
 
     it('buildInputsHash ignores normalized segments when raw description exists', () => {
@@ -3160,8 +3141,10 @@ const sampleScoringV2: CxFitV2Result = {
         strengths: ['leadership'],
         gaps: ['detail'],
       complianceFlags: [],
-      // For legacy persisted assessments without scoring_v2, the response should reuse the stored overallScore.
-      scoringV2: null,
+      scoringV2: {
+        ...sampleScoringV2,
+        score: 72,
+      },
       inputsHash: expectedHash,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -3177,29 +3160,36 @@ const sampleScoringV2: CxFitV2Result = {
 
       expect(result.assessmentId).toBe(storedAssessment.id);
       expect(result.overallScore).toBe(storedAssessment.overallScore);
+      expect(result.scoring_v2?.scorerVersion).toBe(CX_FIT_SCORER_VERSION);
       expect(scoreCxFitV2).not.toHaveBeenCalled();
     });
 
-    it('recomputes a legacy zero-score assessment instead of reusing 0', async () => {
-      const staleZeroAssessment: FitAssessment = {
-        id: 'fit-zero',
+    it('recomputes a persisted assessment when the scorer version is missing', async () => {
+      const legacyScoringV2 = {
+        ...sampleScoringV2,
+        score: 72,
+      } as CxFitV2Result & { scorerVersion?: never };
+      delete (legacyScoringV2 as { scorerVersion?: unknown }).scorerVersion;
+
+      const staleAssessment: FitAssessment = {
+        id: 'fit-missing-version',
         userId: 'user-1',
         jobId: 'job-1',
         baselineId: 'b-1',
         baselineVersion: baseline.version,
-        overallScore: 0,
-        verdict: FitAssessmentVerdict.SKIP,
+        overallScore: 72,
+        verdict: FitAssessmentVerdict.APPLY,
         dimensionScores: {
-          experienceAlignment: 0,
-          leadershipLevel: 0,
-          technicalPlatformFit: 0,
-          industryContext: 0,
-          strategicTacticalFit: 0,
+          experienceAlignment: 70,
+          leadershipLevel: 70,
+          technicalPlatformFit: 70,
+          industryContext: 70,
+          strategicTacticalFit: 70,
         },
-        strengths: [],
-        gaps: [],
+        strengths: ['leadership'],
+        gaps: ['detail'],
         complianceFlags: [],
-        scoringV2: null,
+        scoringV2: legacyScoringV2,
         inputsHash: expectedHash,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -3219,7 +3209,7 @@ const sampleScoringV2: CxFitV2Result = {
         if (where?.id) {
           return Promise.resolve(savedAssessment);
         }
-        return Promise.resolve(staleZeroAssessment);
+        return Promise.resolve(staleAssessment);
       });
 
       fitAssessmentQueryBuilder.getOne.mockImplementation(() =>
@@ -3265,7 +3255,6 @@ const sampleScoringV2: CxFitV2Result = {
       expect(result.overallScore).toBe(sampleScoringV2.score);
       expect(result.fit_score).toBe(sampleScoringV2.score);
       expect(result.score).toBe(sampleScoringV2.score);
-      expect(result.overallScore).not.toBe(0);
     });
 
     it.skip('recomputes when the stored inputs hash is stale', async () => {
@@ -3320,30 +3309,36 @@ const sampleScoringV2: CxFitV2Result = {
       expect(scoreCxFitV2).toHaveBeenCalled();
       expect(savedAssessment).not.toBeNull();
       expect(savedAssessment?.inputsHash).toBe(expectedHash);
-      expect(result.assessmentId).toBe(savedAssessment?.id);
+      expect(result.overallScore).toBe(sampleScoringV2.score);
     });
 
-    it.skip('recomputes when a legacy persisted hash predates the scorer version', async () => {
+    it('recomputes a persisted assessment when the scorer version is stale', async () => {
+      const staleScoringV2 = {
+        ...sampleScoringV2,
+        score: 73,
+        scorerVersion: '2026-01-01-cx-fit-scoring-v1',
+      } as CxFitV2Result;
+
       const legacyAssessment: FitAssessment = {
         id: 'fit-legacy',
         userId: 'user-1',
         jobId: 'job-1',
         baselineId: 'b-1',
         baselineVersion: baseline.version,
-        overallScore: 48,
-        verdict: FitAssessmentVerdict.CONSIDER,
+        overallScore: 73,
+        verdict: FitAssessmentVerdict.APPLY,
         dimensionScores: {
-          experienceAlignment: 45,
-          leadershipLevel: 45,
-          technicalPlatformFit: 45,
-          industryContext: 45,
-          strategicTacticalFit: 45,
+          experienceAlignment: 71,
+          leadershipLevel: 71,
+          technicalPlatformFit: 71,
+          industryContext: 71,
+          strategicTacticalFit: 71,
         },
-        strengths: [],
-        gaps: [],
+        strengths: ['leadership'],
+        gaps: ['detail'],
         complianceFlags: [],
-        scoringV2: null,
-        inputsHash: legacyExpectedHash,
+        scoringV2: staleScoringV2,
+        inputsHash: expectedHash,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -3372,10 +3367,9 @@ const sampleScoringV2: CxFitV2Result = {
         'b-1',
       );
 
-      expect(legacyExpectedHash).not.toBe(expectedHash);
       expect(scoreCxFitV2).toHaveBeenCalled();
       expect(savedAssessment?.inputsHash).toBe(expectedHash);
-      expect(result.assessmentId).toBe(savedAssessment?.id);
+      expect(result.overallScore).toBe(sampleScoringV2.score);
     });
   });
 

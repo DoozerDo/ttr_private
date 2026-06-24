@@ -22,6 +22,8 @@ import { extractCapabilityClusters } from '../scoring-v2/extractors/capability-c
  * If you are about to import `scoreCxFitV2` in a new runtime service/controller, stop and route
  * through the canonical orchestration path instead.
  */
+export const CX_FIT_SCORER_VERSION = '2026-06-24-cx-fit-scoring-v2';
+
 type BaselineSection = { type?: string; content: string };
 
 export type CxFitV2Metadata = {
@@ -426,6 +428,7 @@ export function assessScoreConfidence(input: {
 export type CxFitV2Result = {
   // canonical
   score: number;
+  scorerVersion: typeof CX_FIT_SCORER_VERSION;
   scoreConfidence: 'high' | 'medium' | 'low';
   scoreConfidenceReasons: string[];
   scoreSanityFlags: string[];
@@ -2348,6 +2351,7 @@ export const scoreCxFitV2 = (
 
   return {
     score: finalScore,
+    scorerVersion: CX_FIT_SCORER_VERSION,
     scoreConfidence: scoreConfidenceClassification.scoreConfidence,
     scoreConfidenceReasons: scoreConfidenceClassification.scoreConfidenceReasons,
     scoreSanityFlags: scoreConfidenceClassification.scoreSanityFlags,

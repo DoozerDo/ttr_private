@@ -8,7 +8,10 @@ import { RealityCheckRepository } from './reality-check.repository';
 import { Baseline, BaselineStatus } from '../baseline/baseline.entity';
 import { BaselineSection } from '../baseline/baseline-section.entity';
 import { Job, JobIngestionMethod } from '../jobs/job.entity';
-import type { CxFitV2Result } from '../analysis/cx-fit-scoring-v2';
+import {
+  CX_FIT_SCORER_VERSION,
+  type CxFitV2Result,
+} from '../analysis/cx-fit-scoring-v2';
 import type { ToolCoverage } from '../scoring/fit-score/tool-extractor';
 
 describe('RealityCheckService', () => {
@@ -69,6 +72,7 @@ describe('RealityCheckService', () => {
 
   const baseCxFit: CxFitV2Result = {
     score: 20,
+    scorerVersion: CX_FIT_SCORER_VERSION,
     scoreConfidence: 'high',
     scoreConfidenceReasons: [],
     scoreSanityFlags: [],
@@ -194,6 +198,7 @@ describe('RealityCheckService', () => {
   it('computes mismatch when strong signals exist without updates', () => {
     const mismatchCxFit: CxFitV2Result = {
       ...baseCxFit,
+      scorerVersion: CX_FIT_SCORER_VERSION,
       rubric: {
         ...baseCxFit.rubric,
         dimensionPercents: {
