@@ -166,6 +166,37 @@ describe('BaselineIngestionService', () => {
     expect((result.trace?.baselineIngestion?.dateRangeRejections?.[0]?.redactedHeaderLines ?? []).length).toBeLessThanOrEqual(4);
   });
 
+  it('splits flattened company/role markers into candidate blocks instead of rejecting them as company_or_role', () => {
+    const content = [
+      'Example Org One | Senior Support Operations Manager',
+      'Led incident response and escalation handling across support operations.',
+      'Built runbooks and workflow automation to improve SLA adherence.',
+      'Example Org Two | Support Operations Manager',
+      'Owned support queue health, staffing tradeoffs, and recurring issue follow-up.',
+      'Improved reporting and automation to reduce manual toil.',
+      'Example Org Three | Director, Customer Operations',
+      'Partnered with executives and finance stakeholders to improve escalation handling.',
+      'CERTIFICATIONS',
+      '- Example Certification',
+    ].join('\n');
+
+    const blocks = (service as any).groupExperienceBlocks(content);
+    expect(blocks).toHaveLength(3);
+
+    const context = { missingFields: [], ambiguityFlags: [], lowConfidence: [] };
+    const mapped = blocks.flatMap((block: string, index: number) =>
+      (service as any).parseExperienceBlock(block, context, undefined, index),
+    );
+
+    expect(mapped).toHaveLength(3);
+    expect(context.missingFields).not.toContain('experience.company_or_role');
+    expect(mapped.every((entry: any) => Array.isArray(entry.evidence) && entry.evidence.length > 0)).toBe(true);
+    expect(mapped.every((entry: any) => !entry.start_date && !entry.end_date)).toBe(true);
+    expect(mapped.map((entry: any) => entry.company)).toEqual(
+      expect.arrayContaining(['Example Org One', 'Example Org Two', 'Example Org Three']),
+    );
+  });
+
   it('splits flattened experience text into separate candidate blocks and maps entries without dates', () => {
     const content = [
       'Acme Support | Senior Support Operations Manager',

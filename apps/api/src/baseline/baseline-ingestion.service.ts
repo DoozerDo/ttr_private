@@ -167,6 +167,45 @@ function isStandaloneSectionHeadingLine(value: string): boolean {
   );
 }
 
+function splitFlattenedExperienceRun(line: string): string[] {
+  const text = String(line ?? '').replace(/\s+/g, ' ').trim();
+  if (!text || !text.includes('|')) return [text].filter(Boolean);
+
+  const markerPattern = /(?:^|[\s.;:!?])([A-Z][^|\n]{1,120}\s*\|\s*[^|\n]{1,120})(?=\s|$)/g;
+  const markers: Array<{ start: number; end: number }> = [];
+
+  for (const match of text.matchAll(markerPattern)) {
+    const marker = String(match[1] ?? '').trim();
+    if (!marker) continue;
+    if (!marker.includes('|')) continue;
+    const prefix = String(match[0] ?? '');
+    const prefixOffset = prefix.indexOf(marker);
+    const start = (match.index ?? 0) + (prefixOffset >= 0 ? prefixOffset : 0);
+    markers.push({ start, end: start + marker.length });
+  }
+
+  if (markers.length <= 1) return [text];
+
+  const splitPoints = markers
+    .map((marker) => marker.start)
+    .filter((start, index, array) => array.indexOf(start) === index)
+    .sort((a, b) => a - b);
+
+  if (!splitPoints.length || splitPoints[0] !== 0) {
+    splitPoints.unshift(0);
+  }
+
+  const segments: string[] = [];
+  for (let idx = 0; idx < splitPoints.length; idx += 1) {
+    const start = splitPoints[idx];
+    const end = splitPoints[idx + 1] ?? text.length;
+    const segment = text.slice(start, end).trim();
+    if (segment) segments.push(segment);
+  }
+
+  return segments.length > 0 ? segments : [text];
+}
+
 function normalizeExperienceHeaderSeparatorText(value: string): string {
   return String(value ?? '')
     .replace(/\s*[\u2013\u2014]\s*/g, ' - ')
@@ -303,6 +342,25 @@ function parseRoleAtCompany(line: string): { company: string; roleTitle: string;
 function isTextBulletLine(line: string): boolean {
   const text = String(line ?? '').replace(/\s+/g, ' ').trim();
   return /^[-•*]\s+/.test(text);
+}
+
+function isImplicitEvidenceLine(line: string): boolean {
+  const text = String(line ?? '').replace(/\s+/g, ' ').trim();
+  if (!text) return false;
+  if (text.length > 180) return false;
+  if (text.split(/\s+/).length > 28) return false;
+  if (/^(?:summary|professional summary|profile|experience|professional experience|work experience|skills|technical skills|key skills|education|academic background|training|certifications?|projects?|programs?)\b/i.test(text)) {
+    return false;
+  }
+  if (/\b(?:https?:\/\/|www\.|linkedin\.com|github\.com|mailto:)\b/i.test(text) || /@/.test(text)) {
+    return false;
+  }
+  if (/\+?\d[\d\s().-]{7,}\d/.test(text)) {
+    return false;
+  }
+  return /^(?:designed|built|led|managed|created|implemented|developed|owned|improved|reduced|increased|delivered|supported|maintained|coordinated|partnered|collaborated|architected|automated|migrated|troubleshot|resolved)\b/i.test(
+    text,
+  );
 }
 
 function isLikelyExperienceEntryTitle(value: string): boolean {
@@ -842,6 +900,7 @@ export class BaselineIngestionService {
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n')
       .split('\n')
+      .flatMap((line) => splitFlattenedExperienceRun(line))
       .map((line) => line.trim())
       .filter(Boolean);
 
@@ -865,10 +924,17 @@ export class BaselineIngestionService {
         idx += 1;
         continue;
       }
-      const headerRead = this.readExperienceHeaderAt(lines, idx);
-      const isHeaderLine = Boolean(headerRead);
+      const isHeaderLine = this.isExperienceHeaderSeed(lines, idx) && Boolean(this.readExperienceHeaderAt(lines, idx));
 
       if (isHeaderLine) {
+        const headerRead = this.readExperienceHeaderAt(lines, idx);
+        if (!headerRead) {
+          if (currentBlock.length > 0) {
+            currentBlock.push(line);
+          }
+          idx += 1;
+          continue;
+        }
         flushCurrentBlock();
         currentBlock.push(
           ...lines.slice(idx, idx + (headerRead?.consumed ?? 1)).map((item) => item.trim()).filter(Boolean),
@@ -893,6 +959,22 @@ export class BaselineIngestionService {
       .split(/\n{2,}/)
       .map((block) => block.trim())
       .filter(Boolean);
+  }
+
+  private isExperienceHeaderSeed(lines: string[], startIndex: number): boolean {
+    const line0 = String(lines[startIndex] ?? '').trim();
+    if (!line0) return false;
+    if (isStandaloneSectionHeadingLine(line0) || isContactLikeText(line0)) return false;
+    if (isTextBulletLine(line0) || isImplicitEvidenceLine(line0)) return false;
+
+    const line1 = String(lines[startIndex + 1] ?? '').trim();
+    const line2 = String(lines[startIndex + 2] ?? '').trim();
+
+    if (line0.includes('|') || /\bat\b/i.test(line0) || /\s-\s/.test(line0)) return true;
+    if (isLikelyCompanyName(line0) && (looksLikeRoleTitle(line1) || looksLikeDatesLine(line1))) return true;
+    if (looksLikeRoleTitle(line0) && isLikelyCompanyName(line1)) return true;
+    if (isLikelyCompanyName(line0) && line1 && looksLikeDatesLine(line1) && line2 && looksLikeRoleTitle(line2)) return true;
+    return false;
   }
 
   private parseExperienceBlock(
@@ -975,7 +1057,7 @@ export class BaselineIngestionService {
     const hasExperienceContinuation = (consumed: number): boolean => {
       const nextLine = String(lines[startIndex + consumed] ?? '').trim();
       if (!nextLine) return false;
-      if (isTextBulletLine(nextLine)) return true;
+      if (isTextBulletLine(nextLine) || isImplicitEvidenceLine(nextLine)) return true;
       return Boolean(this.readExperienceHeaderAt(lines, startIndex + consumed));
     };
 
