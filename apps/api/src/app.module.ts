@@ -3,6 +3,9 @@ import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
+import { newDb } from 'pg-mem';
+import { randomUUID } from 'node:crypto';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AdminUsersModule } from './admin-users/admin-users.module';
@@ -48,10 +51,64 @@ import { BetaOpsController } from './ops/beta-ops.controller';
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
+      dataSourceFactory: async (options) => {
+        const shouldUseTestDb =
+          process.env.USE_PGMEM_DB === 'true' || process.env.NODE_ENV === 'test';
+
+        if (shouldUseTestDb) {
+          const db = newDb({ autoCreateForeignKeyIndices: true });
+          db.public.registerFunction({
+            name: 'version',
+            returns: 'text' as any,
+            implementation: () => 'PostgreSQL 16.0',
+          });
+          db.public.registerFunction({
+            name: 'current_database',
+            returns: 'text' as any,
+            implementation: () => 'test',
+          });
+          db.public.registerFunction({
+            name: 'current_schema',
+            returns: 'text' as any,
+            implementation: () => 'public',
+          });
+          db.public.registerFunction({
+            name: 'length',
+            args: [db.public.getType('text')],
+            returns: 'int4' as any,
+            implementation: (value: string) => value.length,
+          });
+          db.public.registerFunction({
+            name: 'uuid_generate_v4',
+            returns: 'uuid' as any,
+            impure: true,
+            implementation: () => randomUUID(),
+          });
+          db.public.registerFunction({
+            name: 'gen_random_uuid',
+            returns: 'uuid' as any,
+            impure: true,
+            implementation: () => randomUUID(),
+          });
+          db.public.registerEquivalentSizableType({
+            name: 'vector',
+            equivalentTo: db.public.getType('text'),
+            isValid: () => true,
+          });
+          const dataSource = db.adapters.createTypeormDataSource({
+            ...(options ?? {}),
+            type: 'postgres',
+          } as any);
+          return dataSource;
+        }
+
+        return new DataSource(options as any);
+      },
       useFactory: (configService: ConfigService) => {
         const nodeEnv =
-          configService.get<string>('NODE_ENV') ?? process.env.NODE_ENV ?? 'development';
+          process.env.NODE_ENV ?? configService.get<string>('NODE_ENV') ?? 'development';
         const isProd = nodeEnv === 'production';
+        const useTestDatabase = process.env.USE_PGMEM_DB === 'true' || nodeEnv === 'test';
         const rawDatabaseUrl =
           configService.get<string>('DATABASE_URL') ?? process.env.DATABASE_URL ?? '';
         const databaseUrl = typeof rawDatabaseUrl === 'string' ? rawDatabaseUrl.trim() : '';
@@ -60,6 +117,15 @@ import { BetaOpsController } from './ops/beta-ops.controller';
           throw new Error(
             'DATABASE_URL is required for production startup.',
           );
+        }
+
+        if (useTestDatabase) {
+          return {
+            type: 'postgres',
+            entities: [User],
+            synchronize: true,
+            autoLoadEntities: true,
+          };
         }
 
         return {

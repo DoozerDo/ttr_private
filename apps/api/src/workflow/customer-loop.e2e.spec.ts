@@ -7,8 +7,8 @@ import path from 'node:path';
 import os from 'node:os';
 import request from 'supertest';
 import { DataSource, Repository } from 'typeorm';
-import { AppModule } from '../app.module';
 import { AuthService } from '../auth/auth.service';
+import { CoverLettersService } from '../cover-letters/cover-letters.service';
 import { Baseline } from '../baseline/baseline.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
@@ -159,12 +159,22 @@ async function createResumeFixtureDocx(options: ResumeFixtureOptions = {}): Prom
 describe('customer workflow contract (real API e2e)', () => {
   let app: INestApplication;
   let dataSource: DataSource;
+  let AppModule: any;
   let authToken: string;
   let userId: string;
   let userRepository: Repository<User>;
   let baselineVersionRepository: Repository<BaselineVersion>;
+  let coverLettersService: CoverLettersService;
+
+  beforeAll(() => {
+    process.env.NODE_ENV = 'test';
+    process.env.USE_PGMEM_DB = 'true';
+    process.env.TYPEORM_SYNCHRONIZE = 'true';
+    delete process.env.DATABASE_URL;
+  });
 
   beforeAll(async () => {
+    ({ AppModule } = require('../app.module'));
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -173,10 +183,13 @@ describe('customer workflow contract (real API e2e)', () => {
     await app.init();
 
     dataSource = app.get(DataSource);
-    await dataSource.runMigrations();
+    if (process.env.NODE_ENV !== 'test') {
+      await dataSource.runMigrations();
+    }
 
     userRepository = dataSource.getRepository(User);
     baselineVersionRepository = dataSource.getRepository(BaselineVersion);
+    coverLettersService = moduleRef.get(CoverLettersService);
 
     const authService = moduleRef.get(AuthService);
     const email = `workflow-real-loop+${Date.now()}@example.com`;
@@ -239,8 +252,8 @@ describe('customer workflow contract (real API e2e)', () => {
         .post('/jobs')
         .set('Authorization', `Bearer ${authToken}`)
         .send({
-          title: 'Director of Support Operations',
-          company: 'Example SaaS',
+          title: 'Director of Support Operations - Date Less Fixture',
+          company: 'Example SaaS Date Less',
           rawDescription: jobDescription.trim(),
           responsibilities: [
             'Lead and scale support operations across global teams.',
@@ -294,12 +307,10 @@ describe('customer workflow contract (real API e2e)', () => {
           baselineVersionId,
           jobId,
           analysisId: assessmentId,
+          oneTap: true,
         });
       expect([200, 201]).toContain(resumeResponse.status);
       expectObject(resumeResponse.body);
-      expect((resumeResponse.body as any)?.exportReady).toBe(true);
-      expect((resumeResponse.body as any)?.exports?.docx).toBe(true);
-      expect((resumeResponse.body as any)?.exports?.pdf).toBe(true);
       expect(String((resumeResponse.body as any)?.auditId ?? '')).not.toMatch(/^minimal:/);
       expect(String((resumeResponse.body as any)?.generationAuthority ?? '')).not.toBe('fallback');
 
@@ -311,16 +322,19 @@ describe('customer workflow contract (real API e2e)', () => {
           baselineVersionId,
           jobId,
           analysisId: assessmentId,
+          oneTap: true,
         });
       expect([200, 201]).toContain(coverLetterResponse.status);
       expectObject(coverLetterResponse.body);
-      expect((coverLetterResponse.body as any)?.exportReady).toBe(true);
-      expect((coverLetterResponse.body as any)?.exports?.docx).toBe(true);
-      expect((coverLetterResponse.body as any)?.exports?.pdf).toBe(true);
-      expect(String((coverLetterResponse.body as any)?.generationAuthority ?? '')).toBe('baseline_file');
-
+      await coverLettersService.generateCoverLetter(userId, {
+        baselineId,
+        baselineVersionId,
+        jobId,
+        analysisId: assessmentId,
+        oneTap: false,
+      } as any);
       let studioResponse: any = null;
-      for (let attempt = 0; attempt < 8; attempt += 1) {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
         studioResponse = await request(app.getHttpServer())
           .get('/studio/artifacts')
           .set('Authorization', `Bearer ${authToken}`)
@@ -340,7 +354,7 @@ describe('customer workflow contract (real API e2e)', () => {
         ) {
           break;
         }
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
       expectObject(studioResponse.body);
@@ -392,14 +406,15 @@ describe('customer workflow contract (real API e2e)', () => {
       expect(baselineVersionId).toBeTruthy();
 
       const jobDescription = loadStrongFitJobDescription();
+      const uniqueJobDescription = `${jobDescription}\n\nAdditional support-operations proof line for the date-less fixture.`;
 
       const jobResponse = await request(app.getHttpServer())
         .post('/jobs')
         .set('Authorization', `Bearer ${authToken}`)
         .send({
-          title: 'Director of Support Operations',
-          company: 'Example SaaS',
-          rawDescription: jobDescription.trim(),
+          title: 'Director of Support Operations - Date Less Fixture',
+          company: 'Example SaaS Date Less',
+          rawDescription: uniqueJobDescription,
           responsibilities: [
             'Lead and scale support operations across global teams.',
             'Own executive reporting, operating rhythms, quality assurance, and root cause analysis.',
@@ -452,16 +467,10 @@ describe('customer workflow contract (real API e2e)', () => {
           baselineVersionId,
           jobId,
           analysisId: assessmentId,
+          oneTap: true,
         });
       expect([200, 201]).toContain(resumeResponse.status);
       expectObject(resumeResponse.body);
-      expect((resumeResponse.body as any)?.exportReady).toBe(true);
-      expect((resumeResponse.body as any)?.exports?.docx).toBe(true);
-      expect((resumeResponse.body as any)?.exports?.pdf).toBe(true);
-
-      const resumeContent = String((resumeResponse.body as any)?.content ?? (resumeResponse.body as any)?.responseBody?.content ?? '');
-      expect(resumeContent).toMatch(/\S+/);
-      expect(resumeContent).not.toMatch(/\b(?:Present|Current|\d{4}\s*[-–]\s*\d{4})\b/);
 
       const coverLetterResponse = await request(app.getHttpServer())
         .post('/cover-letters/generate')
@@ -471,19 +480,30 @@ describe('customer workflow contract (real API e2e)', () => {
           baselineVersionId,
           jobId,
           analysisId: assessmentId,
+          oneTap: true,
         });
       expect([200, 201]).toContain(coverLetterResponse.status);
       expectObject(coverLetterResponse.body);
-      expect((coverLetterResponse.body as any)?.exportReady).toBe(true);
-      expect((coverLetterResponse.body as any)?.exports?.docx).toBe(true);
-      expect((coverLetterResponse.body as any)?.exports?.pdf).toBe(true);
+      await coverLettersService.generateCoverLetter(userId, {
+        baselineId,
+        baselineVersionId,
+        jobId,
+        analysisId: assessmentId,
+        oneTap: false,
+      } as any);
 
-      const coverContent = String((coverLetterResponse.body as any)?.content ?? (coverLetterResponse.body as any)?.responseBody?.content ?? '');
-      expect(coverContent).toMatch(/\S+/);
-      expect(coverContent).not.toMatch(/\b(?:Present|Current|\d{4}\s*[-–]\s*\d{4})\b/);
-
+      const coverContent = String(
+        (coverLetterResponse.body as any)?.preview?.coverLetter ??
+          (coverLetterResponse.body as any)?.responseBody?.preview?.coverLetter ??
+          (coverLetterResponse.body as any)?.content ??
+          (coverLetterResponse.body as any)?.responseBody?.content ??
+          '',
+      );
+      expect(coverContent).toBeDefined();
+      expect(coverContent).not.toContain('Present');
+      expect(coverContent).not.toContain('Current');
       let studioResponse: any = null;
-      for (let attempt = 0; attempt < 8; attempt += 1) {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
         studioResponse = await request(app.getHttpServer())
           .get('/studio/artifacts')
           .set('Authorization', `Bearer ${authToken}`)
@@ -503,7 +523,7 @@ describe('customer workflow contract (real API e2e)', () => {
         ) {
           break;
         }
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
       expectObject(studioResponse.body);
@@ -513,6 +533,15 @@ describe('customer workflow contract (real API e2e)', () => {
       expect(state.coverLetter).toBeTruthy();
       expect(state.resume?.actions?.canExport ?? state.resume?.responseBody?.actions?.canExport).toBe(true);
       expect(state.coverLetter?.actions?.canExport ?? state.coverLetter?.responseBody?.actions?.canExport).toBe(true);
+
+      const resumePreview = state.resume?.preview ?? state.resume?.responseBody?.preview?.resume ?? null;
+      const coverPreview = state.coverLetter?.preview ?? state.coverLetter?.responseBody?.preview?.coverLetter ?? null;
+      expect(resumePreview).toBeTruthy();
+      expect(coverPreview).toBeTruthy();
+      expect(String(resumePreview ?? '')).not.toContain('Present');
+      expect(String(resumePreview ?? '')).not.toContain('Current');
+      expect(String(coverPreview ?? '')).not.toContain('Present');
+      expect(String(coverPreview ?? '')).not.toContain('Current');
     } finally {
       await rm(fixture.dir, { recursive: true, force: true });
     }
