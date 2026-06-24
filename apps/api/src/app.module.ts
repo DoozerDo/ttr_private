@@ -4,7 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { newDb } from 'pg-mem';
+import { DataType, newDb } from 'pg-mem';
 import { randomUUID } from 'node:crypto';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -74,7 +74,7 @@ import { BetaOpsController } from './ops/beta-ops.controller';
           });
           db.public.registerFunction({
             name: 'length',
-            args: [db.public.getType('text')],
+            args: [db.public.getType(DataType.text)],
             returns: 'int4' as any,
             implementation: (value: string) => value.length,
           });
@@ -92,7 +92,7 @@ import { BetaOpsController } from './ops/beta-ops.controller';
           });
           db.public.registerEquivalentSizableType({
             name: 'vector',
-            equivalentTo: db.public.getType('text'),
+            equivalentTo: db.public.getType(DataType.text),
             isValid: () => true,
           });
           const dataSource = db.adapters.createTypeormDataSource({
