@@ -864,7 +864,7 @@ const HEURISTIC_LIFT_CAPS: Record<HeuristicDimension, number> = {
   change_leadership_and_customer_advocacy: 2,
 };
 
-const HEURISTIC_TOTAL_LIFT_CAP = 10;
+const HEURISTIC_TOTAL_LIFT_CAP = 12;
 
 const NETWORK_ADJACENCY_TERMS = [
   'bgp',
@@ -2083,6 +2083,13 @@ export const scoreCxFitV2 = (
     hasFamilyEvidence(baselineText, 'change') || hasFamilyEvidence(jobTextForScoring, 'change');
   const scopeFamilyEvidence =
     hasFamilyEvidence(baselineText, 'scope') || hasFamilyEvidence(jobTextForScoring, 'scope');
+  const baselineNetworkSignals = countTermHits(normalizedBaselineText, NETWORK_ADJACENCY_TERMS);
+  const roleNetworkSignals = countTermHits(normalizedJobText, NETWORK_ADJACENCY_TERMS);
+  const strongNetworkInfrastructureAlignment =
+    baselineNetworkSignals >= 7 &&
+    roleNetworkSignals >= 5 &&
+    responsibilityOverlapPercent >= 55 &&
+    baselineCoveragePercent >= 45;
 
   if (supportFamilyEvidence) {
     calibratedDimensionPercents.support_operations_and_process_rigor = Math.min(
@@ -2110,6 +2117,21 @@ export const scoreCxFitV2 = (
     calibratedDimensionPercents.role_scope_and_seniority = Math.min(
       100,
       calibratedDimensionPercents.role_scope_and_seniority + 2,
+    );
+  }
+
+  if (strongNetworkInfrastructureAlignment) {
+    calibratedDimensionPercents.role_scope_and_seniority = Math.min(
+      100,
+      calibratedDimensionPercents.role_scope_and_seniority + 12,
+    );
+    calibratedDimensionPercents.support_operations_and_process_rigor = Math.min(
+      100,
+      calibratedDimensionPercents.support_operations_and_process_rigor + 6,
+    );
+    calibratedDimensionPercents.tooling_and_platform_experience = Math.min(
+      100,
+      calibratedDimensionPercents.tooling_and_platform_experience + 5,
     );
   }
 

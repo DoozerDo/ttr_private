@@ -307,7 +307,7 @@ describe('scoreCxFitV2', () => {
     }
   });
 
-  it('recognizes direct network-infrastructure evidence strongly enough to avoid collapsing a Dalen-style baseline', () => {
+  it('recognizes direct network-infrastructure evidence strongly enough to reach the strong-fit band', () => {
     const result = scoreCxFitV2(
       {
         job: {
@@ -339,8 +339,7 @@ describe('scoreCxFitV2', () => {
     expect(result.debug.responsibilityOverlapPercent).toBeGreaterThan(0);
     expect(result.rubric.dimensionPercents.tooling_and_platform_experience).toBeGreaterThan(55);
     expect(result.rubric.dimensionPercents.domain_and_business_context).toBeGreaterThan(55);
-    expect(result.score).toBeGreaterThanOrEqual(55);
-    expect(result.score).toBeLessThan(85);
+    expect(result.score).toBeGreaterThanOrEqual(80);
   });
 
   it('keeps heuristics quiet on shallow keyword overlap', () => {
