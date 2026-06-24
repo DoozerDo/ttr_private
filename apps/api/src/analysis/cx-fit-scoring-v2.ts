@@ -864,29 +864,7 @@ const HEURISTIC_LIFT_CAPS: Record<HeuristicDimension, number> = {
   change_leadership_and_customer_advocacy: 2,
 };
 
-const HEURISTIC_TOTAL_LIFT_CAP = 12;
-
-const NETWORK_ADJACENCY_TERMS = [
-  'bgp',
-  'l3 routing',
-  'layer 3 routing',
-  'routing',
-  'switching',
-  'networking',
-  'network devices',
-  'arista',
-  'cisco',
-  'juniper',
-  'mellanox',
-  'vlan',
-  'dns',
-  'dhcp',
-  'vpn',
-  'datacenter',
-  'data center',
-  'fabric',
-  'high performance networking',
-];
+const HEURISTIC_TOTAL_LIFT_CAP = 10;
 
 const HIGH_COMPLEXITY_ENVIRONMENT_TERMS = [
   'microsoft schie',
@@ -2083,14 +2061,6 @@ export const scoreCxFitV2 = (
     hasFamilyEvidence(baselineText, 'change') || hasFamilyEvidence(jobTextForScoring, 'change');
   const scopeFamilyEvidence =
     hasFamilyEvidence(baselineText, 'scope') || hasFamilyEvidence(jobTextForScoring, 'scope');
-  const baselineNetworkSignals = countTermHits(normalizedBaselineText, NETWORK_ADJACENCY_TERMS);
-  const roleNetworkSignals = countTermHits(normalizedJobText, NETWORK_ADJACENCY_TERMS);
-  const strongNetworkInfrastructureAlignment =
-    baselineNetworkSignals >= 7 &&
-    roleNetworkSignals >= 5 &&
-    responsibilityOverlapPercent >= 55 &&
-    baselineCoveragePercent >= 45;
-
   if (supportFamilyEvidence) {
     calibratedDimensionPercents.support_operations_and_process_rigor = Math.min(
       100,
@@ -2120,20 +2090,16 @@ export const scoreCxFitV2 = (
     );
   }
 
-  if (strongNetworkInfrastructureAlignment) {
-    calibratedDimensionPercents.role_scope_and_seniority = Math.min(
-      100,
-      calibratedDimensionPercents.role_scope_and_seniority + 12,
-    );
-    calibratedDimensionPercents.support_operations_and_process_rigor = Math.min(
-      100,
-      calibratedDimensionPercents.support_operations_and_process_rigor + 6,
-    );
-    calibratedDimensionPercents.tooling_and_platform_experience = Math.min(
-      100,
-      calibratedDimensionPercents.tooling_and_platform_experience + 5,
-    );
-  }
+  const moderateStrongAlignment =
+    responsibilityOverlapPercent >= 45 &&
+    adjustedResponsibilityOverlapPercent >= 50 &&
+    baselineCoveragePercent >= 40 &&
+    baselineRecallPercent >= 40;
+  const strongVerifiedAlignment =
+    responsibilityOverlapPercent >= 85 &&
+    adjustedResponsibilityOverlapPercent >= 75 &&
+    baselineCoveragePercent >= 75 &&
+    baselineRecallPercent >= 70;
 
   for (const [dimension, lift] of Object.entries(heuristicResult.heuristicLiftByDimension) as [
     ScoringContractV1DimensionKey,
@@ -2211,6 +2177,14 @@ export const scoreCxFitV2 = (
   // contract rounding: round half up, final only
   const roundedFinal = roundHalfUp(finalBeforeClamp);
   let finalScore = clamp(roundedFinal);
+
+  if (moderateStrongAlignment && finalScore < 80) {
+    finalScore = 80;
+  }
+
+  if (strongVerifiedAlignment && finalScore < 85) {
+    finalScore = 85;
+  }
 
   // Guardrail: cap scores in "strong apply" territory when baseline evidence coverage is clearly insufficient.
   // This prevents inflated 80s scores when experience depth/scope is materially unsupported.

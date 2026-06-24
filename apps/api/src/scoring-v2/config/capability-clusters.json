@@ -61,12 +61,6 @@
       "phrases": ["operational excellence", "process maturity"]
     },
     {
-      "id": "network_infrastructure_operations",
-      "label": "Network Infrastructure Operations",
-      "keywords": ["network", "networking", "datacenter", "routing", "bgp", "vlan", "linux", "firewall", "firewalls", "switch", "switches", "virtualization", "monitoring"],
-      "phrases": ["network infrastructure", "network engineering", "network operations", "datacenter networking", "linux infrastructure", "remote access"]
-    },
-    {
       "id": "automation_process",
       "label": "Automation Process",
       "keywords": ["automation", "workflows", "runbooks"],

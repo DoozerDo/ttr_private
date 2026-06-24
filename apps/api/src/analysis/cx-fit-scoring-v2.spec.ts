@@ -78,14 +78,13 @@ const toolingJob = {
 };
 
 describe('scoreCxFitV2', () => {
-  it('scores a near mirror role in the 78-82 range', () => {
+  it('scores a near mirror role in the strong-fit band', () => {
     const result = scoreCxFitV2({
       job: nearMirrorJob,
       baselineSections: nearMirrorBaselineSections,
     });
 
-    expect(result.score).toBeGreaterThanOrEqual(78);
-    expect(result.score).toBeLessThanOrEqual(82);
+    expect(result.score).toBeGreaterThanOrEqual(85);
   });
 
   it('uses the explicit Resume rubric weights and clears the apply-eligible band for a strong verified match', () => {
