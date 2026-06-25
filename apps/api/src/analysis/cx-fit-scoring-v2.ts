@@ -22,7 +22,7 @@ import { extractCapabilityClusters } from '../scoring-v2/extractors/capability-c
  * If you are about to import `scoreCxFitV2` in a new runtime service/controller, stop and route
  * through the canonical orchestration path instead.
  */
-export const CX_FIT_SCORER_VERSION = '2026-06-24-cx-fit-scoring-v2';
+export const CX_FIT_SCORER_VERSION = '2026-06-25-cx-fit-scoring-v2';
 
 type BaselineSection = { type?: string; content: string };
 
@@ -775,6 +775,19 @@ const EXECUTION_PATTERNS: RegExp[] = [
   /\bmtta\b/,
   /\bsla\b/,
   /\bnps\b/,
+  /support operations?/,
+  /customer operations?/,
+  /support leadership/,
+  /global support/,
+  /service delivery/,
+  /service reliability/,
+  /incident management/,
+  /escalation governance/,
+  /operating model/,
+  /workflow automation/,
+  /customer advocacy/,
+  /\bdashboards?\b/,
+  /\bkpis?\b/,
   /(?:metrics|metric) (?:moved|improved|owned|tracked)/,
   /systems (?:built|launched|implemented)/,
   /automation (?:delivered|deployed|built)/,
@@ -1248,7 +1261,13 @@ const SUPPORT_OPERATIONS_FAMILY_PATTERNS = [
   /support operations?/,
   /customer operations?/,
   /support leadership/,
+  /global support/,
   /support process ownership/,
+  /support management/,
+  /support manager/,
+  /support leader(ship)?/,
+  /support team(s)?/,
+  /customer support/,
   /process ownership/,
   /service delivery/,
   /escalation management/,
@@ -1262,6 +1281,8 @@ const SUPPORT_OPERATIONS_FAMILY_PATTERNS = [
   /kpi/,
   /support queue/,
 ];
+
+const LEADERSHIP_ACTION_PATTERNS = /led|leading|lead(?:s|ership)?|managed|managing|manage|owned|owns?|built|building|improved|improving|scaled|scaling|optimized|optimizing|directed|directing|supervised|supervising|drove|driving|orchestrated|orchestrating|oversee|oversees|overseeing|responsible/;
 
 const CHANGE_LEADERSHIP_FAMILY_PATTERNS = [
   /change leadership/,
@@ -1300,24 +1321,19 @@ function hasFamilyEvidence(text: string, family: 'support' | 'change' | 'scope')
   if (family === 'support') {
     return (
       SUPPORT_OPERATIONS_FAMILY_PATTERNS.some((pattern) => pattern.test(lower)) &&
-      /led|leading|managed|owned|built|improved|scaled|optimized|directed|supervised|drove|orchestrated/.test(
-        lower,
-      )
+      LEADERSHIP_ACTION_PATTERNS.test(lower)
     );
   }
   if (family === 'change') {
     return (
       CHANGE_LEADERSHIP_FAMILY_PATTERNS.some((pattern) => pattern.test(lower)) &&
-      /led|leading|managed|owned|drove|directed|supervised|orchestrated|championed|spearheaded/.test(
-        lower,
-      )
+      LEADERSHIP_ACTION_PATTERNS.test(lower) &&
+      /championed|spearheaded|transformation|rollout|adoption|migration|operating model/.test(lower)
     );
   }
   return (
     LEADERSHIP_SCOPE_FAMILY_PATTERNS.some((pattern) => pattern.test(lower)) &&
-    /led|leading|managed|owned|directed|supervised|built|drove|orchestrated|championed|spearheaded/.test(
-      lower,
-    )
+    LEADERSHIP_ACTION_PATTERNS.test(lower)
   );
 }
 
@@ -2067,7 +2083,7 @@ export const scoreCxFitV2 = (
   if (supportFamilyEvidence) {
     calibratedDimensionPercents.support_operations_and_process_rigor = Math.min(
       100,
-      calibratedDimensionPercents.support_operations_and_process_rigor + 3,
+      calibratedDimensionPercents.support_operations_and_process_rigor + 6,
     );
     calibratedDimensionPercents.role_scope_and_seniority = Math.min(
       100,

@@ -185,6 +185,59 @@ describe('scoreCxFitV2', () => {
     expect(result.score).toBeGreaterThanOrEqual(40);
   });
 
+  it('scores a senior global support leadership match in the strong-fit band', () => {
+    const result = scoreCxFitV2({
+      job: {
+        rawDescription:
+          `Director of Global Support responsible for support operations, incident management, escalation governance, service delivery, and customer advocacy across global teams.
+          Owns operating model design, workflow automation, dashboards, KPIs, and executive reporting for B2B SaaS customers.
+          Leads managers, handles cross-functional change leadership, and improves service reliability and SLA performance.`,
+        normalizedResponsibilities: [
+          'Own global support operations, escalation governance, service delivery, and customer advocacy',
+          'Lead operating model design, workflow automation, dashboards, KPIs, and executive reporting',
+        ],
+        normalizedRequirements: [
+          'Experience leading managers and cross-functional change leadership for B2B SaaS support teams',
+        ],
+      },
+      baselineSections: [
+        {
+          type: 'EXPERIENCE',
+          content:
+            `Senior Customer Operations leader overseeing global support operations, incident management, escalation governance, service delivery, and customer advocacy.
+            Owned operating model design, workflow automation, dashboards, KPIs, executive reporting, and service reliability across global teams.
+            Led managers and cross-functional change leadership for B2B SaaS and enterprise customers.`,
+        },
+        {
+          type: 'SKILLS',
+          content:
+            'Support operations, escalation governance, service delivery, customer advocacy, dashboards, KPIs, workflow automation, executive reporting, operating model design',
+        },
+      ],
+      jobTitle: 'Director of Global Support',
+    });
+
+    expect(result.debug.jobVectorsLength).toBeGreaterThan(0);
+    expect(result.debug.baselineVectors.length).toBeGreaterThan(0);
+    expect(result.rubric.dimensionPercents.support_operations_and_process_rigor).toBeGreaterThan(50);
+    expect(result.rubric.dimensionPercents.change_leadership_and_customer_advocacy).toBeGreaterThan(40);
+    expect(result.score).toBeGreaterThanOrEqual(80);
+  });
+
+  it('keeps empty evidence low even when the job title is senior', () => {
+    const result = scoreCxFitV2({
+      job: {
+        rawDescription: '',
+        normalizedResponsibilities: [],
+        normalizedRequirements: [],
+      },
+      baselineSections: [],
+      jobTitle: 'Director of Global Support',
+    });
+
+    expect(result.score).toBeLessThanOrEqual(20);
+  });
+
   it('gives bounded score credit to leadership-at-scale and transformation evidence', () => {
     const result = scoreCxFitV2({
       job: {

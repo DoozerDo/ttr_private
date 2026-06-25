@@ -1567,10 +1567,27 @@ const sampleScoringV2: CxFitV2Result = {
   });
 
   it('loads the canonical baseline for runFitAssessment without verifiedBaseline and scores once', async () => {
+    const selectedJob = {
+      ...defaultJobRecord,
+      id: 'job-1',
+      rawDescription:
+        'Lead support operations and partner with engineering on incident response. Own queue health, tooling, and customer escalation workflows.',
+      title: 'Director of Global Support',
+      company: 'ExampleCo',
+    };
+    jobRepository.findOne.mockResolvedValue(selectedJob as Job);
+
     await service.runFitAssessment('user-1', {
       baselineId: 'b-1',
       jobId: 'job-1',
       baselineVersion: 2,
+    });
+
+    expect(jobRepository.findOne).toHaveBeenCalledWith({
+      where: {
+        id: 'job-1',
+        userId: 'user-1',
+      },
     });
 
     const queryBuilder = baselineRepository.createQueryBuilder.mock.results[0]?.value;
@@ -1608,6 +1625,41 @@ const sampleScoringV2: CxFitV2Result = {
       ),
     ).toBe(false);
     expect(fitScoringServiceMock.scoreCxFitV2Authenticated).toHaveBeenCalledTimes(1);
+
+    const scoringInput =
+      (fitScoringServiceMock.scoreCxFitV2Authenticated as jest.Mock).mock.calls[0]?.[0];
+    expect(scoringInput).toEqual(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          baselineId: 'b-1',
+        }),
+      }),
+    );
+    expect(Array.isArray(scoringInput.baselineSections)).toBe(true);
+    expect(scoringInput.baselineSections.length).toBeGreaterThan(0);
+    expect(scoringInput.baselineSections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: BaselineSectionType.SUMMARY,
+          content: expect.stringContaining('Test'),
+        }),
+        expect.objectContaining({
+          type: BaselineSectionType.EXPERIENCE,
+          content: expect.stringContaining('ExampleCo'),
+        }),
+      ]),
+    );
+    expect(JSON.stringify(scoringInput.baselineSections)).toContain('Engineer');
+    expect(JSON.stringify(scoringInput.baselineSections)).toContain('2020-01 to 2021-01');
+    expect(JSON.stringify(scoringInput.baselineSections)).toContain('Led ops.');
+    expect(scoringInput.job).toEqual(
+      expect.objectContaining({
+        rawDescription: selectedJob.rawDescription,
+      }),
+    );
+    expect(scoringInput.jobTitle).toBe(selectedJob.title);
+    expect(scoringInput.job.normalizedResponsibilities.length).toBeGreaterThan(0);
+    expect(scoringInput.job.normalizedRequirements.length).toBeGreaterThanOrEqual(0);
   });
 
   it('blocks analysis.run when the latest Resume V2 is unusable even if fallback canonical baseline sections exist', async () => {
