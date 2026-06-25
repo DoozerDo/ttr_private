@@ -3257,6 +3257,115 @@ const sampleScoringV2: CxFitV2Result = {
       expect(result.score).toBe(sampleScoringV2.score);
     });
 
+    it('recomputes a persisted assessment without scoringV2 even when overallScore is zero', async () => {
+      const staleAssessment: FitAssessment = {
+        id: 'fit-no-v2-zero',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'b-1',
+        baselineVersion: baseline.version,
+        overallScore: 0,
+        verdict: FitAssessmentVerdict.CONSIDER,
+        dimensionScores: {
+          experienceAlignment: 0,
+          leadershipLevel: 0,
+          technicalPlatformFit: 0,
+          industryContext: 0,
+          strategicTacticalFit: 0,
+        },
+        strengths: [],
+        gaps: [],
+        complianceFlags: [],
+        scoringV2: null,
+        inputsHash: expectedHash,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      let savedAssessment: FitAssessment | null = null;
+      fitAssessmentRepository.save.mockImplementation(async (payload) => {
+        savedAssessment = {
+          ...payload,
+          id: 'fresh-fit-no-v2-zero',
+          createdAt: new Date(),
+        } as FitAssessment;
+        return savedAssessment;
+      });
+
+      fitAssessmentRepository.findOne.mockImplementation(({ where }) => {
+        if (where?.id) {
+          return Promise.resolve(savedAssessment);
+        }
+        return Promise.resolve(staleAssessment);
+      });
+
+      const result = await service.getLatestAssessmentForBaseline(
+        'user-1',
+        'job-1',
+        'b-1',
+      );
+
+      expect(scoreCxFitV2).toHaveBeenCalled();
+      expect(result.overallScore).toBe(sampleScoringV2.score);
+      expect(result.score).toBe(sampleScoringV2.score);
+      expect(result.scoring_v2?.scorerVersion).toBe(CX_FIT_SCORER_VERSION);
+    });
+
+    it('recomputes a persisted assessment without scoringV2 even when overallScore is nonzero', async () => {
+      const staleAssessment: FitAssessment = {
+        id: 'fit-no-v2-nonzero',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'b-1',
+        baselineVersion: baseline.version,
+        overallScore: 41,
+        verdict: FitAssessmentVerdict.CONSIDER,
+        dimensionScores: {
+          experienceAlignment: 41,
+          leadershipLevel: 41,
+          technicalPlatformFit: 41,
+          industryContext: 41,
+          strategicTacticalFit: 41,
+        },
+        strengths: [],
+        gaps: [],
+        complianceFlags: [],
+        scoringV2: null,
+        inputsHash: expectedHash,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      let savedAssessment: FitAssessment | null = null;
+      fitAssessmentRepository.save.mockImplementation(async (payload) => {
+        savedAssessment = {
+          ...payload,
+          id: 'fresh-fit-no-v2-nonzero',
+          createdAt: new Date(),
+        } as FitAssessment;
+        return savedAssessment;
+      });
+
+      fitAssessmentRepository.findOne.mockImplementation(({ where }) => {
+        if (where?.id) {
+          return Promise.resolve(savedAssessment);
+        }
+        return Promise.resolve(staleAssessment);
+      });
+
+      const result = await service.getLatestAssessmentForBaseline(
+        'user-1',
+        'job-1',
+        'b-1',
+      );
+
+      expect(scoreCxFitV2).toHaveBeenCalled();
+      expect(result.overallScore).toBe(sampleScoringV2.score);
+      expect(result.fit_score).toBe(sampleScoringV2.score);
+      expect(result.score).toBe(sampleScoringV2.score);
+      expect(result.scoring_v2?.scorerVersion).toBe(CX_FIT_SCORER_VERSION);
+    });
+
     it.skip('recomputes when the stored inputs hash is stale', async () => {
       const staleAssessment: FitAssessment = {
         id: 'fit-old',

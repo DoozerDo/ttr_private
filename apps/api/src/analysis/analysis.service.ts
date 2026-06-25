@@ -4554,6 +4554,10 @@ export class AnalysisService {
       return true;
     }
 
+    if (!assessment.scoringV2) {
+      return true;
+    }
+
     const scorerVersion =
       typeof assessment.scoringV2?.scorerVersion === 'string'
         ? assessment.scoringV2.scorerVersion.trim()
@@ -4562,7 +4566,7 @@ export class AnalysisService {
       return true;
     }
 
-    return !assessment.scoringV2 && assessment.overallScore === 0;
+    return false;
   }
 
   private async refreshToolingCoverageForAssessment(
@@ -4783,7 +4787,7 @@ export class AnalysisService {
       change_leadership_and_customer_advocacy:
         assessment.dimensionScores?.strategicTacticalFit ?? 0,
     };
-    const latestScore = assessment.scoringV2?.score ?? assessment.overallScore;
+    const latestScore = assessment.scoringV2?.score ?? null;
     return {
       ok: true,
       assessmentId: assessment.id,
