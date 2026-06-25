@@ -4566,7 +4566,7 @@ export class AnalysisService {
       return true;
     }
 
-    return false;
+    return typeof assessment.scoringV2.score !== 'number' || Number.isNaN(assessment.scoringV2.score);
   }
 
   private async refreshToolingCoverageForAssessment(

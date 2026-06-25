@@ -3366,6 +3366,63 @@ const sampleScoringV2: CxFitV2Result = {
       expect(result.scoring_v2?.scorerVersion).toBe(CX_FIT_SCORER_VERSION);
     });
 
+    it('recomputes a persisted assessment when scoringV2 exists but score is null', async () => {
+      const staleAssessment: FitAssessment = {
+        id: 'fit-null-score',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'b-1',
+        baselineVersion: baseline.version,
+        overallScore: 84,
+        verdict: FitAssessmentVerdict.APPLY,
+        dimensionScores: {
+          experienceAlignment: 84,
+          leadershipLevel: 84,
+          technicalPlatformFit: 84,
+          industryContext: 84,
+          strategicTacticalFit: 84,
+        },
+        strengths: [],
+        gaps: [],
+        complianceFlags: [],
+        scoringV2: {
+          ...sampleScoringV2,
+          score: null,
+        } as CxFitV2Result,
+        inputsHash: expectedHash,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      let savedAssessment: FitAssessment | null = null;
+      fitAssessmentRepository.save.mockImplementation(async (payload) => {
+        savedAssessment = {
+          ...payload,
+          id: 'fresh-fit-null-score',
+          createdAt: new Date(),
+        } as FitAssessment;
+        return savedAssessment;
+      });
+
+      fitAssessmentRepository.findOne.mockImplementation(({ where }) => {
+        if (where?.id) {
+          return Promise.resolve(savedAssessment);
+        }
+        return Promise.resolve(staleAssessment);
+      });
+
+      const result = await service.getLatestAssessmentForBaseline(
+        'user-1',
+        'job-1',
+        'b-1',
+      );
+
+      expect(scoreCxFitV2).toHaveBeenCalled();
+      expect(result.overallScore).toBe(sampleScoringV2.score);
+      expect(result.score).toBe(sampleScoringV2.score);
+      expect(result.scoring_v2?.score).toBe(sampleScoringV2.score);
+    });
+
     it.skip('recomputes when the stored inputs hash is stale', async () => {
       const staleAssessment: FitAssessment = {
         id: 'fit-old',
