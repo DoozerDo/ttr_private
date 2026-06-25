@@ -360,4 +360,62 @@ describe("target workflow UI", () => {
     expect(disabledGenerate).toBeDisabled();
     expect(screen.getByRole("link", { name: "Start Fit Review" })).toBeInTheDocument();
   });
+
+  it("shows a failure state instead of a generated score when the backend returns the zero-score invariant failure", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
+        return Promise.resolve(
+          createResponse(
+            {
+              error: {
+                code: "cx_fit_zero_score_invariant_failed",
+                message: "CX Fit scoring returned an impossible zero score for non-empty baseline and job inputs.",
+              },
+            },
+            false,
+            502,
+          ),
+        );
+      }
+      if (url === "/api/analysis/run") {
+        return Promise.resolve(
+          createResponse(
+            {
+              error: {
+                code: "cx_fit_zero_score_invariant_failed",
+                message: "CX Fit scoring returned an impossible zero score for non-empty baseline and job inputs.",
+              },
+            },
+            false,
+            502,
+          ),
+        );
+      }
+      if (url.includes("/api/analysis/history")) {
+        return Promise.resolve(
+          createResponse({
+            recentAnalyses: [],
+            alignmentPattern: { strongestAlignmentRoles: [], totalAnalyses: 0, averageScore: 0 },
+            badges: [],
+            generatedAt: new Date().toISOString(),
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock as typeof fetchMock);
+
+    render(<WorkspaceRunner baselineId="base-1" jobId="job-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Scoring failed")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(
+        "CX Fit scoring returned an impossible zero score for non-empty baseline and job inputs.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Score generated")).toBeNull();
+  });
 });

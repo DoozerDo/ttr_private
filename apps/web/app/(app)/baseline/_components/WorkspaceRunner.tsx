@@ -581,6 +581,21 @@ const extractErrorMessage = (payload: unknown): string | null => {
   return null;
 };
 
+function extractResultScore(payload: FitResultPayload | null): number | null {
+  if (!payload) return null;
+  if (typeof payload.score === "number") return payload.score;
+  if (typeof payload.fit_score === "number") return payload.fit_score;
+  return null;
+}
+
+function buildZeroScoreInvariantError() {
+  const error = new Error(
+    "CX Fit scoring returned an impossible zero score for non-empty baseline and job inputs.",
+  );
+  (error as Error & { code?: string }).code = "cx_fit_zero_score_invariant_failed";
+  return error;
+}
+
 const isMissingCanonicalRunError = (error: unknown, message?: string | null): boolean => {
   if (error && typeof error === "object") {
     const candidateCode = (error as { code?: unknown }).code;
@@ -1519,6 +1534,10 @@ const showInterruptionState =
         return;
       }
 
+      if (runState === "ok" && extractResultScore(nextResult) === 0) {
+        throw buildZeroScoreInvariantError();
+      }
+
       if (runState === "ok") {
         const canonicalAssessmentId =
           typeof nextResult.assessmentId === "string" ? nextResult.assessmentId.trim() : "";
@@ -1858,6 +1877,9 @@ const showInterruptionState =
       }
 
       const nextResult = payload as FitResultPayload;
+      if (extractResultScore(nextResult) === 0) {
+        throw buildZeroScoreInvariantError();
+      }
       if (process.env.NODE_ENV !== "production") {
         console.info("[target] load_last_run_completed", {
           baselineId,

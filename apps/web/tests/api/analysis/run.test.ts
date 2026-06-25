@@ -73,6 +73,42 @@ describe("POST /api/analysis/run", () => {
     await expect(response.json()).resolves.toEqual(payload);
   });
 
+  it("rejects a successful zero score with cx_fit_zero_score_invariant_failed", async () => {
+    const zeroResponse = new Response(
+      JSON.stringify({
+        assessmentId: "assessment-1",
+        jobId: "job",
+        baselineId: "baseline",
+        score: 0,
+        scoring_v2: {
+          scorerVersion: "2026-06-25-cx-fit-scoring-v2",
+          rubric: {
+            dimensionPercents: {
+              role_scope_and_seniority: 0,
+            },
+          },
+        },
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(zeroResponse)));
+
+    const response = await POST(createRequest("cookie-token"));
+    expect(response.status).toBe(502);
+
+    const payload = await response.json();
+    expect(payload).toMatchObject({
+      error: {
+        code: "cx_fit_zero_score_invariant_failed",
+        message: expect.stringContaining("impossible zero score"),
+      },
+    });
+  });
+
   it("accepts snake_case payloads (baseline_id/job_id) and forwards as baselineId/jobId", async () => {
     const jsonResponse = new Response(JSON.stringify({ score: 83 }), {
       status: 200,
