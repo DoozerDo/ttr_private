@@ -3435,6 +3435,17 @@ export class AnalysisService {
           'CX Fit v2 scoring produced incomplete results',
         );
       }
+      if (scoringV2.score === 0) {
+        this.assertNoImpossibleZeroScore({
+          baselineId: baseline.id,
+          jobId: job.id,
+          baselineSectionCount: sectionPayload.length,
+          baselineTextLength: baselineTextCharsScored,
+          jobTextLength: jobTextCharsScored,
+          scorerVersion: scoringV2.scorerVersion ?? null,
+          categoryBreakdown: scoringV2.rubric.dimensionPercents,
+        });
+      }
       logStageLifecycle("generation_completed", currentStage, {
         score: scoringV2.score,
       });
@@ -4569,6 +4580,42 @@ export class AnalysisService {
     return typeof assessment.scoringV2.score !== 'number' || Number.isNaN(assessment.scoringV2.score);
   }
 
+  private assertNoImpossibleZeroScore(params: {
+    baselineId: string | null;
+    jobId: string | null;
+    baselineSectionCount: number;
+    baselineTextLength: number;
+    jobTextLength: number;
+    scorerVersion: string | null;
+    categoryBreakdown?: Record<string, number> | null;
+  }) {
+    if (params.baselineSectionCount <= 0) {
+      return;
+    }
+    if (params.baselineTextLength <= 0 || params.jobTextLength <= 0) {
+      return;
+    }
+
+    throw new InternalServerErrorException({
+      error: {
+        code: 'cx_fit_zero_score_invariant_failed',
+        message:
+          'CX Fit scoring returned an impossible zero score for non-empty baseline and job inputs.',
+        details: {
+          baselineId: params.baselineId,
+          jobId: params.jobId,
+          baselineSectionCount: params.baselineSectionCount,
+          baselineTextLength: params.baselineTextLength,
+          jobTextLength: params.jobTextLength,
+          scorerVersion: params.scorerVersion,
+          ...(params.categoryBreakdown
+            ? { categoryBreakdown: params.categoryBreakdown }
+            : {}),
+        },
+      },
+    });
+  }
+
   private async refreshToolingCoverageForAssessment(
     assessment: FitAssessment,
   ): Promise<CxFitV2Result | null> {
@@ -4727,6 +4774,24 @@ export class AnalysisService {
       );
     }
 
+    if (assessment.scoringV2?.score === 0) {
+      const baselineTextLength = getCharCount(
+        (baseline.sections ?? [])
+          .map((section) => section.content ?? '')
+          .join('\n'),
+      );
+      const jobTextLength = getCharCount(job.rawDescription ?? '');
+      this.assertNoImpossibleZeroScore({
+        baselineId: assessment.baselineId,
+        jobId: job.id,
+        baselineSectionCount: baseline.sections?.length ?? 0,
+        baselineTextLength,
+        jobTextLength,
+        scorerVersion: assessment.scoringV2.scorerVersion ?? null,
+        categoryBreakdown: assessment.scoringV2.rubric?.dimensionPercents ?? null,
+      });
+    }
+
     if (this.isDevMode()) {
       this.logger.log(
         `[fit-score] latest_assessment_reused jobId=${jobId} baselineId=${assessment.baselineId} assessmentId=${assessment.id} score=${assessment.overallScore}`,
@@ -4872,6 +4937,24 @@ export class AnalysisService {
         baselineId,
         baselineVersion,
       );
+    }
+
+    if (assessment.scoringV2?.score === 0) {
+      const baselineTextLength = getCharCount(
+        (baseline.sections ?? [])
+          .map((section) => section.content ?? '')
+          .join('\n'),
+      );
+      const jobTextLength = getCharCount(job.rawDescription ?? '');
+      this.assertNoImpossibleZeroScore({
+        baselineId: assessment.baselineId,
+        jobId: job.id,
+        baselineSectionCount: baseline.sections?.length ?? 0,
+        baselineTextLength,
+        jobTextLength,
+        scorerVersion: assessment.scoringV2.scorerVersion ?? null,
+        categoryBreakdown: assessment.scoringV2.rubric?.dimensionPercents ?? null,
+      });
     }
 
     if (this.isDevMode()) {

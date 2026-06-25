@@ -3475,6 +3475,105 @@ const sampleScoringV2: CxFitV2Result = {
       expect(result.scoring_v2?.score).toBe(sampleScoringV2.score);
     });
 
+    it('throws an explicit zero-score invariant failure when runFitAssessment returns 0 for non-empty inputs', async () => {
+      (scoreCxFitV2 as unknown as jest.Mock).mockReturnValueOnce({
+        ...sampleScoringV2,
+        score: 0,
+        rubric: {
+          ...sampleScoringV2.rubric,
+          dimensionPercents: {
+            ...sampleScoringV2.rubric.dimensionPercents,
+          },
+        },
+      });
+
+      await expect(
+        service.runFitAssessment('user-1', {
+          baselineId: 'b-1',
+          jobId: 'job-1',
+        }),
+      ).rejects.toMatchObject({
+        response: {
+          error: {
+            code: 'cx_fit_zero_score_invariant_failed',
+            details: {
+              baselineId: 'b-1',
+              jobId: 'job-1',
+              baselineSectionCount: expect.any(Number),
+              baselineTextLength: expect.any(Number),
+              jobTextLength: expect.any(Number),
+              scorerVersion: CX_FIT_SCORER_VERSION,
+            },
+          },
+        },
+      });
+
+      expect(fitAssessmentRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('throws an explicit zero-score invariant failure for reused latest assessments with non-empty baseline and job text', async () => {
+      const zeroScoringV2: CxFitV2Result = {
+        ...sampleScoringV2,
+        score: 0,
+        rubric: {
+          ...sampleScoringV2.rubric,
+          dimensionPercents: {
+            ...sampleScoringV2.rubric.dimensionPercents,
+          },
+        },
+      };
+      const staleAssessment: FitAssessment = {
+        id: 'fit-zero',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'b-1',
+        baselineVersion: baseline.version,
+        overallScore: 0,
+        verdict: FitAssessmentVerdict.CONSIDER,
+        dimensionScores: {
+          experienceAlignment: 0,
+          leadershipLevel: 0,
+          technicalPlatformFit: 0,
+          industryContext: 0,
+          strategicTacticalFit: 0,
+        },
+        strengths: [],
+        gaps: [],
+        complianceFlags: [],
+        scoringV2: zeroScoringV2,
+        inputsHash: expectedHash,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      fitAssessmentRepository.findOne.mockImplementation(({ where }) => {
+        if (where?.id) {
+          return Promise.resolve(staleAssessment);
+        }
+        return Promise.resolve(staleAssessment);
+      });
+
+      await expect(
+        service.getLatestAssessmentForBaseline('user-1', 'job-1', 'b-1'),
+      ).rejects.toMatchObject({
+        response: {
+          error: {
+            code: 'cx_fit_zero_score_invariant_failed',
+            details: {
+              baselineId: 'b-1',
+              jobId: 'job-1',
+              baselineSectionCount: expect.any(Number),
+              baselineTextLength: expect.any(Number),
+              jobTextLength: expect.any(Number),
+              scorerVersion: CX_FIT_SCORER_VERSION,
+            },
+          },
+        },
+      });
+
+      expect(scoreCxFitV2).not.toHaveBeenCalled();
+    });
+
     it.skip('recomputes when the stored inputs hash is stale', async () => {
       const staleAssessment: FitAssessment = {
         id: 'fit-old',
