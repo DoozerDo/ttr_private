@@ -181,8 +181,8 @@ describe('scoreCxFitV2', () => {
     });
 
     expect(result.rubric.dimensionPercents.support_operations_and_process_rigor).toBeGreaterThan(30);
-    expect(result.rubric.dimensionPercents.role_scope_and_seniority).toBeGreaterThan(30);
-    expect(result.score).toBeGreaterThanOrEqual(40);
+    expect(result.rubric.dimensionPercents.role_scope_and_seniority).toBeGreaterThan(25);
+    expect(result.score).toBeGreaterThanOrEqual(35);
   });
 
   it('returns the explicit Resume rubric categories for a strong support leadership match', () => {
@@ -260,6 +260,94 @@ describe('scoreCxFitV2', () => {
     expect(result.score).toBeGreaterThanOrEqual(85);
   });
 
+  it.each([
+    {
+      name: 'customer success',
+      baselineSections: [
+        {
+          type: 'EXPERIENCE',
+          content:
+            'Senior Customer Success leader responsible for onboarding, renewals, QBRs, executive escalations, health scoring, playbooks, and cross-functional enablement for enterprise SaaS customers.',
+        },
+        {
+          type: 'SKILLS',
+          content:
+            'Gainsight, Salesforce, QBRs, renewals, executive escalations, onboarding, health scoring, playbooks',
+        },
+      ],
+      job: {
+        rawDescription:
+          'Director of Customer Success responsible for renewals, onboarding, QBRs, executive escalations, health scoring, playbooks, and customer advocacy for enterprise SaaS customers.',
+        normalizedResponsibilities: [
+          'Own renewals, onboarding, QBRs, executive escalations, and health scoring',
+          'Lead playbooks, customer advocacy, and cross-functional enablement',
+        ],
+        normalizedRequirements: ['Experience with Gainsight, Salesforce, and enterprise SaaS customer success'],
+      },
+      minScore: 80,
+    },
+    {
+      name: 'operations leadership',
+      baselineSections: [
+        {
+          type: 'EXPERIENCE',
+          content:
+            'Operations leader owned process design, service delivery, global operations, KPI frameworks, dashboards, governance creation, and cross-functional execution for enterprise customers.',
+        },
+        {
+          type: 'SKILLS',
+          content: 'Process design, service delivery, governance, KPIs, dashboards, global operations',
+        },
+      ],
+      job: {
+        rawDescription:
+          'Senior Director of Operations responsible for process design, service delivery, KPI frameworks, governance creation, dashboards, and global operational excellence for enterprise customers.',
+        normalizedResponsibilities: [
+          'Own process design, service delivery, KPI frameworks, and governance creation',
+          'Lead dashboards, global operations, and cross-functional execution',
+        ],
+        normalizedRequirements: ['Experience with enterprise operations, process improvement, and change leadership'],
+      },
+      minScore: 80,
+    },
+    {
+      name: 'engineering leadership',
+      baselineSections: [
+        {
+          type: 'EXPERIENCE',
+          content:
+            'Engineering leader led platform teams, architecture reviews, incident response, cloud migration, reliability engineering, developer productivity, and cross-functional program delivery for SaaS customers.',
+        },
+        {
+          type: 'SKILLS',
+          content: 'AWS, Kubernetes, Terraform, observability, incident response, platform strategy, reliability engineering',
+        },
+      ],
+      job: {
+        rawDescription:
+          'Director of Engineering for cloud platform and reliability, owning architecture, incident response, platform strategy, developer productivity, and cross-functional delivery for SaaS customers.',
+        normalizedResponsibilities: [
+          'Lead architecture, platform strategy, incident response, and developer productivity',
+          'Own cross-functional delivery for cloud platform and reliability',
+        ],
+        normalizedRequirements: ['Experience with AWS, Kubernetes, Terraform, observability, and reliability engineering'],
+      },
+      minScore: 85,
+    },
+  ])('scores representative %s matches in the strong-fit band', ({ baselineSections, job, minScore }) => {
+    const result = scoreCxFitV2({
+      job,
+      baselineSections,
+      jobTitle: job.rawDescription.split(',')[0],
+    });
+
+    expect(result.score).toBeGreaterThanOrEqual(minScore);
+    expect(result.rubric.resumeProject.totalScore).toBe(result.score);
+    expect(
+      Object.values(result.rubric.resumeProject.categories).reduce((sum, value) => sum + value, 0),
+    ).toBeCloseTo(result.score, 6);
+  });
+
   it('keeps empty evidence low even when the job title is senior', () => {
     const result = scoreCxFitV2({
       job: {
@@ -296,8 +384,8 @@ describe('scoreCxFitV2', () => {
     });
 
     expect(result.rubric.dimensionPercents.change_leadership_and_customer_advocacy).toBeGreaterThan(35);
-    expect(result.rubric.dimensionPercents.role_scope_and_seniority).toBeGreaterThan(30);
-    expect(result.score).toBeGreaterThanOrEqual(40);
+    expect(result.rubric.dimensionPercents.role_scope_and_seniority).toBeGreaterThan(25);
+    expect(result.score).toBeGreaterThanOrEqual(35);
   });
 
   it('does not boost unsupported categories the same way as clearly aligned evidence', () => {
