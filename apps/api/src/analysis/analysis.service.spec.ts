@@ -2392,6 +2392,155 @@ const sampleScoringV2: CxFitV2Result = {
     expect(result.scoringReliability).toBe('ok');
   });
 
+  it('rehydrates scoring from parsedJson when resumeV2Json is sparse', async () => {
+    const sparseResumeV2 = {
+      heading: { name: 'Test User', contactLine: 'test@example.com' },
+      summary: 'Test',
+      experience: [
+        {
+          company: 'ExampleCo',
+          roleTitle: 'Support Operations Manager',
+          startDate: '2021-01',
+          endDate: '2021-12',
+          bullets: ['Led ops.'],
+        },
+      ],
+    };
+
+    const richParsedJson = {
+      baseline_id: '11111111-1111-4111-8111-111111111111',
+      source_file_id: '11111111-1111-4111-8111-111111111112',
+      source_format: 'pdf',
+      ingested_at: new Date().toISOString(),
+      schema_version: 'baseline_schema_v1',
+      user_verified: true,
+      identity: {
+        full_name: 'Test User',
+        summary: 'Seasoned support operations and platform leader',
+        current_title: 'Director of Support Operations',
+        current_company: 'ExampleCo',
+        location: 'Remote',
+      },
+      experience: [
+        {
+          company: 'ExampleCo',
+          role: 'Director of Support Operations',
+          company_name: 'ExampleCo',
+          role_title: 'Director of Support Operations',
+          start_date: '2020-01',
+          end_date: '2024-03',
+          evidence: [{ id: 'e-1', text: 'Led support operations for a global SaaS team.', metrics: [], tags: [] }],
+          details_text:
+            'Led support operations for a global SaaS team.\nBuilt incident response runbooks and staffing workflows.\nPartnered cross-functionally to improve SLA adherence.',
+        },
+        {
+          company: 'ExampleCo',
+          role: 'Support Operations Manager',
+          company_name: 'ExampleCo',
+          role_title: 'Support Operations Manager',
+          start_date: '2018-01',
+          end_date: '2020-01',
+          evidence: [{ id: 'e-2', text: 'Scaled queue health and reporting.', metrics: [], tags: [] }],
+          details_text:
+            'Scaled queue health and reporting.\nAutomated recurring issue triage.\nSupported executive escalations and post-incident follow-up.',
+        },
+      ],
+      education: [],
+      skills: [{ name: 'ServiceNow', category: null }],
+      people_leadership: {
+        direct_reports: 12,
+        managers_led: true,
+        global_teams: true,
+      },
+      operational_ownership: {
+        functions_owned: ['support operations', 'incident management'],
+        process_design: true,
+        process_scaling: true,
+      },
+      tooling_and_platforms: {
+        tools: ['ServiceNow', 'Jira'],
+        ownership_level: 'owned',
+      },
+      cross_functional_partnership: {
+        product: true,
+        engineering: true,
+        sales_cs: true,
+        executive: true,
+      },
+      customer_advocacy: {
+        executive_escalations: true,
+        voice_of_customer: true,
+        post_incident_rca: true,
+      },
+      scale_and_scope: {
+        customer_segment: 'enterprise',
+        geo_scope: 'global',
+        org_stage: 'growth',
+      },
+      metrics_and_outcomes: {
+        metrics_present: true,
+        metrics: ['Reduced MTTR by 25%'],
+      },
+      skills_and_tools: {
+        tools: ['ServiceNow', 'Jira'],
+        methodologies: ['ITIL'],
+        domains: ['SaaS'],
+      },
+      system_generated_read_only: {
+        missing_fields: [],
+        ambiguity_flags: [],
+        low_confidence_extractions: [],
+      },
+    };
+
+    const sparseParsedRecord = {
+      id: 'parsed-rich-1',
+      baselineId: 'b-1',
+      createdAt: new Date(),
+      parsedJson: richParsedJson,
+      resumeV2Json: sparseResumeV2,
+      flagsJson: {
+        reviewState: {
+          verified: true,
+        },
+      },
+    } as any;
+
+    baselineVersionRepository.findOne.mockResolvedValueOnce({
+      ...baselineVersion,
+      baseline: {
+        ...baseline,
+        parsedRecords: [sparseParsedRecord],
+      } as any,
+    });
+    baselineRepository.findOne.mockResolvedValueOnce({
+      ...baseline,
+      parsedRecords: [sparseParsedRecord],
+      sections: baselineSections,
+    });
+    fitScoringServiceMock.scoreCxFitV2Authenticated.mockClear();
+
+    const result = await service.scoreCompatibility('user-1', {
+      baseline_version_id: 'bv-1',
+      job: { raw_jd_text: 'Lead support operations and process rigor for a scaling SaaS team.' },
+      debug: true,
+    });
+
+    expect(fitScoringServiceMock.scoreCxFitV2Authenticated).toHaveBeenCalled();
+    const scorerInput = fitScoringServiceMock.scoreCxFitV2Authenticated.mock.calls[0][0];
+    expect(Array.isArray(scorerInput.baselineSections)).toBe(true);
+    expect(scorerInput.baselineSections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: expect.any(String),
+          content: expect.stringContaining('Director of Support Operations'),
+        }),
+      ]),
+    );
+    expect(result.scoringProof?.baselineTextCharsScored).toBeGreaterThan(332);
+    expect(result.debug?.baselineSelectedSectionCount).toBeGreaterThan(0);
+  });
+
   it('blocks analysis.run when Resume V2 is invalid even if fallback canonical baseline sections exist', async () => {
     // Force parsed canonical baseline JSON to exist but ResumeV2 to be unusable.
     baselineRepository.findOne.mockResolvedValue({

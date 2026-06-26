@@ -74,7 +74,7 @@ describe('selectBaselineTextForScoring', () => {
     expect(result.includedBaselineChars).toEqual(canonicalChars);
     expect(result.originalBaselineChars).toEqual(canonicalChars);
     expect(result.source).toBe('baseline_parsed');
-    expect(result.selectedSectionCount).toBe(0);
+    expect(result.selectedSectionCount).toBe(1);
     expect(result.selectedSectionGateActive).toBe(false);
   });
 });

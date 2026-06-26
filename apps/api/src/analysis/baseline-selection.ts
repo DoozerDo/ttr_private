@@ -90,7 +90,7 @@ export function selectBaselineTextForScoring({
     normalizedBaselineText = canonicalText;
     includedBaselineChars = getCharCount(canonicalText);
     source = 'baseline_parsed';
-    selectedSectionCount = 0;
+    selectedSectionCount = sectionsForScoring.length;
     originalChars = includedBaselineChars;
     selectedSectionIds = [];
     selectedSectionGateActive = false;

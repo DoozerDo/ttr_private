@@ -1828,7 +1828,7 @@ export class AnalysisService {
     const resumeV2 = (latest as any).resumeV2Json ?? null;
     if (options?.requireResumeV2Authority) {
       assertUsableResumeV2(resumeV2);
-      const canonical = this.buildCanonicalBaselineFromResumeV2(resumeV2);
+      const canonical = BaselineSchema.parse(latest.parsedJson);
       return { canonical, fallbackUsed: false };
     }
 

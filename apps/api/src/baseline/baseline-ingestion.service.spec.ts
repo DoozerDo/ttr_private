@@ -392,4 +392,101 @@ describe('BaselineIngestionService', () => {
     expect(evidenceTexts).toContain('Led incident response for Sev1 and Sev2 outages');
     expect(evidenceTexts).toContain('Improved reporting, routing, and workflow automation');
   });
+
+  it('produces materially equivalent canonical baselines for the same supported resume text in docx and pdf source formats', async () => {
+    const rawText = [
+      'Alex Candidate',
+      'alex.candidate@example.com | Seattle, WA | (555) 555-1234',
+      '',
+      'SUMMARY',
+      'Support operations leader with verified impact across incident management, automation, and executive reporting.',
+      '',
+      'EXPERIENCE',
+      'Acme Support | Senior Support Operations Manager | 2021 - Present',
+      '- Led incident response for Sev1 and Sev2 outages and reduced escalation friction.',
+      '- Built runbooks, routing automation, and reporting dashboards that improved SLA adherence and lowered MTTR.',
+      '',
+      'Beta Support | Support Operations Manager | 2018 - 2021',
+      '- Owned support queue health, staffing tradeoffs, and recurring issue follow-up.',
+      '- Improved reporting, routing, and workflow automation to reduce manual toil.',
+      '',
+      'SKILLS',
+      'Jira Service Management, ServiceNow, incident response, automation',
+    ].join('\n');
+
+    const docxResult = await service.ingestFromText(rawText, 'docx');
+    const pdfResult = await service.ingestFromText(rawText, 'pdf');
+
+    const summarize = (result: Awaited<ReturnType<typeof service.ingestFromText>>) => ({
+      sourceFormat: result.sourceFormat,
+      identity: {
+        fullName: result.canonical.identity.full_name,
+        summary: result.canonical.identity.summary,
+        currentTitle: result.canonical.identity.current_title,
+        currentCompany: result.canonical.identity.current_company,
+      },
+      experience: result.canonical.experience.map((entry) => ({
+        company: entry.company,
+        role: entry.role,
+        start_date: entry.start_date,
+        end_date: entry.end_date,
+        evidenceTexts: entry.evidence.map((item) => item.text),
+      })),
+      skillsAndTools: {
+        tools: result.canonical.skills_and_tools.tools,
+        methodologies: result.canonical.skills_and_tools.methodologies,
+        domains: result.canonical.skills_and_tools.domains,
+      },
+      trace: {
+        extractedText: result.trace?.extractedText,
+        parserOutput: result.trace?.parserOutput,
+        baselineIngestion: result.trace?.baselineIngestion,
+        canonicalParsedBaseline: result.trace?.canonicalParsedBaseline,
+      },
+    });
+
+    expect(summarize(docxResult)).toEqual(
+      expect.objectContaining({
+        sourceFormat: 'docx',
+        identity: expect.objectContaining({
+          fullName: 'Alex Candidate',
+          currentTitle: 'Senior Support Operations Manager',
+          currentCompany: 'Acme Support',
+        }),
+      }),
+    );
+    expect(summarize(pdfResult)).toEqual(
+      expect.objectContaining({
+        sourceFormat: 'pdf',
+        identity: expect.objectContaining({
+          fullName: 'Alex Candidate',
+          currentTitle: 'Senior Support Operations Manager',
+          currentCompany: 'Acme Support',
+        }),
+      }),
+    );
+
+    expect(summarize(pdfResult)).toEqual(
+      expect.objectContaining({
+        identity: summarize(docxResult).identity,
+        experience: summarize(docxResult).experience,
+        skillsAndTools: summarize(docxResult).skillsAndTools,
+        trace: expect.objectContaining({
+          parserOutput: expect.objectContaining({
+            sectionTypes: summarize(docxResult).trace.parserOutput?.sectionTypes,
+            experienceSectionCount: summarize(docxResult).trace.parserOutput?.experienceSectionCount,
+          }),
+          baselineIngestion: expect.objectContaining({
+            candidateBlockCount: summarize(docxResult).trace.baselineIngestion?.candidateBlockCount,
+            mappedExperienceCount: summarize(docxResult).trace.baselineIngestion?.mappedExperienceCount,
+            rejectedBlockCount: summarize(docxResult).trace.baselineIngestion?.rejectedBlockCount,
+          }),
+          canonicalParsedBaseline: expect.objectContaining({
+            experienceCount: summarize(docxResult).trace.canonicalParsedBaseline?.experienceCount,
+            thematicFieldsPresent: summarize(docxResult).trace.canonicalParsedBaseline?.thematicFieldsPresent,
+          }),
+        }),
+      }),
+    );
+  });
 });
