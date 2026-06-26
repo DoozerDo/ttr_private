@@ -2,6 +2,7 @@ import { Controller, Get } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { CX_FIT_SCORER_VERSION } from './analysis/cx-fit-scoring-v2';
 
 const SERVICE_STARTED_AT = new Date();
 
@@ -47,6 +48,13 @@ export class AppController {
     return null;
   }
 
+  private getScoringMetadata() {
+    return {
+      scorerVersion: CX_FIT_SCORER_VERSION,
+      resumeProjectEnabled: true,
+    };
+  }
+
   private getAppVersion(): string {
     const configuredVersion = this.config.get<string>('APP_VERSION');
     if (configuredVersion && configuredVersion.trim()) {
@@ -88,16 +96,24 @@ export class AppController {
   }
 
   private getHealthPayload() {
+    const build = {
+      marker: 'authority-gate-build-check-20260621',
+      gitCommit: this.getGitCommit(),
+      commitSha: this.getGitCommit(),
+      buildTimestamp: this.getBuildTimestamp(),
+      appVersion: this.getAppVersion(),
+      ...this.getScoringMetadata(),
+    };
+
     return {
       status: 'ok',
       service: 'api',
       timestamp: this.getTimestamp(),
-      build: {
-        marker: 'authority-gate-build-check-20260621',
-        gitCommit: this.getGitCommit(),
-        buildTimestamp: this.getBuildTimestamp(),
-        appVersion: this.getAppVersion(),
-      },
+      gitSha: this.getGitCommit() ?? 'unknown',
+      commitSha: this.getGitCommit() ?? 'unknown',
+      scorerVersion: CX_FIT_SCORER_VERSION,
+      resumeProjectEnabled: true,
+      build,
     };
   }
 
@@ -115,23 +131,29 @@ export class AppController {
   getVersion() {
     const version = this.config.get<string>('APP_VERSION') ?? 'unknown';
     const runtime = this.getRuntimeMeta();
+    const build = {
+      marker: 'authority-gate-build-check-20260621',
+      gitCommit: this.getGitCommit(),
+      commitSha: this.getGitCommit(),
+      buildTimestamp: this.getBuildTimestamp(),
+      appVersion: this.getAppVersion(),
+      ...this.getScoringMetadata(),
+    };
 
     return {
       version,
       appVersion: this.getAppVersion(),
       gitSha: this.getGitCommit() ?? 'unknown',
+      commitSha: this.getGitCommit() ?? 'unknown',
+      scorerVersion: CX_FIT_SCORER_VERSION,
+      resumeProjectEnabled: true,
       env: this.config.get<string>('NODE_ENV') ?? 'development',
       port: this.config.get<number>('PORT') ?? 3001,
       startedAt: runtime.startedAt,
       uptimeSeconds: runtime.uptimeSeconds,
       railway: this.getRailwayMeta(),
       timestamp: this.getTimestamp(),
-      build: {
-        marker: 'authority-gate-build-check-20260621',
-        gitCommit: this.getGitCommit(),
-        buildTimestamp: this.getBuildTimestamp(),
-        appVersion: this.getAppVersion(),
-      },
+      build,
     };
   }
 
@@ -139,6 +161,14 @@ export class AppController {
   getStatus() {
     const version = this.config.get<string>('APP_VERSION') ?? 'unknown';
     const runtime = this.getRuntimeMeta();
+    const build = {
+      marker: 'authority-gate-build-check-20260621',
+      gitCommit: this.getGitCommit(),
+      commitSha: this.getGitCommit(),
+      buildTimestamp: this.getBuildTimestamp(),
+      appVersion: this.getAppVersion(),
+      ...this.getScoringMetadata(),
+    };
 
     return {
       status: 'ok',
@@ -146,18 +176,16 @@ export class AppController {
       version,
       appVersion: this.getAppVersion(),
       gitSha: this.getGitCommit() ?? 'unknown',
+      commitSha: this.getGitCommit() ?? 'unknown',
+      scorerVersion: CX_FIT_SCORER_VERSION,
+      resumeProjectEnabled: true,
       env: this.config.get<string>('NODE_ENV') ?? 'development',
       port: this.config.get<number>('PORT') ?? 3001,
       startedAt: runtime.startedAt,
       uptimeSeconds: runtime.uptimeSeconds,
       railway: this.getRailwayMeta(),
       timestamp: this.getTimestamp(),
-      build: {
-        marker: 'authority-gate-build-check-20260621',
-        gitCommit: this.getGitCommit(),
-        buildTimestamp: this.getBuildTimestamp(),
-        appVersion: this.getAppVersion(),
-      },
+      build,
     };
   }
 }

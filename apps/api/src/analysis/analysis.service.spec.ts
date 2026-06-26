@@ -301,23 +301,23 @@ const sampleScoringV2: CxFitV2Result = {
       },
       categories: {
         experience_alignment: 25,
-        leadership_level: 23,
-        technical_and_platform_fit: 18,
-        industry_and_context_fit: 14,
+        leadership_level: 20,
+        technical_and_platform_fit: 20,
+        industry_and_context_fit: 15,
         strategic_vs_tactical_balance: 10,
       },
       categoryPercents: {
         experience_alignment: 83.3333333333,
-        leadership_level: 115,
-        technical_and_platform_fit: 90,
-        industry_and_context_fit: 93.3333333333,
+        leadership_level: 100,
+        technical_and_platform_fit: 100,
+        industry_and_context_fit: 100,
         strategic_vs_tactical_balance: 66.6666666667,
       },
       categoryPoints: {
         experience_alignment: 25,
-        leadership_level: 23,
-        technical_and_platform_fit: 18,
-        industry_and_context_fit: 14,
+        leadership_level: 20,
+        technical_and_platform_fit: 20,
+        industry_and_context_fit: 15,
         strategic_vs_tactical_balance: 10,
       },
       subtotal: 90,
@@ -3588,6 +3588,9 @@ const sampleScoringV2: CxFitV2Result = {
       expect(result.overallScore).toBe(90);
       expect(result.scoring_v2?.score).toBe(90);
       expect(result.scoring_v2?.rubric.resumeProject.totalScore).toBe(90);
+      expect(
+        Object.values(result.breakdown).reduce((sum, value) => sum + value, 0),
+      ).toBe(90);
       expect(fitAssessmentRepository.save).toHaveBeenCalledWith(
         expect.objectContaining({
           overallScore: 90,

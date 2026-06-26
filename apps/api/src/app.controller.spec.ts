@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { AppController } from './app.controller';
+import { CX_FIT_SCORER_VERSION } from './analysis/cx-fit-scoring-v2';
 
 describe('AppController', () => {
   let appController: AppController;
@@ -38,9 +39,16 @@ describe('AppController', () => {
     expect(response.build).toMatchObject({
       marker: 'authority-gate-build-check-20260621',
       gitCommit: null,
+      commitSha: null,
       buildTimestamp: null,
       appVersion: expect.anything(),
+      scorerVersion: CX_FIT_SCORER_VERSION,
+      resumeProjectEnabled: true,
     });
+    expect(response.gitSha).toBe('unknown');
+    expect(response.commitSha).toBe('unknown');
+    expect(response.scorerVersion).toBe(CX_FIT_SCORER_VERSION);
+    expect(response.resumeProjectEnabled).toBe(true);
   });
 
   it('returns a root health payload', () => {
@@ -61,14 +69,20 @@ describe('AppController', () => {
         timestamp: expect.any(String),
         appVersion: expect.anything(),
         gitSha: expect.anything(),
+        commitSha: expect.anything(),
+        scorerVersion: CX_FIT_SCORER_VERSION,
+        resumeProjectEnabled: true,
         startedAt: expect.any(String),
         uptimeSeconds: expect.any(Number),
         railway: expect.any(Object),
         build: expect.objectContaining({
           marker: 'authority-gate-build-check-20260621',
           gitCommit: null,
+          commitSha: null,
           buildTimestamp: null,
           appVersion: expect.anything(),
+          scorerVersion: CX_FIT_SCORER_VERSION,
+          resumeProjectEnabled: true,
         }),
       }),
     );
@@ -82,7 +96,11 @@ describe('AppController', () => {
     const response = appController.getVersion();
 
     expect(response.gitSha).toBe('test-commit-sha');
+    expect(response.commitSha).toBe('test-commit-sha');
     expect(response.build.gitCommit).toBe('test-commit-sha');
+    expect(response.build.commitSha).toBe('test-commit-sha');
+    expect(response.build.scorerVersion).toBe(CX_FIT_SCORER_VERSION);
+    expect(response.build.resumeProjectEnabled).toBe(true);
   });
 
   it('returns combined status payload', () => {
@@ -98,14 +116,20 @@ describe('AppController', () => {
         timestamp: expect.any(String),
         appVersion: expect.anything(),
         gitSha: expect.anything(),
+        commitSha: expect.anything(),
+        scorerVersion: CX_FIT_SCORER_VERSION,
+        resumeProjectEnabled: true,
         startedAt: expect.any(String),
         uptimeSeconds: expect.any(Number),
         railway: expect.any(Object),
         build: expect.objectContaining({
           marker: 'authority-gate-build-check-20260621',
           gitCommit: null,
+          commitSha: null,
           buildTimestamp: null,
           appVersion: expect.anything(),
+          scorerVersion: CX_FIT_SCORER_VERSION,
+          resumeProjectEnabled: true,
         }),
       }),
     );

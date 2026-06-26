@@ -833,6 +833,32 @@ export class AnalysisService {
   }
 
   private buildScoreBreakdown(assessment: FitAssessment): ScoreBreakdown {
+    const resumeProject = assessment.scoringV2?.rubric?.resumeProject;
+    if (resumeProject) {
+      const source = resumeProject.categoryPoints ?? resumeProject.categories;
+      const dimensions = this.scoreBreakdownMeta.map((entry) => {
+        const raw = {
+          role_scope_and_seniority: source.experience_alignment,
+          support_operations_and_process_rigor: source.leadership_level,
+          tooling_and_platform_experience: source.technical_and_platform_fit,
+          domain_and_business_context: source.industry_and_context_fit,
+          change_leadership_and_customer_advocacy:
+            source.strategic_vs_tactical_balance,
+        }[entry.key];
+        const score = this.roundToTenth(typeof raw === 'number' ? raw : 0);
+        return {
+          key: entry.key,
+          label: entry.label,
+          score: Math.max(0, Math.min(entry.weight, score)),
+          weight: entry.weight,
+        };
+      });
+      const total_score = this.roundToTenth(
+        dimensions.reduce((sum, dimension) => sum + dimension.score, 0),
+      );
+      return { total_score, dimensions };
+    }
+
     const dimensionPoints = assessment.scoringV2?.rubric?.dimensionPoints;
     if (dimensionPoints) {
       const dimensions = this.scoreBreakdownMeta.map((entry) => {
@@ -945,6 +971,28 @@ export class AnalysisService {
       categoryPercents: resumeProject.categoryPercents,
       subtotal: resumeProject.subtotal,
       rounding: resumeProject.rounding,
+    };
+  }
+
+  private buildResumeProjectCompatibilityBreakdown(
+    scoringV2?: CxFitV2Result | null,
+  ): {
+    experience_alignment: number;
+    leadership_level: number;
+    technical_platform_fit: number;
+    industry_context: number;
+    strategic_vs_tactical: number;
+  } | null {
+    const resumeProject = scoringV2?.rubric?.resumeProject;
+    if (!resumeProject) return null;
+
+    const source = resumeProject.categoryPoints ?? resumeProject.categories;
+    return {
+      experience_alignment: this.clampPercent(source.experience_alignment ?? 0),
+      leadership_level: this.clampPercent(source.leadership_level ?? 0),
+      technical_platform_fit: this.clampPercent(source.technical_and_platform_fit ?? 0),
+      industry_context: this.clampPercent(source.industry_and_context_fit ?? 0),
+      strategic_vs_tactical: this.clampPercent(source.strategic_vs_tactical_balance ?? 0),
     };
   }
 
@@ -3514,7 +3562,7 @@ export class AnalysisService {
           baselineTextLength: baselineTextCharsScored,
           jobTextLength: jobTextCharsScored,
           scorerVersion: scoringV2.scorerVersion ?? null,
-          categoryBreakdown: scoringV2.rubric.dimensionPercents,
+          categoryBreakdown: this.buildResumeProjectCompatibilityBreakdown(scoringV2),
           resumeProjectBreakdown: this.buildResumeProjectInvariantDetails(scoringV2),
         });
       }
@@ -3587,13 +3635,14 @@ export class AnalysisService {
           ? ('job_description_terms_empty' as const)
           : undefined;
 
-      const breakdown = {
-        experience_alignment: legacyDimensionScores.experienceAlignment,
-        leadership_level: legacyDimensionScores.leadershipLevel,
-        technical_platform_fit: legacyDimensionScores.technicalPlatformFit,
-        industry_context: legacyDimensionScores.industryContext,
-        strategic_vs_tactical: legacyDimensionScores.strategicTacticalFit,
-      };
+      const breakdown =
+        this.buildResumeProjectCompatibilityBreakdown(scoringV2) ?? {
+          experience_alignment: legacyDimensionScores.experienceAlignment,
+          leadership_level: legacyDimensionScores.leadershipLevel,
+          technical_platform_fit: legacyDimensionScores.technicalPlatformFit,
+          industry_context: legacyDimensionScores.industryContext,
+          strategic_vs_tactical: legacyDimensionScores.strategicTacticalFit,
+        };
 
       const baselineVersionHashForDebug = baseline.hash ?? null;
       const jobIdentifier = job?.id ?? resolvedJobId ?? null;
@@ -4854,24 +4903,24 @@ export class AnalysisService {
     const authoritativeScoringV2 = this.alignCxFitScoreToResumeProject(
       assessment.scoringV2,
     );
-    if (authoritativeScoringV2?.score === 0) {
-      const baselineTextLength = getCharCount(
-        (baseline.sections ?? [])
-          .map((section) => section.content ?? '')
-          .join('\n'),
+      if (authoritativeScoringV2?.score === 0) {
+        const baselineTextLength = getCharCount(
+          (baseline.sections ?? [])
+            .map((section) => section.content ?? '')
+            .join('\n'),
       );
       const jobTextLength = getCharCount(job.rawDescription ?? '');
-      this.assertNoImpossibleZeroScore({
-        baselineId: assessment.baselineId,
-        jobId: job.id,
-        baselineSectionCount: baseline.sections?.length ?? 0,
-        baselineTextLength,
-        jobTextLength,
-        scorerVersion: authoritativeScoringV2.scorerVersion ?? null,
-        categoryBreakdown: authoritativeScoringV2.rubric?.dimensionPercents ?? null,
-        resumeProjectBreakdown: this.buildResumeProjectInvariantDetails(authoritativeScoringV2),
-      });
-    }
+        this.assertNoImpossibleZeroScore({
+          baselineId: assessment.baselineId,
+          jobId: job.id,
+          baselineSectionCount: baseline.sections?.length ?? 0,
+          baselineTextLength,
+          jobTextLength,
+          scorerVersion: authoritativeScoringV2.scorerVersion ?? null,
+          categoryBreakdown: this.buildResumeProjectCompatibilityBreakdown(authoritativeScoringV2),
+          resumeProjectBreakdown: this.buildResumeProjectInvariantDetails(authoritativeScoringV2),
+        });
+      }
 
     if (this.isDevMode()) {
       this.logger.log(
@@ -5027,24 +5076,24 @@ export class AnalysisService {
     const authoritativeScoringV2 = this.alignCxFitScoreToResumeProject(
       assessment.scoringV2,
     );
-    if (authoritativeScoringV2?.score === 0) {
-      const baselineTextLength = getCharCount(
-        (baseline.sections ?? [])
-          .map((section) => section.content ?? '')
-          .join('\n'),
+      if (authoritativeScoringV2?.score === 0) {
+        const baselineTextLength = getCharCount(
+          (baseline.sections ?? [])
+            .map((section) => section.content ?? '')
+            .join('\n'),
       );
       const jobTextLength = getCharCount(job.rawDescription ?? '');
-      this.assertNoImpossibleZeroScore({
-        baselineId: assessment.baselineId,
-        jobId: job.id,
-        baselineSectionCount: baseline.sections?.length ?? 0,
-        baselineTextLength,
-        jobTextLength,
-        scorerVersion: authoritativeScoringV2.scorerVersion ?? null,
-        categoryBreakdown: authoritativeScoringV2.rubric?.dimensionPercents ?? null,
-        resumeProjectBreakdown: this.buildResumeProjectInvariantDetails(authoritativeScoringV2),
-      });
-    }
+        this.assertNoImpossibleZeroScore({
+          baselineId: assessment.baselineId,
+          jobId: job.id,
+          baselineSectionCount: baseline.sections?.length ?? 0,
+          baselineTextLength,
+          jobTextLength,
+          scorerVersion: authoritativeScoringV2.scorerVersion ?? null,
+          categoryBreakdown: this.buildResumeProjectCompatibilityBreakdown(authoritativeScoringV2),
+          resumeProjectBreakdown: this.buildResumeProjectInvariantDetails(authoritativeScoringV2),
+        });
+      }
 
     if (this.isDevMode()) {
       this.logger.log(
