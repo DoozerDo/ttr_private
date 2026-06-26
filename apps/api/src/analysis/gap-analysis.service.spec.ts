@@ -124,6 +124,47 @@ describe('GapAnalysisService', () => {
     expect(result.strengths).not.toContain('Support Operations and Process Rigor');
   });
 
+  it('does not surface credited people leadership and strategy evidence as critical gaps', () => {
+    const result = service.analyze({
+      baselineSections: [
+        {
+          content:
+            'Senior Customer Operations leader overseeing people leadership, workforce planning, executive partnership, organizational strategy, customer advocacy, and governance across global teams.\nOwned operating rhythm design, service delivery, customer enablement, and cross-functional leadership for enterprise customers.\nLed managers, coached leaders, and drove transformation across SaaS teams.',
+        },
+      ],
+      validatedRequirements: [
+        'People leadership for global teams',
+        'Organizational strategy and executive partnership',
+        'Customer advocacy and customer enablement',
+      ],
+      debugMatching: true,
+    });
+
+    expect(result.criticalGaps).toHaveLength(0);
+    expect(result.recommendedActions).toHaveLength(0);
+    expect(result.debug?.gapTraces.every((trace) => trace.finalDecision === 'matched')).toBe(true);
+    expect(
+      result.debug?.gapTraces.every((trace) => trace.suppressionReason === 'matched_requirement'),
+    ).toBe(true);
+  });
+
+  it('still emits gaps when evidence is genuinely missing', () => {
+    const result = service.analyze({
+      baselineSections: [
+        {
+          content:
+            'Senior Customer Operations leader overseeing people leadership, workforce planning, executive partnership, organizational strategy, customer advocacy, and governance across global teams.',
+        },
+      ],
+      validatedRequirements: ['Direct firmware engineering experience in pre-silicon environments'],
+      debugMatching: true,
+    });
+
+    const gapTitles = result.criticalGaps.map((gap) => gap.title.toLowerCase());
+    expect(gapTitles).toContain('direct firmware engineering experience');
+    expect(result.recommendedActions.join(' ').toLowerCase()).toContain('direct firmware engineering experience');
+  });
+
   it('returns requirement-derived gap titles instead of taxonomy labels', () => {
     const result = service.analyze({
       baselineSections: [{ content: 'Led support operations and customer escalations.' }],

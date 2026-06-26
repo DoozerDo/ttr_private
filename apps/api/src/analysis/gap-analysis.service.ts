@@ -346,6 +346,121 @@ const GAP_CATEGORY_KEYWORDS: Array<{
     category: 'support_routing',
     patterns: [/\bsupport\b/i, /\brouting\b/i, /\btriage\b/i, /\bqueue\b/i],
   },
+  {
+    category: 'people_leadership',
+    patterns: [
+      /\bpeople leadership\b/i,
+      /\bmanaged managers\b/i,
+      /\bmanager of managers\b/i,
+      /\bmanaged teams\b/i,
+      /\bteam leadership\b/i,
+      /\btalent development\b/i,
+      /\bperformance management\b/i,
+      /\bsuccession planning\b/i,
+      /\bworkforce planning\b/i,
+      /\bcoaching\b/i,
+      /\bmentoring\b/i,
+      /\bhiring\b/i,
+      /\borganizational leadership\b/i,
+      /\borganizational design\b/i,
+      /\borg design\b/i,
+      /\bcross[- ]functional leadership\b/i,
+    ],
+  },
+  {
+    category: 'organizational_strategy',
+    patterns: [
+      /\borganizational strategy\b/i,
+      /\bexecutive partnership\b/i,
+      /\bstrategic planning\b/i,
+      /\boperating model\b/i,
+      /\boperating rhythm\b/i,
+      /\bgovernance\b/i,
+      /\btransformation ownership\b/i,
+      /\bprogram ownership\b/i,
+    ],
+  },
+  {
+    category: 'customer_advocacy',
+    patterns: [
+      /\bcustomer advocacy\b/i,
+      /\bcustomer success\b/i,
+      /\bcustomer enablement\b/i,
+      /\bcustomer outcomes?\b/i,
+      /\bcustomer experience\b/i,
+      /\bcustomer journey\b/i,
+      /\bvoice of customer\b/i,
+      /\brenewals?\b/i,
+      /\bretention\b/i,
+      /\badoption\b/i,
+    ],
+  },
+  {
+    category: 'executive_partnership',
+    patterns: [/\bexecutive partnership\b/i, /\bexecutive reporting\b/i, /\bc[- ]suite\b/i],
+  },
+  {
+    category: 'workforce_planning',
+    patterns: [/\bworkforce planning\b/i, /\bstaffing\b/i, /\bcapacity planning\b/i],
+  },
+  {
+    category: 'transformation_ownership',
+    patterns: [/\btransformation\b/i, /\bchange leadership\b/i, /\bchange management\b/i, /\brollout\b/i, /\bmigration\b/i],
+  },
+];
+
+const BROAD_CONCEPT_REQUIREMENT_PATTERNS: Array<{ concept: string; patterns: RegExp[] }> = [
+  {
+    concept: 'people_leadership',
+    patterns: [
+      /\bpeople leadership\b/i,
+      /\borganizational leadership\b/i,
+      /\bexecutive partnership\b/i,
+      /\bcross[- ]functional leadership\b/i,
+      /\bworkforce planning\b/i,
+      /\btalent development\b/i,
+      /\bteam leadership\b/i,
+      /\bmanager of managers\b/i,
+      /\bmanaged managers\b/i,
+    ],
+  },
+  {
+    concept: 'organizational_strategy',
+    patterns: [
+      /\borganizational strategy\b/i,
+      /\boperating model\b/i,
+      /\boperating rhythm\b/i,
+      /\bgovernance\b/i,
+      /\bprogram ownership\b/i,
+      /\btransformation ownership\b/i,
+      /\bstrategic planning\b/i,
+    ],
+  },
+  {
+    concept: 'customer_advocacy',
+    patterns: [
+      /\bcustomer advocacy\b/i,
+      /\bcustomer success\b/i,
+      /\bcustomer enablement\b/i,
+      /\bvoice of customer\b/i,
+      /\bcustomer outcomes?\b/i,
+      /\brenewals?\b/i,
+      /\bretention\b/i,
+      /\badoption\b/i,
+    ],
+  },
+  {
+    concept: 'executive_partnership',
+    patterns: [/\bexecutive partnership\b/i, /\bc[- ]suite\b/i, /\bexecutive reporting\b/i],
+  },
+  {
+    concept: 'workforce_planning',
+    patterns: [/\bworkforce planning\b/i, /\bstaffing planning\b/i, /\bcapacity planning\b/i],
+  },
+  {
+    concept: 'transformation_ownership',
+    patterns: [/\btransformation\b/i, /\bchange leadership\b/i, /\bchange management\b/i, /\brollout\b/i, /\bmigration\b/i],
+  },
 ];
 
 const SPECIALIZED_ROLE_KEYWORDS = [
@@ -437,6 +552,15 @@ export class GapAnalysisService {
       )
       .filter((entry): entry is RequirementAssessment => Boolean(entry));
     const dedupedEvaluated = this.dedupeAssessments(evaluated);
+    const matchedSemanticConcepts = new Set(
+      dedupedEvaluated
+        .filter((entry) => entry.finalDecision === 'matched')
+        .flatMap((entry) =>
+          this.detectBroadConcepts(
+            `${entry.title} ${entry.requirementEvidence} ${entry.baselineEvidence ?? ''}`,
+          ),
+        ),
+    );
     const requirementDecisionMap = new Map(
       dedupedEvaluated.map((entry) => [this.buildRequirementDecisionKey(entry), entry.finalDecision]),
     );
@@ -454,10 +578,17 @@ export class GapAnalysisService {
         }
         const normalizedTitle = this.normalizeSignalKey(entry.title);
         const normalizedRequirement = this.normalizeSignalKey(entry.requirementEvidence);
+        const requirementConcepts = this.detectBroadConcepts(
+          `${entry.title} ${entry.requirementEvidence}`,
+        );
+        const hasCreditedConceptOverlap = requirementConcepts.some((concept) =>
+          matchedSemanticConcepts.has(concept),
+        );
         if (!normalizedTitle && !normalizedRequirement) return false;
         return !(
           (normalizedTitle && normalizedStrengthSignals.has(normalizedTitle)) ||
-          (normalizedRequirement && normalizedStrengthSignals.has(normalizedRequirement))
+          (normalizedRequirement && normalizedStrengthSignals.has(normalizedRequirement)) ||
+          hasCreditedConceptOverlap
         );
       })
       .slice(0, maxGaps)
@@ -523,19 +654,26 @@ export class GapAnalysisService {
                     normalizedStrengthSignals.has(
                       this.normalizeSignalKey(entry.requirementEvidence),
                     );
+                  const creditedConceptOverlap = this.detectBroadConcepts(
+                    `${entry.title} ${entry.requirementEvidence}`,
+                  ).some((concept) => matchedSemanticConcepts.has(concept));
                   return {
                     ...debug,
                     promotedToStrength,
+                    creditedConceptOverlap,
                     gapEligible: entry.finalDecision !== 'matched',
                     suppressionReason:
                       entry.finalDecision === 'matched'
                         ? 'matched_requirement'
+                        : creditedConceptOverlap
+                          ? 'matched_semantic_concept'
                         : debug.suppressionReason,
                     requirementDecision:
                       requirementDecisionMap.get(this.buildRequirementDecisionKey(entry)) ??
                       entry.finalDecision,
                   } as GapDebugTrace & {
                     promotedToStrength: boolean;
+                    creditedConceptOverlap: boolean;
                     gapEligible: boolean;
                     requirementDecision: 'gap' | 'matched' | 'weak_match';
                   };
@@ -740,6 +878,14 @@ export class GapAnalysisService {
     return selected;
   }
 
+  private detectBroadConcepts(text: string): string[] {
+    const normalized = this.clean(text).toLowerCase();
+    if (!normalized) return [];
+    return BROAD_CONCEPT_REQUIREMENT_PATTERNS.filter((group) =>
+      group.patterns.some((pattern) => pattern.test(normalized)),
+    ).map((group) => group.concept);
+  }
+
   private evaluateRequirement(
     candidate: RequirementCandidate,
     baselineLines: string[],
@@ -751,6 +897,7 @@ export class GapAnalysisService {
     const tokens = this.tokenize(req).slice(0, 20);
     if (!tokens.length) return null;
     const assignedCategory = this.assignCategory(req);
+    const requirementConcepts = this.detectBroadConcepts(req);
     const requirementKeywords = tokens;
 
     const matchedTokens = tokens.filter((token) =>
@@ -761,6 +908,7 @@ export class GapAnalysisService {
       tokens,
       baselineLines,
       assignedCategory,
+      requirementConcepts,
     );
     const baselineEvidence =
       baselineCandidates.find((candidate) => candidate.decision === 'accepted')
@@ -983,26 +1131,31 @@ export class GapAnalysisService {
     tokens: string[],
     baselineLines: string[],
     assignedCategory: string | null,
+    requirementConcepts: string[],
   ): GapDebugCandidate[] {
     const results: GapDebugCandidate[] = [];
     for (const line of baselineLines) {
       const normalized = this.normalizeSignalKey(line);
       const categories = this.assignCategories(line);
+      const semanticConcepts = this.detectBroadConcepts(line);
       const overlap = tokens.filter((token) => normalized.includes(token)).length;
       const score = tokens.length ? overlap / tokens.length : 0;
       const categoryOverlap =
         assignedCategory && categories.includes(assignedCategory);
       const hasCategorySupport = categories.length > 0;
+      const semanticOverlap = requirementConcepts.some((concept) =>
+        semanticConcepts.includes(concept),
+      );
       const eligibleForMatching = this.isDisplayableBaselineEvidence(line);
 
       let decision: GapDebugCandidate['decision'] = 'rejected';
       let rejectionReason: string | undefined = 'low lexical overlap';
       if (!eligibleForMatching) {
         rejectionReason = 'noisy evidence';
-      } else if (score >= 0.7 || (score >= 0.5 && categoryOverlap)) {
+      } else if (score >= 0.7 || (score >= 0.5 && (categoryOverlap || semanticOverlap))) {
         decision = 'accepted';
         rejectionReason = undefined;
-      } else if (score >= 0.35 || categoryOverlap || hasCategorySupport) {
+      } else if (score >= 0.35 || categoryOverlap || hasCategorySupport || semanticOverlap) {
         decision = 'weak';
         rejectionReason =
           score >= 0.35 ? 'score below cutoff' : 'below semantic threshold';
@@ -1015,7 +1168,7 @@ export class GapAnalysisService {
       results.push({
         text: line,
         normalized,
-        categories,
+        categories: [...new Set([...categories, ...semanticConcepts])],
         score: Number(score.toFixed(3)),
         decision,
         rejectionReason,
