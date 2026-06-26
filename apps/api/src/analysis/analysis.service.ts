@@ -78,6 +78,7 @@ import { selectBaselineTextForScoring } from './baseline-selection';
 import type {
   BaselineCoverageDetails,
   FitScoreDebugBundle,
+  ResumeRubricCategoryKey,
 } from './cx-fit-scoring-v2';
 import { CX_FIT_SCORER_VERSION } from './cx-fit-scoring-v2';
 import type { CxFitV2Result } from './fit-scoring.service';
@@ -119,6 +120,14 @@ import { CoverLettersService } from '../cover-letters/cover-letters.service';
 import { VERIFIED_ONLY_GENERATION_THRESHOLD } from '../config/verifiedOnlyGenerationThreshold';
 import { StudioArtifact, StudioArtifactLifecycleStatus } from '../studio-artifacts/studio-artifact.entity';
 import { loadPersistedFitAssessmentReadModel } from '../common/analysis-context-binding';
+
+const RESUME_PROJECT_CATEGORY_ORDER: ResumeRubricCategoryKey[] = [
+  'experience_alignment',
+  'leadership_level',
+  'technical_and_platform_fit',
+  'industry_and_context_fit',
+  'strategic_vs_tactical_balance',
+];
 
 export type AnalysisRequest = {
   baselineId: string;
@@ -832,31 +841,147 @@ export class AnalysisService {
     return Math.round(value * 10) / 10;
   }
 
+  private coerceResumeProjectNumber(value: unknown): number | null {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+
+    if (typeof value === 'string') {
+      const parsed = Number(value.trim());
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    return null;
+  }
+
+  private extractResumeProjectCategoryValue(candidate: unknown): number | null {
+    const direct = this.coerceResumeProjectNumber(candidate);
+    if (direct !== null) {
+      return direct;
+    }
+
+    if (!candidate || typeof candidate !== 'object') {
+      return null;
+    }
+
+    const record = candidate as Record<string, unknown>;
+    for (const key of [
+      'points',
+      'value',
+      'score',
+      'amount',
+      'totalScore',
+      'categoryScore',
+      'categoryPoints',
+    ]) {
+      const numeric = this.coerceResumeProjectNumber(record[key]);
+      if (numeric !== null) {
+        return numeric;
+      }
+    }
+
+    return null;
+  }
+
+  private sumResumeProjectCategorySource(source: unknown): number | null {
+    if (source == null) {
+      return null;
+    }
+
+    const values = Array.isArray(source) ? source : Object.values(source as Record<string, unknown>);
+    let total = 0;
+    let foundNumericValue = false;
+
+    for (const candidate of values) {
+      const numeric = this.extractResumeProjectCategoryValue(candidate);
+      if (numeric !== null) {
+        total += numeric;
+        foundNumericValue = true;
+      }
+    }
+
+    return foundNumericValue ? total : null;
+  }
+
+  private normalizeResumeProjectCategoryKey(value: unknown): ResumeRubricCategoryKey | null {
+    const normalized = normalizeText(String(value ?? ''))
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+
+    switch (normalized) {
+      case 'experience_alignment':
+      case 'leadership_level':
+      case 'technical_and_platform_fit':
+      case 'industry_and_context_fit':
+      case 'strategic_vs_tactical_balance':
+        return normalized;
+      default:
+        return null;
+    }
+  }
+
+  private createEmptyResumeProjectCategoryBreakdown(): Record<ResumeRubricCategoryKey, number> {
+    return {
+      experience_alignment: 0,
+      leadership_level: 0,
+      technical_and_platform_fit: 0,
+      industry_and_context_fit: 0,
+      strategic_vs_tactical_balance: 0,
+    };
+  }
+
+  private selectResumeProjectCategorySource(
+    resumeProject: NonNullable<NonNullable<CxFitV2Result['rubric']>['resumeProject']>,
+  ): unknown | null {
+    const categoryPointsTotal = this.sumResumeProjectCategorySource(resumeProject.categoryPoints);
+    if (categoryPointsTotal !== null && categoryPointsTotal > 0) {
+      return resumeProject.categoryPoints;
+    }
+
+    const categoriesTotal = this.sumResumeProjectCategorySource(resumeProject.categories);
+    if (categoriesTotal !== null && categoriesTotal > 0) {
+      return resumeProject.categories;
+    }
+
+    if (categoryPointsTotal !== null) {
+      return resumeProject.categoryPoints;
+    }
+
+    if (categoriesTotal !== null) {
+      return resumeProject.categories;
+    }
+
+    return null;
+  }
+
   private buildScoreBreakdown(assessment: FitAssessment): ScoreBreakdown {
     const resumeProject = assessment.scoringV2?.rubric?.resumeProject;
     if (resumeProject) {
-      const source = resumeProject.categoryPoints ?? resumeProject.categories;
-      const dimensions = this.scoreBreakdownMeta.map((entry) => {
-        const raw = {
-          role_scope_and_seniority: source.experience_alignment,
-          support_operations_and_process_rigor: source.leadership_level,
-          tooling_and_platform_experience: source.technical_and_platform_fit,
-          domain_and_business_context: source.industry_and_context_fit,
-          change_leadership_and_customer_advocacy:
-            source.strategic_vs_tactical_balance,
-        }[entry.key];
-        const score = this.roundToTenth(typeof raw === 'number' ? raw : 0);
-        return {
-          key: entry.key,
-          label: entry.label,
-          score: Math.max(0, Math.min(entry.weight, score)),
-          weight: entry.weight,
-        };
-      });
-      const total_score = this.roundToTenth(
-        dimensions.reduce((sum, dimension) => sum + dimension.score, 0),
-      );
-      return { total_score, dimensions };
+      const source = this.buildResumeProjectCompatibilityBreakdown(assessment.scoringV2);
+      if (source) {
+        const dimensions = this.scoreBreakdownMeta.map((entry) => {
+          const raw = {
+            role_scope_and_seniority: source.experience_alignment,
+            support_operations_and_process_rigor: source.leadership_level,
+            tooling_and_platform_experience: source.technical_platform_fit,
+            domain_and_business_context: source.industry_context,
+            change_leadership_and_customer_advocacy:
+              source.strategic_vs_tactical,
+          }[entry.key];
+          const score = this.roundToTenth(typeof raw === 'number' ? raw : 0);
+          return {
+            key: entry.key,
+            label: entry.label,
+            score: Math.max(0, Math.min(entry.weight, score)),
+            weight: entry.weight,
+          };
+        });
+        const total_score = this.roundToTenth(
+          dimensions.reduce((sum, dimension) => sum + dimension.score, 0),
+        );
+        return { total_score, dimensions };
+      }
     }
 
     const dimensionPoints = assessment.scoringV2?.rubric?.dimensionPoints;
@@ -912,19 +1037,21 @@ export class AnalysisService {
   ): number | null {
     const resumeProject = scoringV2?.rubric?.resumeProject;
     if (resumeProject) {
-      if (typeof resumeProject.totalScore === 'number' && !Number.isNaN(resumeProject.totalScore)) {
-        return resumeProject.totalScore;
+      const totalScore = this.coerceResumeProjectNumber(resumeProject.totalScore);
+      if (totalScore !== null && totalScore > 0) {
+        return totalScore;
       }
-      if (typeof resumeProject.finalScore === 'number' && !Number.isNaN(resumeProject.finalScore)) {
-        return resumeProject.finalScore;
+      const finalScore = this.coerceResumeProjectNumber(resumeProject.finalScore);
+      if (finalScore !== null && finalScore > 0) {
+        return finalScore;
       }
-      const categories = resumeProject.categories ?? resumeProject.categoryPoints;
-      if (categories) {
-        const categoryTotal = Object.values(categories).reduce(
-          (sum, value) => sum + (typeof value === 'number' && !Number.isNaN(value) ? value : 0),
-          0,
-        );
-        return categoryTotal;
+
+      const selectedCategorySource = this.selectResumeProjectCategorySource(resumeProject);
+      if (selectedCategorySource !== null) {
+        const categoryTotal = this.sumResumeProjectCategorySource(selectedCategorySource);
+        if (categoryTotal !== null) {
+          return categoryTotal;
+        }
       }
     }
 
@@ -939,6 +1066,10 @@ export class AnalysisService {
     scoringV2?: CxFitV2Result | null,
   ): CxFitV2Result | null {
     if (!scoringV2) return null;
+
+    if (!scoringV2.scorerVersion || !String(scoringV2.scorerVersion).trim()) {
+      scoringV2.scorerVersion = CX_FIT_SCORER_VERSION;
+    }
 
     const authoritativeScore = this.getAuthoritativeResumeProjectScore(scoringV2);
     if (authoritativeScore === null) {
@@ -962,12 +1093,13 @@ export class AnalysisService {
   ): Record<string, unknown> | null {
     const resumeProject = scoringV2?.rubric?.resumeProject;
     if (!resumeProject) return null;
+    const selectedCategorySource = this.selectResumeProjectCategorySource(resumeProject);
 
     return {
       id: resumeProject.id,
       totalScore: resumeProject.totalScore ?? resumeProject.finalScore ?? null,
       weights: resumeProject.weights,
-      categories: resumeProject.categories ?? resumeProject.categoryPoints,
+      categories: selectedCategorySource,
       categoryPercents: resumeProject.categoryPercents,
       subtotal: resumeProject.subtotal,
       rounding: resumeProject.rounding,
@@ -986,14 +1118,76 @@ export class AnalysisService {
     const resumeProject = scoringV2?.rubric?.resumeProject;
     if (!resumeProject) return null;
 
-    const source = resumeProject.categoryPoints ?? resumeProject.categories;
-    return {
-      experience_alignment: this.clampPercent(source.experience_alignment ?? 0),
-      leadership_level: this.clampPercent(source.leadership_level ?? 0),
-      technical_platform_fit: this.clampPercent(source.technical_and_platform_fit ?? 0),
-      industry_context: this.clampPercent(source.industry_and_context_fit ?? 0),
-      strategic_vs_tactical: this.clampPercent(source.strategic_vs_tactical_balance ?? 0),
-    };
+    const source = this.selectResumeProjectCategorySource(resumeProject);
+    if (source === null) return null;
+
+    const breakdown = this.createEmptyResumeProjectCategoryBreakdown();
+
+    if (Array.isArray(source)) {
+      let matchedCategory = false;
+      for (const entry of source) {
+        if (!entry || typeof entry !== 'object') continue;
+
+        const record = entry as Record<string, unknown>;
+        const key = this.normalizeResumeProjectCategoryKey(
+          record.key ?? record.category ?? record.name ?? record.id ?? record.type,
+        );
+        const numeric = this.extractResumeProjectCategoryValue(entry);
+        if (key && numeric !== null) {
+          breakdown[key] = this.clampPercent(numeric);
+          matchedCategory = true;
+        }
+      }
+
+      if (matchedCategory) {
+        return {
+          experience_alignment: breakdown.experience_alignment,
+          leadership_level: breakdown.leadership_level,
+          technical_platform_fit: breakdown.technical_and_platform_fit,
+          industry_context: breakdown.industry_and_context_fit,
+          strategic_vs_tactical: breakdown.strategic_vs_tactical_balance,
+        };
+      }
+
+      const numericValues = source
+        .map((entry) => this.extractResumeProjectCategoryValue(entry))
+        .filter((value): value is number => value !== null);
+
+      if (numericValues.length === RESUME_PROJECT_CATEGORY_ORDER.length) {
+        RESUME_PROJECT_CATEGORY_ORDER.forEach((key, index) => {
+          breakdown[key] = this.clampPercent(numericValues[index] ?? 0);
+        });
+        return {
+          experience_alignment: breakdown.experience_alignment,
+          leadership_level: breakdown.leadership_level,
+          technical_platform_fit: breakdown.technical_and_platform_fit,
+          industry_context: breakdown.industry_and_context_fit,
+          strategic_vs_tactical: breakdown.strategic_vs_tactical_balance,
+        };
+      }
+
+      return null;
+    }
+
+    const record = source as Record<string, unknown>;
+    let matchedCategory = false;
+    for (const key of RESUME_PROJECT_CATEGORY_ORDER) {
+      const numeric = this.extractResumeProjectCategoryValue(record[key]);
+      if (numeric !== null) {
+        breakdown[key] = this.clampPercent(numeric);
+        matchedCategory = true;
+      }
+    }
+
+    return matchedCategory
+      ? {
+          experience_alignment: breakdown.experience_alignment,
+          leadership_level: breakdown.leadership_level,
+          technical_platform_fit: breakdown.technical_and_platform_fit,
+          industry_context: breakdown.industry_and_context_fit,
+          strategic_vs_tactical: breakdown.strategic_vs_tactical_balance,
+        }
+      : null;
   }
 
   private leadershipLevelFromBandDelta(bandDelta: number) {

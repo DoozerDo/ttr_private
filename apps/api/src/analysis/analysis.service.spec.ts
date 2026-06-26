@@ -3573,8 +3573,22 @@ const sampleScoringV2: CxFitV2Result = {
           ...sampleScoringV2.rubric,
           resumeProject: {
             ...sampleScoringV2.rubric.resumeProject,
-            totalScore: 90,
-            finalScore: 90,
+            totalScore: 0,
+            finalScore: 0,
+            categories: {
+              experience_alignment: 0,
+              leadership_level: 0,
+              technical_and_platform_fit: 0,
+              industry_and_context_fit: 0,
+              strategic_vs_tactical_balance: 0,
+            },
+            categoryPoints: {
+              experience_alignment: 30,
+              leadership_level: 20,
+              technical_and_platform_fit: 20,
+              industry_and_context_fit: 15,
+              strategic_vs_tactical_balance: 5,
+            },
           },
         },
       });
@@ -3596,6 +3610,45 @@ const sampleScoringV2: CxFitV2Result = {
           overallScore: 90,
         }),
       );
+    });
+
+    it('aligns the Resume rubric score from categoryPoints array data when the top-level score is zero', () => {
+      const scoringV2 = {
+        ...sampleScoringV2,
+        score: 0,
+        rubric: {
+          ...sampleScoringV2.rubric,
+          resumeProject: {
+            ...sampleScoringV2.rubric.resumeProject,
+            totalScore: 0,
+            finalScore: 0,
+            categories: [
+              { category: 'experience_alignment', points: 0 },
+              { category: 'leadership_level', points: 0 },
+              { category: 'technical_and_platform_fit', points: 0 },
+              { category: 'industry_and_context_fit', points: 0 },
+              { category: 'strategic_vs_tactical_balance', points: 0 },
+            ] as unknown as CxFitV2Result['rubric']['resumeProject']['categories'],
+            categoryPoints: [
+              { category: 'experience_alignment', points: 30 },
+              { category: 'leadership_level', points: 20 },
+              { category: 'technical_and_platform_fit', points: 20 },
+              { category: 'industry_and_context_fit', points: 15 },
+              { category: 'strategic_vs_tactical_balance', points: 5 },
+            ] as unknown as CxFitV2Result['rubric']['resumeProject']['categoryPoints'],
+          },
+        },
+      } as CxFitV2Result & { scorerVersion?: string };
+      delete scoringV2.scorerVersion;
+
+      const aligned = (service as unknown as {
+        alignCxFitScoreToResumeProject: (value: CxFitV2Result) => CxFitV2Result | null;
+      }).alignCxFitScoreToResumeProject(scoringV2);
+
+      expect(aligned?.score).toBe(90);
+      expect(aligned?.scorerVersion).toBe(CX_FIT_SCORER_VERSION);
+      expect(aligned?.rubric.resumeProject.totalScore).toBe(90);
+      expect(aligned?.rubric.resumeProject.finalScore).toBe(90);
     });
 
     it('throws an explicit zero-score invariant failure for reused latest assessments with non-empty baseline and job text', async () => {
