@@ -1202,14 +1202,10 @@ export class StudioArtifactsService {
       );
     };
 
-    const exactLegacyResumeFailure =
-      record?.resumeStatus === StudioArtifactLifecycleStatus.FAILED &&
-      String(record?.resumeFailureMessage ?? '') === 'column Baseline.verifiedBaseline does not exist';
     const shouldRecoverEligibleArtifacts =
       !input.recoveryAttempted &&
       typeof score === 'number' &&
       score >= 80 &&
-      exactLegacyResumeFailure &&
       (resumeRecoveryBlocked || coverRecoveryBlocked);
     if (shouldRecoverEligibleArtifacts) {
       const generationRequest = {

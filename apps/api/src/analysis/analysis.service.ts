@@ -4193,8 +4193,6 @@ export class AnalysisService {
         );
       }
 
-      await this.triggerDownstreamDocumentGeneration(userId, savedAssessment);
-
       const lastAnalyzedAt = new Date();
       try {
         await this.baselineRepository.update(

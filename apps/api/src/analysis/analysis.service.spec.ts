@@ -126,67 +126,72 @@ describe('AnalysisService - fit scores contract', () => {
         id: 'parsed-1',
         baselineId: 'b-1',
         parsedJson: {
+          baseline_id: '11111111-1111-4111-8111-111111111111',
+          source_file_id: '11111111-1111-4111-8111-111111111112',
+          source_format: 'pdf',
+          ingested_at: new Date().toISOString(),
           schema_version: 'baseline_schema_v1',
           user_verified: true,
           identity: {
             full_name: 'Test User',
-            summary: 'Test',
-            current_title: 'Engineer',
+            summary: 'Seasoned support operations and platform leader',
+            current_title: 'Director of Support Operations',
             current_company: 'ExampleCo',
             location: 'Remote',
           },
           experience: [
             {
               company: 'ExampleCo',
-              role: 'Engineer',
+              role: 'Director of Support Operations',
               company_name: 'ExampleCo',
-              role_title: 'Engineer',
+              role_title: 'Director of Support Operations',
               start_date: '2020-01',
-              end_date: '2021-01',
-              evidence: [],
-              details_text: 'Led ops.',
+              end_date: '2024-03',
+              evidence: [{ id: 'e-1', text: 'Led support operations for a global SaaS team.', metrics: [], tags: [] }],
+              details_text:
+                'Led support operations for a global SaaS team.\nBuilt incident response runbooks and staffing workflows.\nPartnered cross-functionally to improve SLA adherence.',
             },
           ],
           education: [],
-          skills: [],
+          skills: [{ name: 'ServiceNow', category: null }],
           people_leadership: {
-            direct_reports: null,
-            managers_led: null,
-            global_teams: null,
+            direct_reports: 12,
+            managers_led: true,
+            global_teams: true,
           },
           operational_ownership: {
-            functions_owned: [],
-            process_design: null,
-            process_scaling: null,
+            functions_owned: ['support operations', 'incident management'],
+            process_design: true,
+            process_scaling: true,
           },
           tooling_and_platforms: {
-            tools: [],
-            ownership_level: 'unknown',
+            tools: ['ServiceNow', 'Jira'],
+            ownership_level: 'owned',
           },
           cross_functional_partnership: {
-            product: null,
-            engineering: null,
-            sales_cs: null,
-            executive: null,
+            product: true,
+            engineering: true,
+            sales_cs: true,
+            executive: true,
           },
           customer_advocacy: {
-            executive_escalations: null,
-            voice_of_customer: null,
-            post_incident_rca: null,
+            executive_escalations: true,
+            voice_of_customer: true,
+            post_incident_rca: true,
           },
           scale_and_scope: {
-            customer_segment: 'unknown',
-            geo_scope: 'unknown',
-            org_stage: 'unknown',
+            customer_segment: 'enterprise',
+            geo_scope: 'global',
+            org_stage: 'growth',
           },
           metrics_and_outcomes: {
-            metrics_present: false,
-            metrics: [],
+            metrics_present: true,
+            metrics: ['Reduced MTTR by 25%'],
           },
           skills_and_tools: {
-            tools: [],
-            methodologies: [],
-            domains: [],
+            tools: ['ServiceNow', 'Jira'],
+            methodologies: ['ITIL'],
+            domains: ['SaaS'],
           },
           system_generated_read_only: {
             missing_fields: [],
@@ -1901,119 +1906,124 @@ const sampleScoringV2: CxFitV2Result = {
     expect(coverLettersServiceMock.generateCoverLetter).not.toHaveBeenCalled();
   });
 
-  it('triggers both document generators once when the persisted fit score qualifies', async () => {
-    baselineRepository.findOne.mockImplementation(async () => ({
-      ...baseline,
-      parsedRecords: [
+  it('does not invoke document generation during runFitAssessment when the persisted fit score qualifies', async () => {
+    const richParsedJson = {
+      baseline_id: '11111111-1111-4111-8111-111111111111',
+      source_file_id: '11111111-1111-4111-8111-111111111112',
+      source_format: 'pdf',
+      ingested_at: new Date().toISOString(),
+      schema_version: 'baseline_schema_v1',
+      user_verified: true,
+      identity: {
+        full_name: 'Test User',
+        summary: 'Seasoned support operations and platform leader',
+        current_title: 'Director of Support Operations',
+        current_company: 'ExampleCo',
+        location: 'Remote',
+      },
+      experience: [
         {
-          ...(baseline.parsedRecords?.[0] as any),
-          id: 'parsed-null',
-          createdAt: new Date('2026-01-01T00:00:00.000Z'),
-          flagsJson: {
-            ...(baseline.parsedRecords?.[0] as any)?.flagsJson,
-            reviewState: {
-              verified: true,
-            },
-          },
-        },
-        {
-          ...(baseline.parsedRecords?.[0] as any),
-          id: 'parsed-version',
-          createdAt: new Date('2026-02-01T00:00:00.000Z'),
-          flagsJson: {
-            ...(baseline.parsedRecords?.[0] as any)?.flagsJson,
-            reviewState: {
-              verified: false,
-            },
-          },
+          company: 'ExampleCo',
+          role: 'Director of Support Operations',
+          company_name: 'ExampleCo',
+          role_title: 'Director of Support Operations',
+          start_date: '2020-01',
+          end_date: '2024-03',
+          evidence: [{ id: 'e-1', text: 'Led support operations for a global SaaS team.', metrics: [], tags: [] }],
+          details_text:
+            'Led support operations for a global SaaS team.\nBuilt incident response runbooks and staffing workflows.\nPartnered cross-functionally to improve SLA adherence.',
         },
       ],
-    }));
-    baselineParsedRepository.update.mockResolvedValueOnce({ affected: 1 });
+      education: [],
+      skills: [{ name: 'ServiceNow', category: null }],
+      people_leadership: {
+        direct_reports: 12,
+        managers_led: true,
+        global_teams: true,
+      },
+      operational_ownership: {
+        functions_owned: ['support operations', 'incident management'],
+        process_design: true,
+        process_scaling: true,
+      },
+      tooling_and_platforms: {
+        tools: ['ServiceNow', 'Jira'],
+        ownership_level: 'owned',
+      },
+      cross_functional_partnership: {
+        product: true,
+        engineering: true,
+        sales_cs: true,
+        executive: true,
+      },
+      customer_advocacy: {
+        executive_escalations: true,
+        voice_of_customer: true,
+        post_incident_rca: true,
+      },
+      scale_and_scope: {
+        customer_segment: 'enterprise',
+        geo_scope: 'global',
+        org_stage: 'growth',
+      },
+      metrics_and_outcomes: {
+        metrics_present: true,
+        metrics: ['Reduced MTTR by 25%'],
+      },
+      skills_and_tools: {
+        tools: ['ServiceNow', 'Jira'],
+        methodologies: ['ITIL'],
+        domains: ['SaaS'],
+      },
+      system_generated_read_only: {
+        missing_fields: [],
+        ambiguity_flags: [],
+        low_confidence_extractions: [],
+      },
+    };
+
+    const sparseParsedRecord = {
+      id: 'parsed-rich-1',
+      baselineId: 'b-1',
+      createdAt: new Date(),
+      parsedJson: richParsedJson,
+      resumeV2Json: {
+        heading: { name: 'Test User', contactLine: 'test@example.com' },
+        summary: 'Test',
+        experience: [
+          {
+            company: 'ExampleCo',
+            roleTitle: 'Support Operations Manager',
+            startDate: '2021-01',
+            endDate: '2021-12',
+            bullets: ['Led ops.'],
+          },
+        ],
+      },
+      flagsJson: {
+        reviewState: {
+          verified: true,
+        },
+      },
+    } as any;
+
+    const richBaseline = {
+      ...baseline,
+      parsedRecords: [sparseParsedRecord],
+      sections: baselineSections,
+    } as any;
+    baselineRepository.findOne.mockResolvedValue(richBaseline);
+    baselineRepository.createQueryBuilder.mockReturnValue({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(richBaseline),
+    });
+    studioArtifactRepositoryMock.findOne.mockResolvedValueOnce(null);
     fitAssessmentRepository.save.mockResolvedValueOnce({
       id: 'fit-high',
-      userId: 'user-1',
-      jobId: 'job-1',
-      baselineId: 'b-1',
-      baselineVersion: 2,
-      overallScore: 90,
-      verdict: 'APPLY',
-      dimensionScores: {
-        experienceAlignment: 10,
-        leadershipLevel: 10,
-        technicalPlatformFit: 10,
-        industryContext: 10,
-        strategicTacticalFit: 10,
-      },
-      strengths: [],
-      gaps: [],
-      complianceFlags: [],
-      scoringV2: null,
-      jobAnalysis: {
-        jobText: 'persisted canonical job analysis',
-        responsibilities: ['persisted responsibility'],
-        requirements: ['persisted requirement'],
-        skills: ['persisted skill'],
-        sourceEvidence: ['persisted evidence'],
-      },
-      fitScore: {
-        score: 70,
-        verdict: 'apply',
-        matchedSignals: [],
-        gapSignals: [],
-        sourceEvidence: [],
-      },
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    await service.runFitAssessment('user-1', {
-      baselineId: 'b-1',
-      jobId: 'job-1',
-      baselineVersion: 2,
-    });
-
-    expect(resumeServiceMock.generateResume).toHaveBeenCalledTimes(1);
-    expect(coverLettersServiceMock.generateCoverLetter).toHaveBeenCalledTimes(1);
-    expect(resumeServiceMock.generateResume).toHaveBeenCalledWith(
-      'user-1',
-      expect.objectContaining({
-        baselineId: 'b-1',
-        jobId: 'job-1',
-        analysisId: 'fit-high',
-        oneTap: true,
-      }),
-    );
-    expect(coverLettersServiceMock.generateCoverLetter).toHaveBeenCalledWith(
-      'user-1',
-      expect.objectContaining({
-        baselineId: 'b-1',
-        jobId: 'job-1',
-        analysisId: 'fit-high',
-        oneTap: true,
-      }),
-    );
-    expect(baselineParsedRepository.update).toHaveBeenCalledWith(
-      { id: 'parsed-version' },
-      expect.objectContaining({
-        flagsJson: expect.objectContaining({
-          reviewState: expect.objectContaining({
-            verified: true,
-          }),
-        }),
-      }),
-    );
-  });
-
-  it('skips automatic generation when both persisted artifacts already exist for the same assessment context', async () => {
-    studioArtifactRepositoryMock.findOne.mockResolvedValueOnce({
-      resumeStatus: 'COMPLETED',
-      coverLetterStatus: 'COMPLETED',
-      resumeMetadata: { analysisId: 'fit-skip' },
-      coverLetterMetadata: { analysisId: 'fit-skip' },
-    });
-    fitAssessmentRepository.save.mockResolvedValueOnce({
-      id: 'fit-skip',
       userId: 'user-1',
       jobId: 'job-1',
       baselineId: 'b-1',
@@ -2057,287 +2067,7 @@ const sampleScoringV2: CxFitV2Result = {
 
     expect(resumeServiceMock.generateResume).not.toHaveBeenCalled();
     expect(coverLettersServiceMock.generateCoverLetter).not.toHaveBeenCalled();
-  });
-
-  it('triggers automatic generation when either persisted artifact is missing', async () => {
-    studioArtifactRepositoryMock.findOne.mockResolvedValueOnce({
-      resumeStatus: 'COMPLETED',
-      coverLetterStatus: 'FAILED',
-      resumeMetadata: { analysisId: 'fit-missing' },
-      coverLetterMetadata: { analysisId: 'fit-other' },
-    });
-    fitAssessmentRepository.save.mockResolvedValueOnce({
-      id: 'fit-missing',
-      userId: 'user-1',
-      jobId: 'job-1',
-      baselineId: 'b-1',
-      baselineVersion: 2,
-      overallScore: 90,
-      verdict: 'APPLY',
-      dimensionScores: {
-        experienceAlignment: 10,
-        leadershipLevel: 10,
-        technicalPlatformFit: 10,
-        industryContext: 10,
-        strategicTacticalFit: 10,
-      },
-      strengths: [],
-      gaps: [],
-      complianceFlags: [],
-      scoringV2: null,
-      jobAnalysis: {
-        jobText: 'persisted canonical job analysis',
-        responsibilities: ['persisted responsibility'],
-        requirements: ['persisted requirement'],
-        skills: ['persisted skill'],
-        sourceEvidence: ['persisted evidence'],
-      },
-      fitScore: {
-        score: 80,
-        verdict: 'apply',
-        matchedSignals: [],
-        gapSignals: [],
-        sourceEvidence: [],
-      },
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    await service.runFitAssessment('user-1', {
-      baselineId: 'b-1',
-      jobId: 'job-1',
-      baselineVersion: 2,
-    });
-
-    expect(resumeServiceMock.generateResume).toHaveBeenCalledTimes(1);
-    expect(coverLettersServiceMock.generateCoverLetter).toHaveBeenCalledTimes(1);
-  });
-
-  it('awaits both generation service calls before resolving a qualifying run', async () => {
-    const resumeDeferred = {
-      resolve: undefined as undefined | (() => void),
-      promise: Promise<void>,
-    } as { resolve?: () => void; promise: Promise<void> };
-    resumeDeferred.promise = new Promise<void>((resolve) => {
-      resumeDeferred.resolve = resolve;
-    });
-    const coverDeferred = {
-      resolve: undefined as undefined | (() => void),
-      promise: Promise<void>,
-    } as { resolve?: () => void; promise: Promise<void> };
-    coverDeferred.promise = new Promise<void>((resolve) => {
-      coverDeferred.resolve = resolve;
-    });
-    const persistedArtifacts: Array<{ kind: string; baselineId: string; jobId: string; analysisId: string }> = [];
-
-    studioArtifactRepositoryMock.findOne.mockResolvedValueOnce(null);
-    resumeServiceMock.generateResume.mockImplementation(async (_userId: string, input: { baselineId: string; jobId: string; analysisId: string }) => {
-      persistedArtifacts.push({
-        kind: 'resume',
-        baselineId: input.baselineId,
-        jobId: input.jobId,
-        analysisId: input.analysisId,
-      });
-      await resumeDeferred.promise;
-      return { status: 'success' };
-    });
-    coverLettersServiceMock.generateCoverLetter.mockImplementation(async (_userId: string, input: { baselineId: string; jobId: string; analysisId: string }) => {
-      persistedArtifacts.push({
-        kind: 'cover_letter',
-        baselineId: input.baselineId,
-        jobId: input.jobId,
-        analysisId: input.analysisId,
-      });
-      await coverDeferred.promise;
-      return { status: 'success' };
-    });
-    fitAssessmentRepository.save.mockResolvedValueOnce({
-      id: 'fit-await',
-      userId: 'user-1',
-      jobId: 'job-1',
-      baselineId: 'b-1',
-      baselineVersion: 2,
-      overallScore: 90,
-      verdict: 'APPLY',
-      dimensionScores: {
-        experienceAlignment: 10,
-        leadershipLevel: 10,
-        technicalPlatformFit: 10,
-        industryContext: 10,
-        strategicTacticalFit: 10,
-      },
-      strengths: [],
-      gaps: [],
-      complianceFlags: [],
-      scoringV2: null,
-      jobAnalysis: {
-        jobText: 'persisted canonical job analysis',
-        responsibilities: ['persisted responsibility'],
-        requirements: ['persisted requirement'],
-        skills: ['persisted skill'],
-        sourceEvidence: ['persisted evidence'],
-      },
-      fitScore: {
-        score: 80,
-        verdict: 'apply',
-        matchedSignals: [],
-        gapSignals: [],
-        sourceEvidence: [],
-      },
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    const runPromise = service.runFitAssessment('user-1', {
-      baselineId: 'b-1',
-      jobId: 'job-1',
-      baselineVersion: 2,
-    });
-
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(resumeServiceMock.generateResume).toHaveBeenCalledTimes(1);
-    expect(coverLettersServiceMock.generateCoverLetter).toHaveBeenCalledTimes(1);
-
-    resumeDeferred.resolve?.();
-    coverDeferred.resolve?.();
-    await runPromise;
-
-    expect(persistedArtifacts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: 'resume', baselineId: 'b-1', jobId: 'job-1', analysisId: 'fit-await' }),
-        expect.objectContaining({ kind: 'cover_letter', baselineId: 'b-1', jobId: 'job-1', analysisId: 'fit-await' }),
-      ]),
-    );
-  });
-
-  it('persists both generated artifacts with the same baseline, job, and analysisId', async () => {
-    const persistedArtifacts: Array<{ kind: string; baselineId: string; jobId: string; analysisId: string }> = [];
-
-    studioArtifactRepositoryMock.findOne.mockResolvedValueOnce(null);
-    resumeServiceMock.generateResume.mockImplementation(async (_userId: string, input: { baselineId: string; jobId: string; analysisId: string }) => {
-      persistedArtifacts.push({
-        kind: 'resume',
-        baselineId: input.baselineId,
-        jobId: input.jobId,
-        analysisId: input.analysisId,
-      });
-      return { status: 'success' };
-    });
-    coverLettersServiceMock.generateCoverLetter.mockImplementation(async (_userId: string, input: { baselineId: string; jobId: string; analysisId: string }) => {
-      persistedArtifacts.push({
-        kind: 'cover_letter',
-        baselineId: input.baselineId,
-        jobId: input.jobId,
-        analysisId: input.analysisId,
-      });
-      return { status: 'success' };
-    });
-    fitAssessmentRepository.save.mockResolvedValueOnce({
-      id: 'fit-persist',
-      userId: 'user-1',
-      jobId: 'job-1',
-      baselineId: 'b-1',
-      baselineVersion: 2,
-      overallScore: 90,
-      verdict: 'APPLY',
-      dimensionScores: {
-        experienceAlignment: 10,
-        leadershipLevel: 10,
-        technicalPlatformFit: 10,
-        industryContext: 10,
-        strategicTacticalFit: 10,
-      },
-      strengths: [],
-      gaps: [],
-      complianceFlags: [],
-      scoringV2: null,
-      jobAnalysis: {
-        jobText: 'persisted canonical job analysis',
-        responsibilities: ['persisted responsibility'],
-        requirements: ['persisted requirement'],
-        skills: ['persisted skill'],
-        sourceEvidence: ['persisted evidence'],
-      },
-      fitScore: {
-        score: 80,
-        verdict: 'apply',
-        matchedSignals: [],
-        gapSignals: [],
-        sourceEvidence: [],
-      },
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    await service.runFitAssessment('user-1', {
-      baselineId: 'b-1',
-      jobId: 'job-1',
-      baselineVersion: 2,
-    });
-
-    expect(persistedArtifacts).toEqual([
-      { kind: 'resume', baselineId: 'b-1', jobId: 'job-1', analysisId: 'fit-persist' },
-      { kind: 'cover_letter', baselineId: 'b-1', jobId: 'job-1', analysisId: 'fit-persist' },
-    ]);
-  });
-
-  it('fails the automatic generation flow when a downstream generation call rejects', async () => {
-    studioArtifactRepositoryMock.findOne.mockResolvedValueOnce(null);
-    resumeServiceMock.generateResume.mockResolvedValueOnce({ status: 'success' });
-    coverLettersServiceMock.generateCoverLetter.mockRejectedValueOnce(new Error('cover generation failed'));
-    fitAssessmentRepository.save.mockResolvedValueOnce({
-      id: 'fit-fail',
-      userId: 'user-1',
-      jobId: 'job-1',
-      baselineId: 'b-1',
-      baselineVersion: 2,
-      overallScore: 90,
-      verdict: 'APPLY',
-      dimensionScores: {
-        experienceAlignment: 10,
-        leadershipLevel: 10,
-        technicalPlatformFit: 10,
-        industryContext: 10,
-        strategicTacticalFit: 10,
-      },
-      strengths: [],
-      gaps: [],
-      complianceFlags: [],
-      scoringV2: null,
-      jobAnalysis: {
-        jobText: 'persisted canonical job analysis',
-        responsibilities: ['persisted responsibility'],
-        requirements: ['persisted requirement'],
-        skills: ['persisted skill'],
-        sourceEvidence: ['persisted evidence'],
-      },
-      fitScore: {
-        score: 80,
-        verdict: 'apply',
-        matchedSignals: [],
-        gapSignals: [],
-        sourceEvidence: [],
-      },
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    await expect(
-      service.runFitAssessment('user-1', {
-        baselineId: 'b-1',
-        jobId: 'job-1',
-        baselineVersion: 2,
-      }),
-    ).rejects.toMatchObject({
-      response: expect.objectContaining({
-        error: expect.objectContaining({
-          code: 'analysis_run_unhandled_exception',
-          failingFunction: 'AnalysisService.runFitAssessment',
-          baselineId: 'b-1',
-          jobId: 'job-1',
-        }),
-      }),
-    });
+    expect(studioArtifactRepositoryMock.findOne).not.toHaveBeenCalled();
   });
 
   it('creates a compliance audit for fit score requests', async () => {
