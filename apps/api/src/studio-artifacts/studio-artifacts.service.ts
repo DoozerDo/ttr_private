@@ -1206,10 +1206,18 @@ export class StudioArtifactsService {
       );
     };
 
+    const currentArtifactRetryRequested =
+      Boolean(resumeRecordRaw?.retryAllowed && resumeRecoveryBlocked) ||
+      Boolean(coverRecordRaw?.retryAllowed && coverRecoveryBlocked);
+    const currentInputsAreValidForRecovery =
+      Boolean(artifactReadiness) &&
+      artifactReadiness !== 'blocked' &&
+      structuredBaselineExperienceCount > 0 &&
+      structuredBaselineMissingEvidenceReasons.length === 0;
+    const scoreEligibleForRecovery = typeof score === 'number' && score >= 80;
     const shouldRecoverEligibleArtifacts =
       !input.recoveryAttempted &&
-      typeof score === 'number' &&
-      score >= 80 &&
+      (scoreEligibleForRecovery || (currentArtifactRetryRequested && currentInputsAreValidForRecovery)) &&
       (resumeRecoveryBlocked || coverRecoveryBlocked);
     if (shouldRecoverEligibleArtifacts) {
       const generationRequest = {
