@@ -3174,10 +3174,24 @@ export class ResumeService {
         (latestParsedRecord as any)?.flagsJson?.reviewState?.verified,
       );
       resumeV2AuthorityResolution = this.resolveResumeV2Authority(baseline.parsedRecords);
-      if (isResumeV2 && !resumeV2AuthorityResolution.usable) {
+      const canonicalBaselineSectionsForUsabilityCheck = resolveBaselineSectionsForGeneration(baseline);
+      const canonicalStructuredForUsabilityCheck = extractStructuredBaselineFromSections(
+        canonicalBaselineSectionsForUsabilityCheck as any,
+      );
+      const canonicalStructuredExperienceCountForUsabilityCheck = Array.isArray(
+        (canonicalStructuredForUsabilityCheck as any)?.experience,
+      )
+        ? (canonicalStructuredForUsabilityCheck as any).experience.length
+        : 0;
+      if (
+        isResumeV2 &&
+        !resumeV2AuthorityResolution.usable &&
+        canonicalStructuredExperienceCountForUsabilityCheck === 0 &&
+        !forceRegenerate
+      ) {
         assertUsableResumeV2(resumeV2AuthorityResolution.persisted);
       }
-      isResumeV2 = resumeV2AuthorityResolution.usable;
+      isResumeV2 = resumeV2AuthorityResolution.usable || canonicalStructuredExperienceCountForUsabilityCheck > 0;
       const persistedResumeV2ForAuthority = (() => {
         try {
           const persisted =
@@ -4179,10 +4193,10 @@ export class ResumeService {
 	      }
 	      if (forceTemplateRegen) {
 	        lastResumeGenerationCheckpoint = 'structured_template_extract_start';
-	        const structured = extractStructuredBaselineFromSections(resumeInputSections);
+	        const structured = extractStructuredBaselineFromSections(canonicalBaselineSectionsForGeneration as any);
 	        emitStructuredBaselineExtractionDebug(
 	          'force_template_regen',
-	          resumeInputSections as unknown[],
+	          canonicalBaselineSectionsForGeneration as unknown[],
 	          structured as unknown,
 	        );
 	        if (process.env.RESUME_V2_INGEST_DEBUG === 'true') {

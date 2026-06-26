@@ -736,6 +736,73 @@ describe('CoverLettersService contract', () => {
     }
   });
 
+  it('hydrates cover letter generation from parsedJson when persisted ResumeV2 is sparse', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const buildAllowedBlocksSpy = jest.spyOn(service as any, 'buildAllowedBlocksFromStructuredBaseline');
+
+    (baseline as any).parsedRecords = [
+      {
+        createdAt: new Date('2026-05-01T00:00:00.000Z'),
+        parsedJson: {
+          experience: [
+            {
+              company: 'Parsed Co',
+              role_title: 'Director of Support Operations',
+              start_date: 'Jan 2021',
+              end_date: 'Present',
+              details_text: 'Led support operations and exec updates.',
+            },
+            {
+              company: 'Parsed Co',
+              role_title: 'Support Operations Manager',
+              start_date: 'Jan 2018',
+              end_date: 'Dec 2020',
+              details_text: 'Improved incident routing and operating reviews.',
+            },
+          ],
+        },
+        resumeV2Json: {
+          heading: { name: 'Test Candidate', contactLine: '' },
+          summary: 'Sparse ResumeV2 summary.',
+          experience: [
+            {
+              company: 'Sparse Co',
+              roleTitle: 'Support Analyst',
+              dateRange: '2022 - 2024',
+              bullets: ['Sparse resumeV2 evidence.'],
+            },
+          ],
+          education: [],
+        },
+      } as any,
+    ];
+
+    baseline.sections = [
+      {
+        title: 'Summary',
+        sectionType: 'SUMMARY',
+        content: 'Customer operations leader focused on measurable improvements and execution cadence.',
+      } as any,
+    ];
+
+    try {
+      await (service as any).buildCoverLetterDraft('user-1', request as any).catch(() => null);
+      expect(buildAllowedBlocksSpy).toHaveBeenCalled();
+      const structuredArg = buildAllowedBlocksSpy.mock.calls[0]?.[0]?.structured as any;
+      expect(Array.isArray(structuredArg?.experience)).toBe(true);
+      expect(structuredArg.experience.length).toBe(2);
+      expect(JSON.stringify(structuredArg)).toContain('Parsed Co');
+      expect(JSON.stringify(structuredArg)).toContain('Director of Support Operations');
+      expect(JSON.stringify(structuredArg)).not.toContain('Sparse Co');
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsed;
+      buildAllowedBlocksSpy.mockRestore();
+    }
+  });
+
   it('Dalen regression: malformed headers + real technical evidence yields interpreted-evidence audit when traceable', async () => {
     const { service } = buildService();
     const original = baseline.sections?.[0]?.content ?? '';

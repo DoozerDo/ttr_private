@@ -51,7 +51,7 @@ function extractExperienceSectionsFromParsedJson(
         const detailsText = toStringValue(entry['details_text']);
         const details = splitBodyLines(detailsText);
 
-        const header = [role, company, [start, end].filter(Boolean).join(' - ')]
+        const header = [company, role, [start, end].filter(Boolean).join(' - ')]
           .filter(Boolean)
           .join(' | ');
         const detailLines = details.length ? details : scopeSummary ? [scopeSummary] : [];

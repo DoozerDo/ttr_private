@@ -18,6 +18,7 @@ import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { CriticalFlowTrackerService } from '../support/critical-flow-tracker.service';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 import { BaselineSectionType } from '../baseline/baseline-section.entity';
+import { resolveBaselineSectionsForGeneration } from '../baseline/baseline-section-source';
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 import { extractEvidenceUnitsFromLogicalUnits, reconstructLogicalTextUnits } from './resume-draft-bullets';
 import * as ResumeDraftBullets from './resume-draft-bullets';
@@ -430,6 +431,77 @@ describe('ResumeService contract', () => {
       } else {
         delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
       }
+    }
+  });
+
+  it('hydrates resume generation from parsedJson when persisted ResumeV2 is sparse', async () => {
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    const originalSections = baseline.sections;
+    const originalParsedRecords = baseline.parsedRecords;
+    const { service } = buildService();
+
+    try {
+      baseline.sections = [
+        {
+          ...baseSection,
+          id: 'section-summary-only',
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          order: 0,
+          content: 'Customer operations leader focused on measurable improvements and execution cadence.',
+        } as any,
+      ] as any;
+      baseline.parsedRecords = [
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          parsedJson: {
+            experience: [
+              {
+                company: 'Parsed Co',
+                role_title: 'Director of Support Operations',
+                start_date: 'Jan 2021',
+                end_date: 'Present',
+                details_text: 'Led support operations and exec updates.',
+              },
+              {
+                company: 'Parsed Co',
+                role_title: 'Support Operations Manager',
+                start_date: 'Jan 2018',
+                end_date: 'Dec 2020',
+                details_text: 'Improved incident routing and operating reviews.',
+              },
+            ],
+          },
+          resumeV2Json: {
+            heading: { name: 'Test Candidate', contactLine: '' },
+            summary: 'Sparse ResumeV2 summary.',
+            experience: [
+              {
+                company: 'Sparse Co',
+                roleTitle: 'Support Analyst',
+                dateRange: '2022 - 2024',
+                bullets: ['Sparse resumeV2 evidence.'],
+              },
+            ],
+            education: [],
+          },
+        } as any,
+      ] as any;
+
+      const canonicalSections = resolveBaselineSectionsForGeneration(baseline as any);
+      const structured = extractStructuredBaselineFromSections(canonicalSections as any);
+      expect(Array.isArray(structured?.experience)).toBe(true);
+      expect(structured.experience.length).toBe(2);
+      expect(JSON.stringify(structured)).toContain('Parsed Co');
+      expect(JSON.stringify(structured)).toContain('Director of Support Operations');
+      expect(JSON.stringify(structured)).not.toContain('Sparse Co');
+
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsedRecords;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     }
   });
 
