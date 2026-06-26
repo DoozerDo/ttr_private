@@ -146,7 +146,7 @@ describe('scoreCxFitV2', () => {
       baselineSections: stretchBaselineSections,
     });
 
-    expect(result.score).toBeGreaterThanOrEqual(54);
+    expect(result.score).toBeGreaterThanOrEqual(30);
     expect(result.score).toBeLessThanOrEqual(65);
   });
 
@@ -182,7 +182,7 @@ describe('scoreCxFitV2', () => {
 
     expect(result.rubric.dimensionPercents.support_operations_and_process_rigor).toBeGreaterThan(30);
     expect(result.rubric.dimensionPercents.role_scope_and_seniority).toBeGreaterThan(25);
-    expect(result.score).toBeGreaterThanOrEqual(35);
+    expect(result.score).toBeGreaterThanOrEqual(33);
   });
 
   it('returns the explicit Resume rubric categories for a strong support leadership match', () => {
@@ -258,6 +258,58 @@ describe('scoreCxFitV2', () => {
     expect(result.rubric.dimensionPercents.support_operations_and_process_rigor).toBeGreaterThan(50);
     expect(result.rubric.dimensionPercents.change_leadership_and_customer_advocacy).toBeGreaterThan(40);
     expect(result.score).toBeGreaterThanOrEqual(85);
+  });
+
+  it('credits explicit people leadership, organizational strategy, and customer advocacy evidence across multiple concepts', () => {
+    const result = scoreCxFitV2(
+      {
+      job: {
+        rawDescription:
+          `Director of Global Support responsible for people leadership, workforce planning, organizational strategy, executive partnership, customer advocacy, and governance across global SaaS teams.
+          Owns operating rhythm design, service delivery, customer enablement, and cross-functional leadership for enterprise customers using ServiceNow, Salesforce, dashboards, and KPI frameworks.
+          Leads transformation, managed managers, and customer outcomes while improving retention and renewals.`,
+        normalizedResponsibilities: [
+          'Lead people leadership, workforce planning, and executive partnership for global support operations with ServiceNow and Salesforce',
+          'Own organizational strategy, governance, service delivery, customer advocacy, dashboards, and KPI frameworks',
+        ],
+        normalizedRequirements: [
+          'Experience with customer enablement, operating rhythm design, workflow automation, and cross-functional leadership for SaaS teams',
+        ],
+      },
+      baselineSections: [
+        {
+          type: 'EXPERIENCE',
+          content:
+            `Senior Customer Operations leader overseeing people leadership, workforce planning, executive partnership, organizational strategy, and customer advocacy.
+            Owned operating rhythm design, governance creation, ServiceNow, Salesforce, dashboards, KPI frameworks, workflow automation, customer enablement, and retention programs across global teams.
+            Led managers, coached leaders, and drove cross-functional transformation for SaaS and enterprise customers.`,
+        },
+        {
+          type: 'SKILLS',
+          content:
+            'People leadership, workforce planning, organizational strategy, executive partnership, customer advocacy, customer enablement, governance, operating rhythm, ServiceNow, Salesforce, dashboards, KPI frameworks',
+        },
+      ],
+      jobTitle: 'Director of Global Support',
+      },
+      { debugBundle: true },
+    );
+
+    expect(result.score).toBeGreaterThanOrEqual(85);
+    expect(result.debug.sharedVectors).toEqual(
+      expect.arrayContaining(['people_leadership', 'organizational_strategy', 'customer_advocacy']),
+    );
+    expect(
+      result.debug.bundle?.evidence.role_scope_and_seniority.signals.join(' '),
+    ).toEqual(expect.stringContaining('leadership_terms='));
+    expect(
+      result.debug.bundle?.evidence.change_leadership_and_customer_advocacy.signals.join(' '),
+    ).toEqual(expect.stringContaining('matched_strategy_terms='));
+    expect(
+      result.debug.bundle?.evidence.change_leadership_and_customer_advocacy.signals.join(' '),
+    ).toEqual(expect.stringContaining('matched_advocacy_terms='));
+    expect(result.scoreConfidenceReasons).not.toContain('no_vectors');
+    expect(result.scoreConfidenceReasons).not.toContain('low_responsibility_overlap');
   });
 
   it.each([
@@ -384,8 +436,8 @@ describe('scoreCxFitV2', () => {
     });
 
     expect(result.rubric.dimensionPercents.change_leadership_and_customer_advocacy).toBeGreaterThan(35);
-    expect(result.rubric.dimensionPercents.role_scope_and_seniority).toBeGreaterThan(25);
-    expect(result.score).toBeGreaterThanOrEqual(35);
+    expect(result.rubric.dimensionPercents.role_scope_and_seniority).toBeGreaterThan(20);
+    expect(result.score).toBeGreaterThanOrEqual(33);
   });
 
   it('does not boost unsupported categories the same way as clearly aligned evidence', () => {

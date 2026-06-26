@@ -710,6 +710,57 @@ const RESPONSIBILITY_VECTORS = [
     ],
   },
   {
+    id: 'people_leadership',
+    keywords: [
+      'people leadership',
+      'managed managers',
+      'manager of managers',
+      'managed teams',
+      'team leadership',
+      'talent development',
+      'performance management',
+      'succession planning',
+      'workforce planning',
+      'coaching',
+      'mentoring',
+      'hiring',
+      'org design',
+      'organizational design',
+    ],
+  },
+  {
+    id: 'organizational_strategy',
+    keywords: [
+      'organizational strategy',
+      'organizational leadership',
+      'executive partnership',
+      'cross-functional leadership',
+      'workforce planning',
+      'strategic planning',
+      'people leadership',
+      'talent development',
+      'performance management',
+      'succession planning',
+      'org design',
+      'organizational design',
+    ],
+  },
+  {
+    id: 'customer_advocacy',
+    keywords: [
+      'customer advocacy',
+      'voice of customer',
+      'customer outcomes',
+      'customer enablement',
+      'customer experience',
+      'customer journey',
+      'adoption',
+      'retention',
+      'renewals',
+      'customer success',
+    ],
+  },
+  {
     id: 'network_infrastructure_operations',
     keywords: [
       'network engineer',
@@ -837,6 +888,20 @@ const STRATEGY_PATTERNS: RegExp[] = [
   /tooling roadmap/,
   /cross[- ]functional prioritization/,
   /program(?:s)? (?:built|launched|led|owned)/,
+  /organizational strategy/,
+  /organizational leadership/,
+  /executive partnership/,
+  /cross[- ]functional leadership/,
+  /workforce planning/,
+  /talent development/,
+  /performance management/,
+  /succession planning/,
+  /org(?:anization)? design/,
+  /customer advocacy/,
+  /customer enablement/,
+  /customer outcomes?/,
+  /voice of the customer/,
+  /operating rhythm/,
 ];
 
 const EXECUTION_PATTERNS: RegExp[] = [
@@ -870,9 +935,15 @@ const CUSTOMER_ADVOCACY_PATTERNS: RegExp[] = [
   /\bvoc\b/,
   /customer experience/,
   /customer advocacy/,
+  /customer success/,
+  /customer enablement/,
+  /customer outcomes?/,
+  /customer journey/,
   /csat/,
   /nps/,
-  /customer outcomes?/,
+  /renewals?/,
+  /retention/,
+  /adoption/,
   /reduce (?:contacts|time to resolution|steps)/,
   /\bdeflection\b/,
   /knowledge base/,
@@ -986,6 +1057,24 @@ const TRAJECTORY_TERMS = [
   'network',
 ];
 
+const PEOPLE_LEADERSHIP_TERMS = [
+  'people leadership',
+  'managed managers',
+  'manager of managers',
+  'managed teams',
+  'team leadership',
+  'talent development',
+  'performance management',
+  'succession planning',
+  'workforce planning',
+  'coaching',
+  'mentoring',
+  'hiring',
+  'organizational leadership',
+  'organizational design',
+  'org design',
+];
+
 const HEURISTIC_CONFIDENCE_POINTS: Record<HeuristicConfidence, number> = {
   low: 1,
   medium: 2,
@@ -1010,6 +1099,22 @@ const STRATEGIC_SIGNAL_TERMS = [
   'p&l',
   'governance',
   'strategy',
+  'strategic planning',
+  'business strategy',
+  'organizational strategy',
+  'organizational leadership',
+  'executive partnership',
+  'cross-functional leadership',
+  'people leadership',
+  'workforce planning',
+  'talent development',
+  'performance management',
+  'succession planning',
+  'org design',
+  'organizational design',
+  'operating model',
+  'operating rhythm',
+  'transformation',
   'vision',
   'enterprise',
   'organizational',
@@ -1023,6 +1128,13 @@ const STRATEGIC_SIGNAL_TERMS = [
   'portfolio',
   'board',
   'cab',
+  'customer advocacy',
+  'customer enablement',
+  'customer outcomes',
+  'voice of customer',
+  'adoption',
+  'retention',
+  'renewals',
 ];
 
 const EXECUTIVE_SCOPE_TERMS = [
@@ -1036,6 +1148,19 @@ const EXECUTIVE_SCOPE_TERMS = [
   'organizational',
   'governance',
   'executive',
+  'executive partnership',
+  'organizational leadership',
+  'cross-functional leadership',
+  'people leadership',
+  'workforce planning',
+  'talent development',
+  'performance management',
+  'succession planning',
+  'org design',
+  'organizational design',
+  'customer advocacy',
+  'customer outcomes',
+  'customer enablement',
   'multi region',
   'cross regional',
   'enterprise level',
@@ -1444,6 +1569,18 @@ const formatClusterList = (clusters: string[]) => {
   return `${clusters.slice(0, 8).join(',')}...`;
 };
 
+const collectMatchedTerms = (text: string, terms: string[]) => {
+  const lower = text.toLowerCase();
+  return Array.from(
+    new Set(
+      terms.filter((term) => {
+        const normalized = term.toLowerCase().trim();
+        return normalized.length > 0 && lower.includes(normalized);
+      }),
+    ),
+  );
+};
+
 const SUPPORT_OPERATIONS_FAMILY_PATTERNS = [
   /support operations?/,
   /customer operations?/,
@@ -1469,7 +1606,7 @@ const SUPPORT_OPERATIONS_FAMILY_PATTERNS = [
   /support queue/,
 ];
 
-const LEADERSHIP_ACTION_PATTERNS = /led|leading|lead(?:s|ership)?|managed|managing|manage|owned|owns?|built|building|improved|improving|scaled|scaling|optimized|optimizing|directed|directing|supervised|supervising|drove|driving|orchestrated|orchestrating|oversee|oversees|overseeing|responsible/;
+const LEADERSHIP_ACTION_PATTERNS = /led|leading|lead(?:s|ership)?|managed|managing|manage|owned|owns?|built|building|improved|improving|scaled|scaling|optimized|optimizing|directed|directing|supervised|supervising|drove|driving|orchestrated|orchestrating|oversee|oversees|overseeing|responsible|coached|coaching|mentored|mentoring|hired|hiring|developed|developing|partnered|partnering|guided|guiding|shaped|shaping/;
 
 const CHANGE_LEADERSHIP_FAMILY_PATTERNS = [
   /change leadership/,
@@ -1485,10 +1622,18 @@ const CHANGE_LEADERSHIP_FAMILY_PATTERNS = [
   /reorganization/,
   /redesign/,
   /launch/,
+  /executive partnership/,
+  /organizational strategy/,
+  /organizational leadership/,
+  /cross-functional leadership/,
+  /workforce planning/,
+  /customer advocacy/,
+  /customer enablement/,
 ];
 
 const LEADERSHIP_SCOPE_FAMILY_PATTERNS = [
   /led|leading|managed|owned|directed|supervised|built|drove|orchestrated|championed|spearheaded/,
+  /coached|coaching|mentored|mentoring|hired|hiring|developed|developing|guided|guiding/,
   /team of \d+/,
   /\d+\+/,
   /across \d+/,
@@ -1501,6 +1646,15 @@ const LEADERSHIP_SCOPE_FAMILY_PATTERNS = [
   /division/,
   /department/,
   /region/,
+  /people leadership/,
+  /workforce planning/,
+  /talent development/,
+  /performance management/,
+  /succession planning/,
+  /organizational leadership/,
+  /organizational design/,
+  /org design/,
+  /executive partnership/,
 ];
 
 function hasFamilyEvidence(text: string, family: 'support' | 'change' | 'scope'): boolean {
@@ -2846,6 +3000,22 @@ const buildFitScoreDebugBundle = (
     changeLeadershipEligibility === 'ineligible_ic_role'
       ? 'dimension_ineligible_ic_role=true'
       : 'dimension_ineligible_ic_role=false';
+  const semanticSignalText = `${normalizedBaselineText} ${normalizedJobText}`;
+  const strategicSignalTerms = collectMatchedTerms(semanticSignalText, STRATEGIC_SIGNAL_TERMS);
+  const executiveScopeTerms = collectMatchedTerms(semanticSignalText, EXECUTIVE_SCOPE_TERMS);
+  const peopleLeadershipTerms = collectMatchedTerms(semanticSignalText, PEOPLE_LEADERSHIP_TERMS);
+  const customerAdvocacyTerms = collectMatchedTerms(semanticSignalText, [
+    'customer success',
+    'customer advocacy',
+    'voice of customer',
+    'customer outcomes',
+    'customer enablement',
+    'customer experience',
+    'customer journey',
+    'adoption',
+    'retention',
+    'renewals',
+  ]);
 
   const evidence: Record<ScoringContractV1DimensionKey, FitScoreDimensionEvidence> = {
     role_scope_and_seniority: buildEvidence(
@@ -2862,6 +3032,8 @@ const buildFitScoreDebugBundle = (
         `band_delta=${bandDelta}`,
         `baseline_band=L${baselineBand}`,
         `role_band=L${roleBand}`,
+        `leadership_terms=${formatClusterList(peopleLeadershipTerms)}`,
+        `executive_terms=${formatClusterList(executiveScopeTerms)}`,
       ],
       [
         { source: 'job', reference: 'normalized job summary', text: normalizedJobText },
@@ -2919,6 +3091,9 @@ const buildFitScoreDebugBundle = (
         `advocacy_ratio_floored=${flooredAdvocacyRatioPercent.toFixed(1)}%`,
         changeIneligibleSignal,
         changePercentSignal,
+        `matched_strategy_terms=${formatClusterList(strategicSignalTerms)}`,
+        `matched_advocacy_terms=${formatClusterList(customerAdvocacyTerms)}`,
+        `matched_leadership_terms=${formatClusterList(peopleLeadershipTerms)}`,
       ],
       [
         { source: 'job', reference: 'normalized job summary', text: normalizedJobText },
