@@ -228,6 +228,13 @@ describe('scoreCxFitV2', () => {
       industry_and_context_fit: 15,
       strategic_vs_tactical_balance: 15,
     });
+    expect(Object.keys(result.rubric.resumeProject.categories).sort()).toEqual([
+      'experience_alignment',
+      'industry_and_context_fit',
+      'leadership_level',
+      'strategic_vs_tactical_balance',
+      'technical_and_platform_fit',
+    ]);
     expect(Object.keys(result.rubric.resumeProject.categoryPoints).sort()).toEqual([
       'experience_alignment',
       'industry_and_context_fit',
@@ -242,10 +249,11 @@ describe('scoreCxFitV2', () => {
       'strategic_vs_tactical_balance',
       'technical_and_platform_fit',
     ]);
+    expect(result.rubric.resumeProject.totalScore).toBe(result.score);
     expect(result.rubric.resumeProject.finalScore).toBe(result.score);
     expect(result.rubric.resumeProject.subtotal).toBeCloseTo(result.score, 6);
     expect(
-      Object.values(result.rubric.resumeProject.categoryPoints).reduce((sum, value) => sum + value, 0),
+      Object.values(result.rubric.resumeProject.categories).reduce((sum, value) => sum + value, 0),
     ).toBeCloseTo(result.score, 6);
     expect(result.rubric.dimensionPercents.support_operations_and_process_rigor).toBeGreaterThan(50);
     expect(result.rubric.dimensionPercents.change_leadership_and_customer_advocacy).toBeGreaterThan(40);

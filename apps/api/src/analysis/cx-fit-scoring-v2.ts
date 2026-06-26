@@ -458,9 +458,11 @@ export type CxFitV2Result = {
     resumeProject: {
       id: 'resume_project_cx_fit_v1';
       weights: ResumeRubricWeights;
+      categories: Record<ResumeRubricCategoryKey, number>;
       categoryPercents: Record<ResumeRubricCategoryKey, number>;
       categoryPoints: Record<ResumeRubricCategoryKey, number>;
       subtotal: number;
+      totalScore: number;
       finalScore: number;
       rounding: 'round_half_up_final_only';
     };
@@ -1391,9 +1393,11 @@ const buildResumeProjectRubric = (
   return {
     id: 'resume_project_cx_fit_v1',
     weights: RESUME_PROJECT_WEIGHTS,
+    categories: normalizedCategoryPoints,
     categoryPercents: normalizedCategoryPercents,
     categoryPoints: normalizedCategoryPoints,
     subtotal,
+    totalScore: finalScore,
     finalScore,
     rounding: 'round_half_up_final_only',
   };

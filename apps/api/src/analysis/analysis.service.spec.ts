@@ -290,6 +290,41 @@ const sampleScoringV2: CxFitV2Result = {
       change_leadership_and_customer_advocacy: 14,
     },
     subtotal: 92,
+    resumeProject: {
+      id: 'resume_project_cx_fit_v1',
+      weights: {
+        experience_alignment: 30,
+        leadership_level: 20,
+        technical_and_platform_fit: 20,
+        industry_and_context_fit: 15,
+        strategic_vs_tactical_balance: 15,
+      },
+      categories: {
+        experience_alignment: 25,
+        leadership_level: 23,
+        technical_and_platform_fit: 18,
+        industry_and_context_fit: 14,
+        strategic_vs_tactical_balance: 10,
+      },
+      categoryPercents: {
+        experience_alignment: 83.3333333333,
+        leadership_level: 115,
+        technical_and_platform_fit: 90,
+        industry_and_context_fit: 93.3333333333,
+        strategic_vs_tactical_balance: 66.6666666667,
+      },
+      categoryPoints: {
+        experience_alignment: 25,
+        leadership_level: 23,
+        technical_and_platform_fit: 18,
+        industry_and_context_fit: 14,
+        strategic_vs_tactical_balance: 10,
+      },
+      subtotal: 90,
+      totalScore: 90,
+      finalScore: 90,
+      rounding: 'round_half_up_final_only',
+    },
     penalties: [],
     finalBeforeClamp: 90,
     rounding: 'round_half_up_final_only',
@@ -3481,6 +3516,25 @@ const sampleScoringV2: CxFitV2Result = {
         score: 0,
         rubric: {
           ...sampleScoringV2.rubric,
+          resumeProject: {
+            ...sampleScoringV2.rubric.resumeProject,
+            totalScore: 0,
+            finalScore: 0,
+            categories: {
+              experience_alignment: 0,
+              leadership_level: 0,
+              technical_and_platform_fit: 0,
+              industry_and_context_fit: 0,
+              strategic_vs_tactical_balance: 0,
+            },
+            categoryPoints: {
+              experience_alignment: 0,
+              leadership_level: 0,
+              technical_and_platform_fit: 0,
+              industry_and_context_fit: 0,
+              strategic_vs_tactical_balance: 0,
+            },
+          },
           dimensionPercents: {
             ...sampleScoringV2.rubric.dimensionPercents,
           },
@@ -3511,12 +3565,61 @@ const sampleScoringV2: CxFitV2Result = {
       expect(fitAssessmentRepository.save).not.toHaveBeenCalled();
     });
 
+    it('uses the Resume rubric aggregate when runFitAssessment receives a zero legacy score with a nonzero nested rubric total', async () => {
+      (fitScoringServiceMock.scoreCxFitV2Authenticated as jest.Mock).mockReturnValueOnce({
+        ...sampleScoringV2,
+        score: 0,
+        rubric: {
+          ...sampleScoringV2.rubric,
+          resumeProject: {
+            ...sampleScoringV2.rubric.resumeProject,
+            totalScore: 90,
+            finalScore: 90,
+          },
+        },
+      });
+
+      const result = await service.runFitAssessment('user-1', {
+        baselineId: 'b-1',
+        jobId: 'job-1',
+      });
+
+      expect(result.score).toBe(90);
+      expect(result.overallScore).toBe(90);
+      expect(result.scoring_v2?.score).toBe(90);
+      expect(result.scoring_v2?.rubric.resumeProject.totalScore).toBe(90);
+      expect(fitAssessmentRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          overallScore: 90,
+        }),
+      );
+    });
+
     it('throws an explicit zero-score invariant failure for reused latest assessments with non-empty baseline and job text', async () => {
       const zeroScoringV2: CxFitV2Result = {
         ...sampleScoringV2,
         score: 0,
         rubric: {
           ...sampleScoringV2.rubric,
+          resumeProject: {
+            ...sampleScoringV2.rubric.resumeProject,
+            totalScore: 0,
+            finalScore: 0,
+            categories: {
+              experience_alignment: 0,
+              leadership_level: 0,
+              technical_and_platform_fit: 0,
+              industry_and_context_fit: 0,
+              strategic_vs_tactical_balance: 0,
+            },
+            categoryPoints: {
+              experience_alignment: 0,
+              leadership_level: 0,
+              technical_and_platform_fit: 0,
+              industry_and_context_fit: 0,
+              strategic_vs_tactical_balance: 0,
+            },
+          },
           dimensionPercents: {
             ...sampleScoringV2.rubric.dimensionPercents,
           },

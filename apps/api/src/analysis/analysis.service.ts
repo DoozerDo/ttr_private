@@ -881,6 +881,73 @@ export class AnalysisService {
     return { total_score, dimensions };
   }
 
+  private getAuthoritativeResumeProjectScore(
+    scoringV2?: CxFitV2Result | null,
+  ): number | null {
+    const resumeProject = scoringV2?.rubric?.resumeProject;
+    if (resumeProject) {
+      if (typeof resumeProject.totalScore === 'number' && !Number.isNaN(resumeProject.totalScore)) {
+        return resumeProject.totalScore;
+      }
+      if (typeof resumeProject.finalScore === 'number' && !Number.isNaN(resumeProject.finalScore)) {
+        return resumeProject.finalScore;
+      }
+      const categories = resumeProject.categories ?? resumeProject.categoryPoints;
+      if (categories) {
+        const categoryTotal = Object.values(categories).reduce(
+          (sum, value) => sum + (typeof value === 'number' && !Number.isNaN(value) ? value : 0),
+          0,
+        );
+        return categoryTotal;
+      }
+    }
+
+    if (typeof scoringV2?.score === 'number' && !Number.isNaN(scoringV2.score)) {
+      return scoringV2.score;
+    }
+
+    return null;
+  }
+
+  private alignCxFitScoreToResumeProject(
+    scoringV2?: CxFitV2Result | null,
+  ): CxFitV2Result | null {
+    if (!scoringV2) return null;
+
+    const authoritativeScore = this.getAuthoritativeResumeProjectScore(scoringV2);
+    if (authoritativeScore === null) {
+      return scoringV2;
+    }
+
+    if (scoringV2.score !== authoritativeScore) {
+      scoringV2.score = authoritativeScore;
+    }
+
+    if (scoringV2.rubric?.resumeProject) {
+      scoringV2.rubric.resumeProject.totalScore = authoritativeScore;
+      scoringV2.rubric.resumeProject.finalScore = authoritativeScore;
+    }
+
+    return scoringV2;
+  }
+
+  private buildResumeProjectInvariantDetails(
+    scoringV2?: CxFitV2Result | null,
+  ): Record<string, unknown> | null {
+    const resumeProject = scoringV2?.rubric?.resumeProject;
+    if (!resumeProject) return null;
+
+    return {
+      id: resumeProject.id,
+      totalScore: resumeProject.totalScore ?? resumeProject.finalScore ?? null,
+      weights: resumeProject.weights,
+      categories: resumeProject.categories ?? resumeProject.categoryPoints,
+      categoryPercents: resumeProject.categoryPercents,
+      subtotal: resumeProject.subtotal,
+      rounding: resumeProject.rounding,
+    };
+  }
+
   private leadershipLevelFromBandDelta(bandDelta: number) {
     const absoluteGap = Math.abs(bandDelta);
     const raw = 100 - Math.min(100, absoluteGap * 15);
@@ -2642,7 +2709,7 @@ export class AnalysisService {
       dimensionWeights,
     );
 
-      const scoringV2 = this.fitScoringService.scoreCxFitV2Authenticated(
+      let scoringV2 = this.fitScoringService.scoreCxFitV2Authenticated(
         {
           job: {
             rawDescription: canonicalJobForHash.rawDescription,
@@ -2661,6 +2728,8 @@ export class AnalysisService {
         },
         { debugBundle: allowDebug },
       );
+      scoringV2 = this.alignCxFitScoreToResumeProject(scoringV2) ?? scoringV2;
+      const authoritativeScore = scoringV2.score;
 
       if (
         !scoringV2 ||
@@ -3404,7 +3473,7 @@ export class AnalysisService {
           message: PROMPT_LIKE_FLAG_MESSAGE,
         });
       }
-      const scoringV2 = this.fitScoringService.scoreCxFitV2Authenticated(
+      let scoringV2 = this.fitScoringService.scoreCxFitV2Authenticated(
         {
           job: {
             rawDescription: canonicalJobForHash.rawDescription,
@@ -3423,6 +3492,8 @@ export class AnalysisService {
         },
         { debugBundle: allowDebug },
       );
+      scoringV2 = this.alignCxFitScoreToResumeProject(scoringV2) ?? scoringV2;
+      const authoritativeScore = scoringV2.score;
 
       if (
         !scoringV2 ||
@@ -3435,7 +3506,7 @@ export class AnalysisService {
           'CX Fit v2 scoring produced incomplete results',
         );
       }
-      if (scoringV2.score === 0) {
+      if (authoritativeScore === 0) {
         this.assertNoImpossibleZeroScore({
           baselineId: baseline.id,
           jobId: job.id,
@@ -3444,18 +3515,19 @@ export class AnalysisService {
           jobTextLength: jobTextCharsScored,
           scorerVersion: scoringV2.scorerVersion ?? null,
           categoryBreakdown: scoringV2.rubric.dimensionPercents,
+          resumeProjectBreakdown: this.buildResumeProjectInvariantDetails(scoringV2),
         });
       }
       logStageLifecycle("generation_completed", currentStage, {
-        score: scoringV2.score,
+        score: authoritativeScore,
       });
       if (this.isDevMode()) {
         this.logger.log(
-          `[fit-score] scoring_v2_completed baselineId=${baseline.id} jobId=${resolvedJobId} score=${scoringV2.score} heuristicUsed=${scoringV2.debug.heuristicInference.usedHeuristicInference} heuristicLiftTotal=${scoringV2.debug.heuristicInference.heuristicLiftTotal} scoreConfidence=${scoringV2.scoreConfidence} scorePresentationMode=${scoringV2.scorePresentationMode}`,
+          `[fit-score] scoring_v2_completed baselineId=${baseline.id} jobId=${resolvedJobId} score=${authoritativeScore} heuristicUsed=${scoringV2.debug.heuristicInference.usedHeuristicInference} heuristicLiftTotal=${scoringV2.debug.heuristicInference.heuristicLiftTotal} scoreConfidence=${scoringV2.scoreConfidence} scorePresentationMode=${scoringV2.scorePresentationMode}`,
         );
       }
       this.logger.log(
-        `[fit-score] analysis.run scoring_completed runId=${attemptContext.attemptId} userId=${userId} baselineId=${baseline.id} jobId=${resolvedJobId} dedupeKey=${analysisDedupeKey} score=${scoringV2.score}`,
+        `[fit-score] analysis.run scoring_completed runId=${attemptContext.attemptId} userId=${userId} baselineId=${baseline.id} jobId=${resolvedJobId} dedupeKey=${analysisDedupeKey} score=${authoritativeScore}`,
       );
 
       this.applyBaselineCoverageDetails(
@@ -3473,9 +3545,9 @@ export class AnalysisService {
       const legacyDimensionScores =
         this.mapCxFitV2ToLegacyDimensionScores(scoringV2);
       const responseVerdict =
-        this.deriveFitScoreVerdictLabelFromScore(scoringV2.score);
+        this.deriveFitScoreVerdictLabelFromScore(authoritativeScore);
       const persistenceVerdict =
-        this.deriveFitAssessmentVerdictFromScore(scoringV2.score);
+        this.deriveFitAssessmentVerdictFromScore(authoritativeScore);
 
       const gapInsights = this.gapAnalysisService.analyze({
         baselineSections: sectionPayload,
@@ -3489,7 +3561,7 @@ export class AnalysisService {
       });
       const strengths = gapInsights.strengths;
       const gaps = gapInsights.criticalGaps.map((gap) => gap.title);
-      const finalScore = scoringV2.score;
+      const finalScore = authoritativeScore;
       const jobAnalysis = this.buildJobAnalysis({
         rawDescription: job?.rawDescription ?? '',
         normalizedResponsibilities: job?.normalizedResponsibilities ?? [],
@@ -4462,6 +4534,7 @@ export class AnalysisService {
 
   private async buildLatestAssessmentPayload(assessment: FitAssessment) {
     const gapInsights = await this.buildGapInsightsForAssessment(assessment);
+    const scoringV2 = this.alignCxFitScoreToResumeProject(assessment.scoringV2);
     const summary = this.buildSummaryFromTerms(
       gapInsights.strengths ?? [],
       gapInsights.criticalGaps.map((gap) => gap.title),
@@ -4477,7 +4550,7 @@ export class AnalysisService {
     })
       : null;
 
-    const scoringV2DimensionScores = assessment.scoringV2?.rubric?.dimensionPercents ?? null;
+    const scoringV2DimensionScores = scoringV2?.rubric?.dimensionPercents ?? null;
     const fallbackDimensionScores = {
       role_scope_and_seniority: assessment.dimensionScores?.experienceAlignment ?? 0,
       support_operations_and_process_rigor: assessment.dimensionScores?.leadershipLevel ?? 0,
@@ -4486,17 +4559,17 @@ export class AnalysisService {
       change_leadership_and_customer_advocacy:
         assessment.dimensionScores?.strategicTacticalFit ?? 0,
     };
-    const latestScore = assessment.scoringV2?.score ?? assessment.overallScore;
-    const latestLegacyDimensionScores = assessment.scoringV2
-      ? this.mapCxFitV2ToLegacyDimensionScores(assessment.scoringV2)
+    const latestScore = scoringV2?.score ?? assessment.overallScore;
+    const latestLegacyDimensionScores = scoringV2
+      ? this.mapCxFitV2ToLegacyDimensionScores(scoringV2)
       : assessment.dimensionScores;
     const narrative = buildResultsNarrative({
       overallScore: latestScore,
       dimensionScores: scoringV2DimensionScores ?? fallbackDimensionScores,
     });
     const scoreBreakdown = this.buildScoreBreakdown(assessment);
-    const refreshedScoringV2 = await this.refreshToolingCoverageForAssessment(
-      assessment,
+    const refreshedScoringV2 = this.alignCxFitScoreToResumeProject(
+      await this.refreshToolingCoverageForAssessment(assessment),
     );
     const canonicalClaims = refreshedScoringV2?.debug?.toolingCoverage?.claims ?? [];
     const supportedClaims = canonicalClaims.filter(
@@ -4547,7 +4620,7 @@ export class AnalysisService {
       confidenceReasons: assessment.confidenceReasons ?? [],
       createdAt: assessment.createdAt,
       jobAnalysis: null,
-      fitScore: assessment.overallScore ?? null,
+      fitScore: latestScore,
       scoring_v2: refreshedScoringV2,
       supportingSignals,
       baselineEvidence,
@@ -4588,6 +4661,7 @@ export class AnalysisService {
     jobTextLength: number;
     scorerVersion: string | null;
     categoryBreakdown?: Record<string, number> | null;
+    resumeProjectBreakdown?: Record<string, unknown> | null;
   }) {
     if (params.baselineSectionCount <= 0) {
       return;
@@ -4610,6 +4684,9 @@ export class AnalysisService {
           scorerVersion: params.scorerVersion,
           ...(params.categoryBreakdown
             ? { categoryBreakdown: params.categoryBreakdown }
+            : {}),
+          ...(params.resumeProjectBreakdown
+            ? { resumeProjectBreakdown: params.resumeProjectBreakdown }
             : {}),
         },
       },
@@ -4774,7 +4851,10 @@ export class AnalysisService {
       );
     }
 
-    if (assessment.scoringV2?.score === 0) {
+    const authoritativeScoringV2 = this.alignCxFitScoreToResumeProject(
+      assessment.scoringV2,
+    );
+    if (authoritativeScoringV2?.score === 0) {
       const baselineTextLength = getCharCount(
         (baseline.sections ?? [])
           .map((section) => section.content ?? '')
@@ -4787,8 +4867,9 @@ export class AnalysisService {
         baselineSectionCount: baseline.sections?.length ?? 0,
         baselineTextLength,
         jobTextLength,
-        scorerVersion: assessment.scoringV2.scorerVersion ?? null,
-        categoryBreakdown: assessment.scoringV2.rubric?.dimensionPercents ?? null,
+        scorerVersion: authoritativeScoringV2.scorerVersion ?? null,
+        categoryBreakdown: authoritativeScoringV2.rubric?.dimensionPercents ?? null,
+        resumeProjectBreakdown: this.buildResumeProjectInvariantDetails(authoritativeScoringV2),
       });
     }
 
@@ -4797,7 +4878,10 @@ export class AnalysisService {
         `[fit-score] latest_assessment_reused jobId=${jobId} baselineId=${assessment.baselineId} assessmentId=${assessment.id} score=${assessment.overallScore}`,
       );
     }
-    return this.buildLatestAssessmentPayload(assessment);
+    return this.buildLatestAssessmentPayload({
+      ...assessment,
+      scoringV2: authoritativeScoringV2 ?? assessment.scoringV2,
+    });
   }
 
   async getFitAssessmentById(
@@ -4844,6 +4928,7 @@ export class AnalysisService {
         `[fit-score] assessment_rehydrated assessmentId=${assessmentId} score=${assessment.overallScore}`,
       );
     }
+    const scoringV2 = this.alignCxFitScoreToResumeProject(assessment.scoringV2);
     const fallbackDimensionScores = {
       role_scope_and_seniority: assessment.dimensionScores?.experienceAlignment ?? 0,
       support_operations_and_process_rigor: assessment.dimensionScores?.leadershipLevel ?? 0,
@@ -4852,7 +4937,7 @@ export class AnalysisService {
       change_leadership_and_customer_advocacy:
         assessment.dimensionScores?.strategicTacticalFit ?? 0,
     };
-    const latestScore = assessment.scoringV2?.score ?? null;
+    const latestScore = scoringV2?.score ?? null;
     return {
       ok: true,
       assessmentId: assessment.id,
@@ -4865,8 +4950,8 @@ export class AnalysisService {
       overallScore: latestScore,
       score: latestScore,
       verdict: assessment.verdict,
-      dimensionScores: assessment.scoringV2
-        ? this.mapCxFitV2ToLegacyDimensionScores(assessment.scoringV2)
+      dimensionScores: scoringV2
+        ? this.mapCxFitV2ToLegacyDimensionScores(scoringV2)
         : assessment.dimensionScores,
       strengths: assessment.strengths ?? [],
       gaps: assessment.gaps ?? [],
@@ -4890,8 +4975,8 @@ export class AnalysisService {
       confidenceReasons: assessment.confidenceReasons ?? [],
       createdAt: assessment.createdAt,
       jobAnalysis: null,
-      fitScore: assessment.overallScore ?? null,
-      scoring_v2: assessment.scoringV2,
+      fitScore: latestScore,
+      scoring_v2: scoringV2,
       supportingSignals: [],
       baselineEvidence: [],
       verification_coverage: null,
@@ -4939,7 +5024,10 @@ export class AnalysisService {
       );
     }
 
-    if (assessment.scoringV2?.score === 0) {
+    const authoritativeScoringV2 = this.alignCxFitScoreToResumeProject(
+      assessment.scoringV2,
+    );
+    if (authoritativeScoringV2?.score === 0) {
       const baselineTextLength = getCharCount(
         (baseline.sections ?? [])
           .map((section) => section.content ?? '')
@@ -4952,8 +5040,9 @@ export class AnalysisService {
         baselineSectionCount: baseline.sections?.length ?? 0,
         baselineTextLength,
         jobTextLength,
-        scorerVersion: assessment.scoringV2.scorerVersion ?? null,
-        categoryBreakdown: assessment.scoringV2.rubric?.dimensionPercents ?? null,
+        scorerVersion: authoritativeScoringV2.scorerVersion ?? null,
+        categoryBreakdown: authoritativeScoringV2.rubric?.dimensionPercents ?? null,
+        resumeProjectBreakdown: this.buildResumeProjectInvariantDetails(authoritativeScoringV2),
       });
     }
 
@@ -4962,6 +5051,9 @@ export class AnalysisService {
         `[fit-score] latest_assessment_for_baseline_reused jobId=${jobId} baselineId=${baselineId} assessmentId=${assessment.id} score=${assessment.overallScore}`,
       );
     }
-    return this.buildLatestAssessmentPayload(assessment);
+    return this.buildLatestAssessmentPayload({
+      ...assessment,
+      scoringV2: authoritativeScoringV2 ?? assessment.scoringV2,
+    });
   }
 }
