@@ -1,4 +1,4 @@
-import { scoreCxFitV2 } from './cx-fit-scoring-v2';
+import { CX_FIT_SCORER_VERSION, scoreCxFitV2 } from './cx-fit-scoring-v2';
 
 const nearMirrorBaselineSections = [
   {
@@ -185,7 +185,7 @@ describe('scoreCxFitV2', () => {
     expect(result.score).toBeGreaterThanOrEqual(40);
   });
 
-  it('scores a senior global support leadership match in the strong-fit band', () => {
+  it('returns the explicit Resume rubric categories for a strong support leadership match', () => {
     const result = scoreCxFitV2({
       job: {
         rawDescription:
@@ -217,11 +217,39 @@ describe('scoreCxFitV2', () => {
       jobTitle: 'Director of Global Support',
     });
 
+    expect(result.scorerVersion).toBe(CX_FIT_SCORER_VERSION);
     expect(result.debug.jobVectorsLength).toBeGreaterThan(0);
     expect(result.debug.baselineVectors.length).toBeGreaterThan(0);
+    expect(result.rubric.resumeProject.id).toBe('resume_project_cx_fit_v1');
+    expect(result.rubric.resumeProject.weights).toEqual({
+      experience_alignment: 30,
+      leadership_level: 20,
+      technical_and_platform_fit: 20,
+      industry_and_context_fit: 15,
+      strategic_vs_tactical_balance: 15,
+    });
+    expect(Object.keys(result.rubric.resumeProject.categoryPoints).sort()).toEqual([
+      'experience_alignment',
+      'industry_and_context_fit',
+      'leadership_level',
+      'strategic_vs_tactical_balance',
+      'technical_and_platform_fit',
+    ]);
+    expect(Object.keys(result.rubric.resumeProject.categoryPercents).sort()).toEqual([
+      'experience_alignment',
+      'industry_and_context_fit',
+      'leadership_level',
+      'strategic_vs_tactical_balance',
+      'technical_and_platform_fit',
+    ]);
+    expect(result.rubric.resumeProject.finalScore).toBe(result.score);
+    expect(result.rubric.resumeProject.subtotal).toBeCloseTo(result.score, 6);
+    expect(
+      Object.values(result.rubric.resumeProject.categoryPoints).reduce((sum, value) => sum + value, 0),
+    ).toBeCloseTo(result.score, 6);
     expect(result.rubric.dimensionPercents.support_operations_and_process_rigor).toBeGreaterThan(50);
     expect(result.rubric.dimensionPercents.change_leadership_and_customer_advocacy).toBeGreaterThan(40);
-    expect(result.score).toBeGreaterThanOrEqual(80);
+    expect(result.score).toBeGreaterThanOrEqual(85);
   });
 
   it('keeps empty evidence low even when the job title is senior', () => {

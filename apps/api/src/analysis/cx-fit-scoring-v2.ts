@@ -172,6 +172,15 @@ export type ScoringContractV1DimensionKey =
 
 export type ScoringContractV1Weights = Record<ScoringContractV1DimensionKey, number>;
 
+export type ResumeRubricCategoryKey =
+  | 'experience_alignment'
+  | 'leadership_level'
+  | 'technical_and_platform_fit'
+  | 'industry_and_context_fit'
+  | 'strategic_vs_tactical_balance';
+
+export type ResumeRubricWeights = Record<ResumeRubricCategoryKey, number>;
+
 export type ScoringContractV1PenaltyCode =
   | 'scope_mismatch_downlevel'
   | 'domain_mismatch_hard'
@@ -446,6 +455,15 @@ export type CxFitV2Result = {
     penalties: ScoringContractV1Penalty[];
     finalBeforeClamp: number;
     rounding: 'round_half_up_final_only';
+    resumeProject: {
+      id: 'resume_project_cx_fit_v1';
+      weights: ResumeRubricWeights;
+      categoryPercents: Record<ResumeRubricCategoryKey, number>;
+      categoryPoints: Record<ResumeRubricCategoryKey, number>;
+      subtotal: number;
+      finalScore: number;
+      rounding: 'round_half_up_final_only';
+    };
   };
 
   // extra debug info (safe to log / show)
@@ -504,6 +522,22 @@ const BASE_WEIGHTS: ScoringContractV1Weights = {
   domain_and_business_context: 15,
   change_leadership_and_customer_advocacy: 15,
 };
+
+const RESUME_PROJECT_WEIGHTS: ResumeRubricWeights = {
+  experience_alignment: 30,
+  leadership_level: 20,
+  technical_and_platform_fit: 20,
+  industry_and_context_fit: 15,
+  strategic_vs_tactical_balance: 15,
+};
+
+const RESUME_PROJECT_CATEGORY_ORDER: ResumeRubricCategoryKey[] = [
+  'experience_alignment',
+  'leadership_level',
+  'technical_and_platform_fit',
+  'industry_and_context_fit',
+  'strategic_vs_tactical_balance',
+];
 
 const RESPONSIBILITY_VECTORS = [
   {
@@ -1248,6 +1282,122 @@ const toWeightedPoints = (percent: number, weight: number) => {
 };
 
 const capabilityClusterRegistry = getCapabilityClusterRegistry();
+
+const buildResumeProjectRubric = (
+  dimensionPoints: Record<ScoringContractV1DimensionKey, number>,
+  finalScore: number,
+): CxFitV2Result['rubric']['resumeProject'] => {
+  const rawCategoryPoints: Record<ResumeRubricCategoryKey, number> = {
+    experience_alignment: dimensionPoints.role_scope_and_seniority,
+    leadership_level: dimensionPoints.support_operations_and_process_rigor,
+    technical_and_platform_fit: dimensionPoints.tooling_and_platform_experience,
+    industry_and_context_fit: dimensionPoints.domain_and_business_context,
+    strategic_vs_tactical_balance: dimensionPoints.change_leadership_and_customer_advocacy,
+  };
+
+  const categoryPoints: Record<ResumeRubricCategoryKey, number> = {
+    ...rawCategoryPoints,
+  };
+
+  const maxPoints: Record<ResumeRubricCategoryKey, number> = {
+    experience_alignment: RESUME_PROJECT_WEIGHTS.experience_alignment,
+    leadership_level: RESUME_PROJECT_WEIGHTS.leadership_level,
+    technical_and_platform_fit: RESUME_PROJECT_WEIGHTS.technical_and_platform_fit,
+    industry_and_context_fit: RESUME_PROJECT_WEIGHTS.industry_and_context_fit,
+    strategic_vs_tactical_balance: RESUME_PROJECT_WEIGHTS.strategic_vs_tactical_balance,
+  };
+
+  const rawSubtotal = RESUME_PROJECT_CATEGORY_ORDER.reduce(
+    (sum, category) => sum + rawCategoryPoints[category],
+    0,
+  );
+  let remainingDelta = finalScore - rawSubtotal;
+
+  const distributeDelta = (
+    direction: 1 | -1,
+    categories: ResumeRubricCategoryKey[],
+  ) => {
+    for (const category of categories) {
+      if (remainingDelta === 0) return;
+      if (Math.sign(remainingDelta) !== direction) continue;
+      const room =
+        direction > 0 ? maxPoints[category] - categoryPoints[category] : categoryPoints[category];
+      if (room <= 0) continue;
+      const adjustment = Math.min(Math.abs(remainingDelta), room);
+      categoryPoints[category] += direction * adjustment;
+      remainingDelta -= direction * adjustment;
+    }
+  };
+
+  // Preserve the raw shape while deterministically reconciling the nested rubric to the
+  // authoritative final score. Positive deltas are added in rubric order; negative deltas are
+  // removed in reverse order so the sum remains exact and bounded within each category weight.
+  if (remainingDelta > 0) {
+    distributeDelta(1, RESUME_PROJECT_CATEGORY_ORDER);
+    if (remainingDelta > 0) {
+      distributeDelta(1, [...RESUME_PROJECT_CATEGORY_ORDER].reverse());
+    }
+  } else if (remainingDelta < 0) {
+    distributeDelta(-1, [...RESUME_PROJECT_CATEGORY_ORDER].reverse());
+    if (remainingDelta < 0) {
+      distributeDelta(-1, RESUME_PROJECT_CATEGORY_ORDER);
+    }
+  }
+
+  if (Math.abs(remainingDelta) > 1e-9) {
+    const correctionCategory =
+      remainingDelta > 0
+        ? RESUME_PROJECT_CATEGORY_ORDER[RESUME_PROJECT_CATEGORY_ORDER.length - 1]
+        : RESUME_PROJECT_CATEGORY_ORDER[0];
+    const correctedValue = categoryPoints[correctionCategory] + remainingDelta;
+    categoryPoints[correctionCategory] = Math.max(
+      0,
+      Math.min(maxPoints[correctionCategory], correctedValue),
+    );
+    remainingDelta = 0;
+  }
+
+  const normalizedCategoryPoints: Record<ResumeRubricCategoryKey, number> = {
+    experience_alignment: categoryPoints.experience_alignment,
+    leadership_level: categoryPoints.leadership_level,
+    technical_and_platform_fit: categoryPoints.technical_and_platform_fit,
+    industry_and_context_fit: categoryPoints.industry_and_context_fit,
+    strategic_vs_tactical_balance: categoryPoints.strategic_vs_tactical_balance,
+  };
+  const normalizedCategoryPercents: Record<ResumeRubricCategoryKey, number> = {
+    experience_alignment:
+      (normalizedCategoryPoints.experience_alignment / RESUME_PROJECT_WEIGHTS.experience_alignment) * 100,
+    leadership_level:
+      (normalizedCategoryPoints.leadership_level / RESUME_PROJECT_WEIGHTS.leadership_level) * 100,
+    technical_and_platform_fit:
+      (normalizedCategoryPoints.technical_and_platform_fit /
+        RESUME_PROJECT_WEIGHTS.technical_and_platform_fit) *
+      100,
+    industry_and_context_fit:
+      (normalizedCategoryPoints.industry_and_context_fit /
+        RESUME_PROJECT_WEIGHTS.industry_and_context_fit) *
+      100,
+    strategic_vs_tactical_balance:
+      (normalizedCategoryPoints.strategic_vs_tactical_balance /
+        RESUME_PROJECT_WEIGHTS.strategic_vs_tactical_balance) *
+      100,
+  };
+
+  const subtotal = RESUME_PROJECT_CATEGORY_ORDER.reduce(
+    (sum, category) => sum + normalizedCategoryPoints[category],
+    0,
+  );
+
+  return {
+    id: 'resume_project_cx_fit_v1',
+    weights: RESUME_PROJECT_WEIGHTS,
+    categoryPercents: normalizedCategoryPercents,
+    categoryPoints: normalizedCategoryPoints,
+    subtotal,
+    finalScore,
+    rounding: 'round_half_up_final_only',
+  };
+};
 
 const formatClusterList = (clusters: string[]) => {
   if (!clusters.length) return 'none';
@@ -2382,6 +2532,7 @@ export const scoreCxFitV2 = (
       penalties,
       finalBeforeClamp,
       rounding: 'round_half_up_final_only',
+      resumeProject: buildResumeProjectRubric(dimensionPoints, finalScore),
     },
     debug: {
       jobScoringTextSource,
