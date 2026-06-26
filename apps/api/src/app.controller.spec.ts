@@ -4,6 +4,7 @@ import { AppController } from './app.controller';
 
 describe('AppController', () => {
   let appController: AppController;
+  const originalCommitSha = process.env.COMMIT_SHA;
 
   beforeEach(async () => {
     const app: TestingModule = await Test.createTestingModule({
@@ -19,6 +20,14 @@ describe('AppController', () => {
     }).compile();
 
     appController = app.get<AppController>(AppController);
+  });
+
+  afterEach(() => {
+    if (originalCommitSha === undefined) {
+      delete process.env.COMMIT_SHA;
+    } else {
+      process.env.COMMIT_SHA = originalCommitSha;
+    }
   });
 
   it('returns a health payload', () => {
@@ -65,6 +74,15 @@ describe('AppController', () => {
     );
     expect(typeof response.uptimeSeconds).toBe('number');
     expect(response.timestamp).toBeDefined();
+  });
+
+  it('surfaces the injected commit sha in build metadata', () => {
+    process.env.COMMIT_SHA = 'test-commit-sha';
+
+    const response = appController.getVersion();
+
+    expect(response.gitSha).toBe('test-commit-sha');
+    expect(response.build.gitCommit).toBe('test-commit-sha');
   });
 
   it('returns combined status payload', () => {

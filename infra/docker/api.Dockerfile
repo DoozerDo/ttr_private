@@ -33,6 +33,9 @@ FROM node:20.19.5-slim AS runtime
 WORKDIR /usr/src/app/apps/api
 ENV NODE_ENV=production
 ENV TTR_TEMPLATES_DIR=/usr/src/app/apps/api/templates
+ARG GIT_SHA=unknown
+ENV COMMIT_SHA=${GIT_SHA}
+LABEL org.opencontainers.image.revision=${GIT_SHA}
 
 COPY --from=prod-deps /usr/src/workspace/node_modules /usr/src/app/node_modules
 COPY --from=builder /usr/src/workspace/apps/api/package.json ./package.json
