@@ -4,6 +4,7 @@ import {
   BaselineSection,
   BaselineSectionType,
 } from './baseline-section.entity';
+import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
 
 type ParsedRecordLike = {
   createdAt?: Date | string;
@@ -99,7 +100,10 @@ export function resolveBaselineSectionsForGeneration(
 ): BaselineSection[] {
   const directSections = (baseline.sections ?? []).slice().sort((a, b) => a.order - b.order);
   if (directSections.length > 0) {
-    return directSections;
+    const directStructured = extractStructuredBaselineFromSections(directSections as BaselineSection[]);
+    if ((directStructured.experience ?? []).length > 0) {
+      return directSections;
+    }
   }
 
   const parsed = ((baseline.parsedRecords ?? []) as ParsedRecordLike[])
@@ -111,16 +115,24 @@ export function resolveBaselineSectionsForGeneration(
     })[0];
 
   const parsedSections = extractExperienceSectionsFromParsedJson(parsed?.parsedJson);
-  return parsedSections.map((section, index) => ({
-    id: `parsed-experience-${index}`,
-    baselineId: baseline.id,
-    sectionType: section.sectionType,
-    title: section.title,
-    content: section.content,
-    includePolicy: BaselineIncludePolicy.ALWAYS,
-    order: index,
-    createdAt: new Date(0),
-    updatedAt: new Date(0),
-  })) as BaselineSection[];
+  if (parsedSections.length > 0) {
+    return parsedSections.map((section, index) => ({
+      id: `parsed-experience-${index}`,
+      baselineId: baseline.id,
+      sectionType: section.sectionType,
+      title: section.title,
+      content: section.content,
+      includePolicy: BaselineIncludePolicy.ALWAYS,
+      order: index,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    })) as BaselineSection[];
+  }
+
+  if (directSections.length > 0) {
+    return directSections;
+  }
+
+  return [];
 }
 

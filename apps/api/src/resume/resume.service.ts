@@ -2998,6 +2998,7 @@ export class ResumeService {
     let dedupeKey: string | undefined;
     let reservationRunId: string | undefined;
 	    let isResumeV2 = false;
+	    let usePersistedResumeV2Authority = false;
 	    let resumeSuccessPersistenceFailed = false;
 	    const structuredExtractionDebugEnabled =
 	      process.env.STRUCTURED_BASELINE_EXTRACTION_DEBUG === 'true';
@@ -3381,7 +3382,27 @@ export class ResumeService {
           baseline.id,
         )
       : [];
-    const primaryGenerationSections = resumeV2AuthoritySections as any;
+    const canonicalBaselineSectionsForGeneration = resolveBaselineSectionsForGeneration(baseline);
+    const resumeV2StructuredExperienceCount = Array.isArray(
+      extractStructuredBaselineFromSections(resumeV2AuthoritySections as any)?.experience,
+    )
+      ? extractStructuredBaselineFromSections(resumeV2AuthoritySections as any).experience.length
+      : 0;
+    const canonicalStructuredExperienceCount = Array.isArray(
+      extractStructuredBaselineFromSections(canonicalBaselineSectionsForGeneration as any)?.experience,
+    )
+      ? extractStructuredBaselineFromSections(canonicalBaselineSectionsForGeneration as any).experience.length
+      : 0;
+    const shouldPreferCanonicalParsedBaselineAuthority =
+      isResumeV2 &&
+      canonicalStructuredExperienceCount > resumeV2StructuredExperienceCount;
+    usePersistedResumeV2Authority =
+      isResumeV2 && !shouldPreferCanonicalParsedBaselineAuthority;
+    const primaryGenerationSections = (
+      shouldPreferCanonicalParsedBaselineAuthority
+        ? canonicalBaselineSectionsForGeneration
+        : resumeV2AuthoritySections
+    ) as any;
     const sectionsWithPolicies = this.applyPoliciesToSections(
       primaryGenerationSections as any,
       policies,
@@ -3511,7 +3532,7 @@ export class ResumeService {
 	    } | null = null;
 
 	    if (
-	      !isResumeV2 &&
+	      !usePersistedResumeV2Authority &&
 	      enforceTemplateReadiness &&
 	      !templateReadinessForBaseline.canGenerateResume &&
 	      !hasMeaningfulInterpretedEvidence &&
@@ -3636,7 +3657,7 @@ export class ResumeService {
 	        // If evidence is usable-but-imperfect (e.g., sparse text / lightly structured bullets),
 	        // proceed with generation and let Fit Review + quality gates surface refinements.
 	        if (!templateReadinessForBaseline.canGenerateResume && resumeV2UsableExperienceCount === 0) {
-	          if (!isResumeV2 && this.isStudioEligibleGenerationLane(request, options, jobId, analysisId, effectiveAssessment ?? null)) {
+	          if (!usePersistedResumeV2Authority && this.isStudioEligibleGenerationLane(request, options, jobId, analysisId, effectiveAssessment ?? null)) {
 	            templateReadinessDegradedToBaselineOnly = {
 	              reason: 'baseline_template_not_ready',
 	              details: {
@@ -3935,7 +3956,7 @@ export class ResumeService {
 
     let usedMinimalFallback = Boolean(forcedMinimalSections);
     let sections: ResumeDraftSection[] = forcedMinimalSections ?? [];
-    if (isResumeV2) {
+    if (usePersistedResumeV2Authority) {
 	      sections = resumeV2AuthoritySections as ResumeDraftSection[];
     } else if (!forcedMinimalSections) {
       try {
@@ -3969,7 +3990,7 @@ export class ResumeService {
       }
     }
 
-    if (!isResumeV2) {
+    if (!usePersistedResumeV2Authority) {
       sections = this.applyJobAlignedPresentation({
         sections,
         jobText: job?.rawDescription ?? null,
@@ -4047,7 +4068,7 @@ export class ResumeService {
     let crossCompanyEvidenceBlockedCount = 0;
 
     let persistedResumeV2: Record<string, unknown> | null = null;
-    if (isResumeV2) {
+    if (usePersistedResumeV2Authority) {
       persistedResumeV2 = (this.getLatestPersistedResumeV2Json(baseline.parsedRecords) as any) ?? null;
       if (!persistedResumeV2 || typeof persistedResumeV2 !== 'object') {
         const backfilled = this.baselineResumeV2BackfillService
@@ -4058,7 +4079,7 @@ export class ResumeService {
     }
 
 	    let normalizedDocument = (() => {
-	      if (isResumeV2) {
+	      if (usePersistedResumeV2Authority) {
 	        lastResumeGenerationCheckpoint = 'resume_v2_ingest_start';
 	        try {
           const shouldLogV2 = process.env.RESUME_V2_INGEST_DEBUG === 'true';
@@ -4241,7 +4262,7 @@ export class ResumeService {
               // ignore
             }
           }
-	          if (!isResumeV2 && this.isStudioEligibleGenerationLane(request, options, jobId, analysisId, effectiveAssessment ?? null)) {
+	          if (!usePersistedResumeV2Authority && this.isStudioEligibleGenerationLane(request, options, jobId, analysisId, effectiveAssessment ?? null)) {
 	            if (persistedResumeV2AuthorityWithExperience) {
 	              const authoritativeSections = this.buildResumeV2AuthoritySectionsFromNormalizedDocument(
 	                persistedResumeV2AuthorityWithExperience as NormalizedResumeDocument,
@@ -4432,7 +4453,7 @@ export class ResumeService {
       );
     })();
 
-    if (!isResumeV2 && Array.isArray((normalizedDocument as any)?.experience)) {
+    if (!usePersistedResumeV2Authority && Array.isArray((normalizedDocument as any)?.experience)) {
       const experienceBeforePostProcessing = (normalizedDocument as any).experience as any[];
       const candidateDocument = structuredClone(normalizedDocument) as typeof normalizedDocument;
 
@@ -4534,10 +4555,10 @@ export class ResumeService {
         careerIdentity: careerIdentitySnapshot,
       }) as any;
       usedStructuredBaselineTemplate = true;
-      if (isResumeV2 && resumeV2AuthorityResolution.usable) {
+      if (usePersistedResumeV2Authority && resumeV2AuthorityResolution.usable) {
         usedStructuredBaselineTemplate = true;
       }
-      if (isResumeV2) {
+      if (usePersistedResumeV2Authority) {
         // Canonical ResumeV2 output is evidence-backed but still needs the text-only
         // document shape expected by the downstream quality/export validators.
         normalizedDocument = this.toTextOnlyResumeDocument(normalizedDocument as NormalizedResumeDocument) as any;
@@ -4571,7 +4592,7 @@ export class ResumeService {
       positioningMetadata = null;
     }
 
-    if (!isResumeV2) {
+    if (!usePersistedResumeV2Authority) {
       // Deterministic structural repair pass: prevent bullet-like prose from being treated as an
       // experience header field. This is non-fabricating: it clears malformed header fields and
       // preserves the original text as bullets when appropriate.
@@ -4591,7 +4612,7 @@ export class ResumeService {
       }
     }
 
-    if (!isResumeV2) {
+    if (!usePersistedResumeV2Authority) {
       // Trailing-fragment sanitation must run before quality validation so the validator never evaluates
       // pre-sanitized bullets/summaries.
       normalizedDocument = sanitizeResumeForTrailingFragments(normalizedDocument);
@@ -4681,10 +4702,10 @@ export class ResumeService {
     } = null;
 
     const firstPassQualityGate =
-      isResumeV2 && v2QualityGate ? v2QualityGate : validateResumeArtifactQuality(normalizedDocument);
+      usePersistedResumeV2Authority && v2QualityGate ? v2QualityGate : validateResumeArtifactQuality(normalizedDocument);
     let qualityGate = firstPassQualityGate;
     let repairAttempted = false;
-    if (!isResumeV2 && firstPassQualityGate.status === 'needs_refinement') {
+    if (!usePersistedResumeV2Authority && firstPassQualityGate.status === 'needs_refinement') {
       repairAttempted = true;
       const repaired = repairResumeForQuality(normalizedDocument, firstPassQualityGate);
       const repairedGate = validateResumeArtifactQuality(repaired);
@@ -5526,7 +5547,7 @@ export class ResumeService {
 	    // (e.g. minimal fallback due to weak extraction), preserve the non-blocking "zero_experience_headers"
 	    // limitation if the baseline sections contain no valid company|role headers.
 		    if (
-		      !isResumeV2 &&
+		      !usePersistedResumeV2Authority &&
 		      Boolean(request.oneTap) &&
 		      Boolean(options?.enforceOneTap) &&
 		      Boolean(options?.skipReadinessGate) &&
@@ -5566,7 +5587,7 @@ export class ResumeService {
 	    })();
 	    const qualityGateStatus = String((qualityGate as any)?.status ?? '').trim();
 	    const canonicalResumeV2AuthorityIsUsable =
-	      isResumeV2 && resumeV2AuthorityResolution.usable && resumeV2UsableExperienceCount > 0;
+	      usePersistedResumeV2Authority && resumeV2AuthorityResolution.usable && resumeV2UsableExperienceCount > 0;
 	    const finalExportReady = Boolean(
 	      (exportable || isResumeV2) &&
 	        qualityGateStatus === 'pass' &&
@@ -6243,7 +6264,7 @@ export class ResumeService {
       responseKeys: response && typeof response === 'object' ? Object.keys(response as any) : [],
     });
 
-    if (!isResumeV2 || !resumeV2AuthorityResolution.usable) {
+    if (!usePersistedResumeV2Authority || !resumeV2AuthorityResolution.usable) {
       this.seedCanonicalEvidenceIntoGuardedResumePreview({
         responseBody: response as unknown as Record<string, unknown>,
         resumeInputSections,
@@ -6338,7 +6359,7 @@ export class ResumeService {
         // Contract: a resume that failed Studio persistence must not be treated as generated.
         throw error;
       }
-	      if (isResumeV2) {
+	      if (usePersistedResumeV2Authority) {
 	        const responseBody =
 	          error instanceof UnprocessableEntityException
 	            ? (error.getResponse() as any)
@@ -6625,7 +6646,7 @@ export class ResumeService {
           }));
         }
 
-        if (isResumeV2 && persistedResumeV2HasUsableExperience) {
+        if (usePersistedResumeV2Authority && persistedResumeV2HasUsableExperience) {
           try {
             const normalized = normalizeNormalizedResumeDocument(
               persistedResumeV2ForFailSafe as NormalizedResumeDocument,

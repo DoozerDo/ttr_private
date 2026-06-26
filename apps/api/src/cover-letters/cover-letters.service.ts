@@ -1617,24 +1617,41 @@ export class CoverLettersService {
     }
     let baselineFileUsable = Boolean(persistedResumeV2) || Boolean(evidenceBundle.usableWorkHistoryEvidence);
     const baselineFileVersionHash = baselineVersion.hash ?? null;
-    const sourceSections = baselineFileUsable ? [] : resolveBaselineSectionsForGeneration(baseline);
-    const sections = baselineFileUsable ? [] : this.applyPoliciesToSections(sourceSections, policies);
-    const allowedSections = baselineFileUsable
-      ? []
-      : sections.filter(
-          (section) =>
-            (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
-            BaselineIncludePolicy.NEVER,
-        );
+    const canonicalBaselineSections = resolveBaselineSectionsForGeneration(baseline);
+    const persistedResumeV2Normalized = persistedResumeV2
+      ? normalizeNormalizedResumeDocument(persistedResumeV2 as any)
+      : null;
+    const canonicalStructuredBaseline = extractStructuredBaselineFromSections(canonicalBaselineSections as any);
+    const persistedResumeV2ExperienceCount = Array.isArray((persistedResumeV2Normalized as any)?.experience)
+      ? (persistedResumeV2Normalized as any).experience.length
+      : 0;
+    const canonicalExperienceCount = Array.isArray((canonicalStructuredBaseline as any)?.experience)
+      ? (canonicalStructuredBaseline as any).experience.length
+      : 0;
+    const shouldPreferCanonicalParsedBaselineAuthority =
+      !persistedResumeV2 || canonicalExperienceCount > persistedResumeV2ExperienceCount;
+    const sourceSections = shouldPreferCanonicalParsedBaselineAuthority
+      ? canonicalBaselineSections
+      : baselineFileUsable
+        ? []
+        : canonicalBaselineSections;
+    const sections = this.applyPoliciesToSections(sourceSections, policies);
+    const allowedSections = sections.filter(
+      (section) =>
+        (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
+        BaselineIncludePolicy.NEVER,
+    );
 
     const evidenceSignals = buildBaselineEvidenceSignals({
       baselineId: baseline.id,
       baselineVersionId: baselineVersion.id,
-      baselineSections: baselineFileUsable ? [] : (allowedSections as any),
+      baselineSections: allowedSections as any,
     });
-    const structuredBaseline = baselineFileUsable
-      ? normalizeNormalizedResumeDocument(persistedResumeV2 as any)
-      : extractStructuredBaselineFromSections(sourceSections as any);
+    const structuredBaseline = shouldPreferCanonicalParsedBaselineAuthority
+      ? canonicalStructuredBaseline
+      : baselineFileUsable
+        ? persistedResumeV2Normalized
+        : extractStructuredBaselineFromSections(sourceSections as any);
     if (
       !baselineFileUsable &&
       Array.isArray((structuredBaseline as any)?.experience) &&

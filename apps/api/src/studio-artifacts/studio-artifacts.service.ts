@@ -32,6 +32,7 @@ import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-
 import { ResumeService } from '../resume/resume.service';
 import { CoverLettersService } from '../cover-letters/cover-letters.service';
 import type { CustomerWorkflowState } from '../workflow/customer-workflow.service';
+import { resolveBaselineSectionsForGeneration } from '../baseline/baseline-section-source';
 
 export type StudioArtifactKind = 'resume' | 'cover_letter';
 
@@ -944,8 +945,11 @@ export class StudioArtifactsService {
     }
 
     const score = typeof assessment?.overallScore === 'number' ? assessment.overallScore : null;
-    const structured = baseline?.sections?.length
-      ? extractStructuredBaselineFromSections(baseline.sections as any)
+    const structuredSections = baseline
+      ? resolveBaselineSectionsForGeneration(baseline as any)
+      : [];
+    const structured = structuredSections.length
+      ? extractStructuredBaselineFromSections(structuredSections as any)
       : null;
     const structuredBaselineExperienceCount = structured?.experience?.length ?? 0;
     const structuredBaselineMissingEvidenceReasons = structured?.missingEvidenceReasons ?? [];
