@@ -219,6 +219,12 @@ const BASELINE_INVALID_MESSAGE =
   'Baseline content is missing in this environment. Please re upload or select a valid baseline.';
 const SCORING_V2_INPUTS_VERSION = 'cx-fit-v2-heuristics-2026-04-06';
 const JOB_NORMALIZATION_VERSION = 'job-normalization-sanitization-2026-04-06';
+export const GAP_ANALYSIS_VERSION = 'gap-analysis-2026-06-26-v1';
+export const ANALYSIS_RUN_CACHE_VERSION = [
+  SCORING_V2_INPUTS_VERSION,
+  CX_FIT_SCORER_VERSION,
+  GAP_ANALYSIS_VERSION,
+].join('|');
 
 export function buildJobTextForScoring(job: JobTextInput): JobTextForScoring {
   const rawDescription = (job.rawDescription ?? '').trim();
@@ -2177,7 +2183,7 @@ export class AnalysisService {
         input.baselineId,
         input.jobId,
         input.inputsHash,
-        SCORING_V2_INPUTS_VERSION,
+        ANALYSIS_RUN_CACHE_VERSION,
       ].join('|'),
     );
   }

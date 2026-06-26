@@ -26,6 +26,7 @@ import { User } from '../users/user.entity';
 import { Interview } from '../interviews/interview.entity';
 import { ExpandedFitAssessment } from './expanded-fit-assessment.entity';
 import { AnalysisService } from './analysis.service';
+import { ANALYSIS_RUN_CACHE_VERSION } from './analysis.service';
 import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
 import { FitScoringService } from './fit-scoring.service';
 import { GapAnalysisService } from './gap-analysis.service';
@@ -34,11 +35,7 @@ import { ResumeService } from '../resume/resume.service';
 import { CoverLettersService } from '../cover-letters/cover-letters.service';
 import type { CalibrationProfile } from './calibration-profiles';
 import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
-import {
-  CX_FIT_SCORER_VERSION,
-  scoreCxFitV2,
-  type CxFitV2Result,
-} from './cx-fit-scoring-v2';
+import { CX_FIT_SCORER_VERSION, scoreCxFitV2, type CxFitV2Result } from './cx-fit-scoring-v2';
 import { resetBetaAccessSchemaCompatForTests } from '../users/beta-access-schema-compat';
 
 jest.mock('./cx-fit-scoring-v2', () => ({
@@ -3086,6 +3083,30 @@ const sampleScoringV2: CxFitV2Result = {
       );
 
       expect(hashWithoutNormalized).toBe(hashWithNormalized);
+    });
+
+    it('buildAnalysisDedupeKey includes the analysis cache fingerprint', () => {
+      const dedupeKey = service['buildAnalysisDedupeKey']({
+        userId: 'user-1',
+        baselineId: 'b-1',
+        jobId: 'job-1',
+        inputsHash: 'inputs-hash-1',
+      });
+
+      const expected = createHash('sha256')
+        .update(
+          [
+            'analysis.run',
+            'user-1',
+            'b-1',
+            'job-1',
+            'inputs-hash-1',
+            ANALYSIS_RUN_CACHE_VERSION,
+          ].join('|'),
+        )
+        .digest('hex');
+
+      expect(dedupeKey).toBe(expected);
     });
 
     it('returns the stored assessment when inputs hash matches', async () => {
