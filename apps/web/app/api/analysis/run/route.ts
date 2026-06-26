@@ -8,28 +8,6 @@ import { saveAnalysisRunTraceForDebug } from "@/src/lib/debug-baseline-analysis-
 
 export const runtime = "nodejs";
 
-function extractScoreCandidate(body: unknown): number | null {
-  if (!body || typeof body !== "object") return null;
-  const record = body as { score?: unknown; fit_score?: unknown };
-  if (typeof record.score === "number") return record.score;
-  if (typeof record.fit_score === "number") return record.fit_score;
-  return null;
-}
-
-function buildZeroScoreFailure(details: Record<string, unknown>) {
-  return NextResponse.json(
-    {
-      error: {
-        code: "cx_fit_zero_score_invariant_failed",
-        message:
-          "CX Fit scoring returned an impossible zero score for non-empty baseline and job inputs.",
-        details,
-      },
-    },
-    { status: 502 },
-  );
-}
-
 function decodeUserIdFromJwt(token: string): string | null {
   try {
     const parts = token.split(".");
@@ -83,49 +61,14 @@ export async function POST(req: NextRequest) {
         debug: payload?.debug,
       }),
     });
-    console.log("SCORING RESPONSE:", response);
-    const responseBody =
-      response.headers.get("content-type")?.includes("application/json")
-        ? await response.clone().json().catch(() => null)
-        : null;
 
-    const scoreCandidate = extractScoreCandidate(responseBody);
-    if (response.ok && scoreCandidate === 0) {
-      const body = responseBody as
-        | {
-            baselineId?: unknown;
-            jobId?: unknown;
-            scorerVersion?: unknown;
-            scoring_v2?: {
-              scorerVersion?: unknown;
-              rubric?: {
-                dimensionPercents?: Record<string, number>;
-              };
-            };
-            scoringProof?: {
-              baselineTextCharsScored?: unknown;
-              jobTextCharsScored?: unknown;
-            };
-          }
-        | null;
-      return buildZeroScoreFailure({
-        baselineId: body?.baselineId ?? baselineId,
-        jobId: body?.jobId ?? jobId,
-        scorerVersion:
-          body?.scorerVersion ??
-          body?.scoring_v2?.scorerVersion ??
-          null,
-        categoryBreakdown:
-          body?.scoring_v2?.rubric?.dimensionPercents ?? undefined,
-        baselineTextLength: body?.scoringProof?.baselineTextCharsScored ?? null,
-        jobTextLength: body?.scoringProof?.jobTextCharsScored ?? null,
-      });
-    }
-
-    const relayed = await relayJsonResponse(response);
     if (process.env.NODE_ENV !== "production") {
+      const responseBody =
+        response.headers.get("content-type")?.includes("application/json")
+          ? await response.clone().json().catch(() => null)
+          : null;
       const body =
-        relayed.headers.get("content-type")?.includes("application/json") ? await relayed.clone().json() : null;
+        responseBody;
       console.log("[web/api/analysis/run] response", {
         assessmentId: body?.assessmentId ?? null,
         baselineId: body?.baselineId ?? null,
@@ -152,7 +95,7 @@ export async function POST(req: NextRequest) {
         });
       }
     }
-    return relayed;
+    return relayJsonResponse(response);
   } catch (error) {
     console.error("Failed to run fit assessment", error);
     return NextResponse.json(

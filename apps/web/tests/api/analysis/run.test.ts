@@ -73,24 +73,42 @@ describe("POST /api/analysis/run", () => {
     await expect(response.json()).resolves.toEqual(payload);
   });
 
-  it("rejects a successful zero score with cx_fit_zero_score_invariant_failed", async () => {
-    const zeroResponse = new Response(
-      JSON.stringify({
-        assessmentId: "assessment-1",
-        jobId: "job",
-        baselineId: "baseline",
-        score: 0,
-        scoring_v2: {
+  it("relays upstream cx_fit_zero_score_invariant_failed responses unchanged", async () => {
+    const errorPayload = {
+      error: {
+        code: "cx_fit_zero_score_invariant_failed",
+        message:
+          "CX Fit scoring returned an impossible zero score for non-empty baseline and job inputs.",
+        details: {
+          baselineId: "baseline",
+          jobId: "job",
+          baselineSectionCount: 4,
+          baselineTextLength: 1200,
+          jobTextLength: 900,
           scorerVersion: "2026-06-25-cx-fit-scoring-v2",
-          rubric: {
-            dimensionPercents: {
-              role_scope_and_seniority: 0,
+          categoryBreakdown: {
+            role_scope_and_seniority: 0,
+            domain_and_business_context: 0,
+          },
+          resumeProjectBreakdown: {
+            id: "resume_project_cx_fit_v1",
+            totalScore: 90,
+            categories: {
+              experience_alignment: 30,
+              leadership_level: 20,
+              technical_and_platform_fit: 20,
+              industry_and_context_fit: 15,
+              strategic_vs_tactical_balance: 5,
             },
           },
         },
-      }),
+      },
+    };
+
+    const zeroResponse = new Response(
+      JSON.stringify(errorPayload),
       {
-        status: 200,
+        status: 502,
         headers: { "content-type": "application/json" },
       },
     );
@@ -101,12 +119,7 @@ describe("POST /api/analysis/run", () => {
     expect(response.status).toBe(502);
 
     const payload = await response.json();
-    expect(payload).toMatchObject({
-      error: {
-        code: "cx_fit_zero_score_invariant_failed",
-        message: expect.stringContaining("impossible zero score"),
-      },
-    });
+    expect(payload).toEqual(errorPayload);
   });
 
   it("accepts snake_case payloads (baseline_id/job_id) and forwards as baselineId/jobId", async () => {
