@@ -140,12 +140,17 @@ export default function OpportunitiesPage() {
         rows.map(async (row): Promise<[string, number | null]> => {
           const jobId = (row.savedJobId ?? row.jobId ?? "").trim();
           const baselineId = (row.savedBaselineId ?? row.baselineId ?? "").trim();
+          const analysisId = row.analysisId?.trim() ?? "";
           if (!jobId || !baselineId) return [row.id, null];
           try {
-            const response = await fetch(
-              `/api/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(baselineId)}/latest`,
-              { cache: "no-store" },
-            );
+            const response = analysisId
+              ? await fetch(`/api/analysis/fit-assessments/${encodeURIComponent(analysisId)}`, {
+                  cache: "no-store",
+                })
+              : await fetch(
+                  `/api/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(baselineId)}/latest`,
+                  { cache: "no-store" },
+                );
             if (!response.ok) return [row.id, null];
             const payload = (await response.json()) as {
               score?: number | null;

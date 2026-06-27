@@ -343,7 +343,7 @@ export default function FitReviewClient() {
     return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
-  const resolvedJobId = jobId || storedAnalysis?.jobId || "";
+  const resolvedJobId = jobId || (!requestedAnalysisId ? storedAnalysis?.jobId || "" : "");
   const normalizedResolvedJobId = resolvedJobId.trim();
   const storedSavedTimestamp = useMemo(
     () => parseTimestamp(storedAnalysis?.savedAt ?? null),
@@ -356,18 +356,16 @@ export default function FitReviewClient() {
   const storedJobMatchesResolved =
     Boolean(normalizedResolvedJobId && storedAnalysis?.jobId?.trim() === normalizedResolvedJobId);
   const displayAssessment = useMemo(() => {
-    if (storedJobMatchesResolved && storedAnalysis?.analysis) {
-      if (storedSavedTimestamp >= remoteCreatedTimestamp) {
-        return storedAnalysis.analysis;
-      }
-    }
-
     if (
       assessment &&
       normalizedResolvedJobId &&
       assessment.jobId?.trim() === normalizedResolvedJobId
     ) {
       return assessment;
+    }
+
+    if (requestedAnalysisId) {
+      return assessment ?? null;
     }
 
     if (storedJobMatchesResolved && storedAnalysis?.analysis) {
@@ -377,6 +375,7 @@ export default function FitReviewClient() {
     return assessment ?? storedAnalysis?.analysis ?? null;
   }, [
     assessment,
+    requestedAnalysisId,
     normalizedResolvedJobId,
     remoteCreatedTimestamp,
     storedAnalysis?.analysis,
@@ -583,13 +582,15 @@ export default function FitReviewClient() {
     };
   }, [requestedAnalysisId, resolvedJobId]);
 
-  const hasAnalysis = Boolean(displayAssessment || storedAnalysis?.analysis);
+  const hasAnalysis = Boolean(displayAssessment || (!requestedAnalysisId && storedAnalysis?.analysis));
   const displayRecord =
     displayAssessment && typeof displayAssessment === "object"
       ? (displayAssessment as Record<string, unknown>)
       : null;
   const storedRecord =
-    storedAnalysis?.analysis && typeof storedAnalysis.analysis === "object"
+    !requestedAnalysisId &&
+    storedAnalysis?.analysis &&
+    typeof storedAnalysis.analysis === "object"
       ? (storedAnalysis.analysis as Record<string, unknown>)
       : null;
 

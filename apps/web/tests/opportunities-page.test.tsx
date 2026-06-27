@@ -33,8 +33,11 @@ describe("Opportunities page", () => {
           ),
         );
       }
-      if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
         return Promise.resolve(new Response(JSON.stringify({ score: 82 }), { status: 200 }));
+      }
+      if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
+        return Promise.resolve(new Response(JSON.stringify({ score: 71 }), { status: 200 }));
       }
       return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
     });
@@ -50,7 +53,18 @@ describe("Opportunities page", () => {
     await waitFor(() => {
       expect(screen.getByText("Improved")).toBeInTheDocument();
     });
+    expect(screen.getByText(/82\s*↑/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update materials" })).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        resolveUrl(url as RequestInfo | URL).includes("/api/analysis/fit-assessments/analysis-1"),
+      ),
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        resolveUrl(url as RequestInfo | URL).includes("/api/analysis/job/job-1/baseline/base-1/latest"),
+      ),
+    ).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: "Open Results" }));
     expect(mockRouterPush).toHaveBeenCalledWith(
@@ -86,6 +100,9 @@ describe("Opportunities page", () => {
             { status: 200 },
           ),
         );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(new Response(JSON.stringify({ score: 82 }), { status: 200 }));
       }
       if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
         return Promise.resolve(new Response(JSON.stringify({ score: 82 }), { status: 200 }));
@@ -195,6 +212,9 @@ describe("Opportunities page", () => {
             { status: 200 },
           ),
         );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(new Response(JSON.stringify({ score: 68 }), { status: 200 }));
       }
       if (url.includes("/api/analysis/job/job-1/baseline/base-1/latest")) {
         return Promise.resolve(new Response(JSON.stringify({}), { status: 404 }));
