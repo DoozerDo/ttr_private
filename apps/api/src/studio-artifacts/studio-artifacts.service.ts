@@ -33,6 +33,7 @@ import { ResumeService } from '../resume/resume.service';
 import { CoverLettersService } from '../cover-letters/cover-letters.service';
 import type { CustomerWorkflowState } from '../workflow/customer-workflow.service';
 import { resolveBaselineSectionsForGeneration } from '../baseline/baseline-section-source';
+import { WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR } from '@shared/workflowThresholds';
 
 export type StudioArtifactKind = 'resume' | 'cover_letter';
 
@@ -1214,7 +1215,7 @@ export class StudioArtifactsService {
       artifactReadiness !== 'blocked' &&
       structuredBaselineExperienceCount > 0 &&
       structuredBaselineMissingEvidenceReasons.length === 0;
-    const scoreEligibleForRecovery = typeof score === 'number' && score >= 80;
+    const scoreEligibleForRecovery = typeof score === 'number' && score >= WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR;
     const shouldRecoverEligibleArtifacts =
       !input.recoveryAttempted &&
       (scoreEligibleForRecovery || (currentArtifactRetryRequested && currentInputsAreValidForRecovery)) &&
@@ -1245,7 +1246,7 @@ export class StudioArtifactsService {
 
     // Never drop persisted artifacts from readState; currentness/staleness must be indicated via metadata flags.
     const shouldMarkLegacyStale =
-      Boolean(artifactReadiness) && typeof score === 'number' && score >= 80;
+      Boolean(artifactReadiness) && typeof score === 'number' && score >= WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR;
 
     const resumeRecord = 
       shouldMarkLegacyStale && resumeRecordRaw && !isStructuredTemplateResult(resumeRecordRaw.responseBody)

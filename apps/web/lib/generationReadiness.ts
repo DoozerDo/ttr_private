@@ -1,4 +1,5 @@
 import type { ClaimVerificationStatus, NormalizedClaimVerification } from "./claimVerification";
+import { WORKFLOW_UNLOCK_SCORE_FLOOR } from "@shared/workflowThresholds";
 
 export type GenerationReadiness = {
   status: "ready" | "limited" | "blocked";
@@ -852,7 +853,7 @@ export function getGenerationReadiness(
       code: "full_block",
       message: "Fit score is unavailable for this analysis.",
     });
-  } else if (inferredFitScore < 70) {
+  } else if (inferredFitScore < WORKFLOW_UNLOCK_SCORE_FLOOR) {
     reasonCodes.push("score_floor_blocked");
     addUniqueReason(reasons, {
       code: "full_block",

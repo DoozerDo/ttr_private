@@ -1,4 +1,5 @@
 import type { GenerationReadiness } from "@/lib/generationReadiness";
+import { isWorkflowDirectStudioEligible } from "@shared/workflowThresholds";
 
 export type WorkflowAuthorityState = "READY" | "REVIEW_REQUIRED" | "BLOCKED" | "PARTIAL";
 export type WorkflowAuthorityPrimaryAction = "GENERATE" | "RETRY" | "REVIEW" | "BLOCKED";
@@ -39,24 +40,24 @@ export function resolveWorkflowAuthority(input: ResolveWorkflowAuthorityInput): 
 
   // Deterministic authority rules (single lane):
   // - Structural baseline/readiness blockers always win (never show READY/CURRENT when blocked).
-  // - Otherwise, score >= 80 is READY (generate-now contract).
+  // - Otherwise, scores at or above the direct-studio floor are READY (generate-now contract).
   // - Output presence affects messaging/actions, but must not override blockers.
   const workflowState: WorkflowAuthorityState = hasAnyUsableOutput
     ? (hasBaselineResumeV2Blocker || input.generationReadiness.blocked
         ? "BLOCKED"
-        : typeof score === "number" && score >= 80
+        : isWorkflowDirectStudioEligible(score)
           ? "READY"
           : "REVIEW_REQUIRED")
-    : hasBaselineResumeV2Blocker
-      ? "BLOCKED"
-      : input.generationReadiness.blocked
+      : hasBaselineResumeV2Blocker
         ? "BLOCKED"
-        : typeof score === "number" && score >= 80
-          ? "READY"
-          : "REVIEW_REQUIRED";
+        : input.generationReadiness.blocked
+          ? "BLOCKED"
+          : isWorkflowDirectStudioEligible(score)
+            ? "READY"
+            : "REVIEW_REQUIRED";
 
   const canGenerate =
-    typeof score === "number" && score >= 80 && !input.generationReadiness.blocked && !hasBaselineResumeV2Blocker;
+    isWorkflowDirectStudioEligible(score) && !input.generationReadiness.blocked && !hasBaselineResumeV2Blocker;
   const suppressFailureMessaging = hasAnyUsableOutput;
 
   const primaryAction: WorkflowAuthorityPrimaryAction =

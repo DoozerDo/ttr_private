@@ -6,6 +6,10 @@ import { shouldGenerateDocuments, isSystemOwnedFinalizedGeneration } from "@/lib
 import { isMomentumGenerationAllowed } from "@/lib/documentGenerationGate";
 import { getFitReviewHref, getResultsHref, getStudioHref } from "@/src/navigation/routes";
 import {
+  WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR,
+  WORKFLOW_UNLOCK_SCORE_FLOOR,
+} from "@shared/workflowThresholds";
+import {
   resolveWorkflowProgression,
   type WorkflowBlockingReason,
   type WorkflowPrimaryAction,
@@ -381,7 +385,7 @@ function verifyAnalysisAgreement(
     return;
   }
 
-  if (score !== null && score < 70) {
+  if (score !== null && score < WORKFLOW_UNLOCK_SCORE_FLOOR) {
     const canOpenStudio = input.productReadiness.canOpenStudio;
     const ready = input.generationReadiness.status === "ready";
     const limited = input.generationReadiness.status === "limited";
@@ -400,7 +404,8 @@ function verifyAnalysisAgreement(
   if (input.surface === "target") {
     // Target surface treats score as the canonical generation eligibility signal.
     // GenerationReadiness may be limited/blocked due to verification constraints, but that must not
-    // contradict score-based availability (score >= 70). Keep mismatch checks score-only here.
+    // contradict score-based availability (score >= WORKFLOW_UNLOCK_SCORE_FLOOR).
+    // Keep mismatch checks score-only here.
   }
 
   if (input.surface === "results" || input.surface === "studio") {
@@ -668,7 +673,8 @@ function mapWorkflowStateToReadinessState(
     case "returning_user_persisted_last_assessment":
       return "READY";
     case "studio_ready":
-      return qualifiedForGeneration && (score !== null && score >= 80 || productReadiness?.confidence === "HIGH")
+      return qualifiedForGeneration &&
+        ((score !== null && score >= WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR) || productReadiness?.confidence === "HIGH")
         ? "READY"
         : qualifiedForGeneration
           ? "DRAFT"
@@ -676,7 +682,9 @@ function mapWorkflowStateToReadinessState(
     case "results_ready":
       if (forceFitReview || score === null || !shouldGenerateDocuments(score)) return "IMPROVE";
       if (!productReadiness?.canOpenStudio) return "BLOCKED";
-      return score >= 80 || productReadiness?.confidence === "HIGH" ? "READY" : "DRAFT";
+      return score >= WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR || productReadiness?.confidence === "HIGH"
+        ? "READY"
+        : "DRAFT";
     default:
       return qualifiedForGeneration ? "READY" : "NOT_ANALYZED";
   }

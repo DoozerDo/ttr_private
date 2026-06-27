@@ -18,8 +18,9 @@ import {
 } from "../lib/session";
 import { publishBaselineUpdated } from "@/src/lib/baseline-sync";
 import { sanitizeRenderedTextValue } from "@/lib/renderedText";
+import { WORKFLOW_UNLOCK_SCORE_FLOOR } from "@shared/workflowThresholds";
 
-const GENERATION_SCORE_THRESHOLD = 70;
+const GENERATION_SCORE_THRESHOLD = WORKFLOW_UNLOCK_SCORE_FLOOR;
 const TIMESTAMP_KEYS = [
   "evaluatedAt",
   "evaluated_at",
@@ -80,7 +81,7 @@ function formatTimestamp(value?: string | null): string | null {
 function getAlignmentLabel(score: number | null): string {
   if (score === null) return "Alignment pending";
   if (score >= 90) return "Strong Alignment";
-  if (score >= 70) return "Moderate Alignment";
+  if (score >= GENERATION_SCORE_THRESHOLD) return "Moderate Alignment";
   return "Limited Alignment";
 }
 

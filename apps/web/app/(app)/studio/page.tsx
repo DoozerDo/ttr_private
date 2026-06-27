@@ -83,11 +83,12 @@ import {
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
 import { getGenerationCompletionStorageKey } from "@/lib/nextAction";
 import { buildProductDecisionState } from "@/lib/productDecisionState";
-import { 
+import {
   resolveDocumentGenerationMode, 
   shouldGenerateDocuments, 
 } from "@/lib/documentGenerationContract"; 
 import { isGenerateNowEligible } from "@/lib/documentGenerationGate";
+import { isWorkflowDirectStudioEligible } from "@shared/workflowThresholds";
 import { deriveEvidenceLedger } from "@/lib/evidenceLedger";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import {
@@ -4021,7 +4022,7 @@ export default function StudioPage() {
     // ResumeV2 authority: if ResumeV2 reports zero usable experience entries, Studio must hard-block generation
     // and avoid rendering generation-ready CTAs (no contradictory states).
     if (resumeV2Authority.blocksGeneration) return false;
-    return baselineExists && typeof score === "number" && score >= 80;
+    return baselineExists && isGenerateNowEligible(score);
   }, [
     analysisScore,
     effectiveBaselineId,
@@ -5963,7 +5964,7 @@ export default function StudioPage() {
   const isLowQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "LOW"; 
   const isMediumQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "MEDIUM"; 
   const isHighQualityDraft = hasCompletedGeneration && artifactQuality.confidence === "HIGH"; 
-  // Low-confidence is still a signal, but score >= 80 must not block or degrade access to usable artifacts.
+  // Low-confidence is still a signal, but direct-studio scores must not block or degrade access to usable artifacts.
   const showLowQualityRecoveryLane = isLowQualityDraft && !generateNowEligible;
   // Resume existence authority is persisted artifact presence; quality feedback remains advisory.
   const hasUsableResume = hasResumeArtifact;
@@ -11274,7 +11275,7 @@ export default function StudioPage() {
     trackEvent,
   });
 
-  // Studio: score >= 80 renders artifact cards directly; no intermediate "generation ready" shell.
+  // Studio: direct-studio scores render artifact cards directly; no intermediate "generation ready" shell.
 
   const startGenerationFromReadyShell = useCallback(
     async (
@@ -14128,16 +14129,16 @@ export default function StudioPage() {
                   );
                   const score = typeof analysisScore === "number" ? analysisScore : null;
                   const artifactCurrent =
-                    score !== null && score >= 80 && generationMode === "structured_baseline_template";
+                    isWorkflowDirectStudioEligible(score) && generationMode === "structured_baseline_template";
                   const hasMissingStructuredBaseline = readMissingStructuredBaselineSignal(
                     artifactContract.normalized.resumeResponse,
                   );
                   const reason =
-                    score !== null && score < 80
+                    !isWorkflowDirectStudioEligible(score)
                       ? "below_80"
-                      : score !== null && score >= 80 && hasMissingStructuredBaseline
+                      : isWorkflowDirectStudioEligible(score) && hasMissingStructuredBaseline
                         ? "missing_structured_baseline"
-                        : score !== null && score >= 80 && generationMode !== "structured_baseline_template"
+                        : isWorkflowDirectStudioEligible(score) && generationMode !== "structured_baseline_template"
                           ? "stale_legacy"
                           : "current";
                   return (
@@ -14597,13 +14598,13 @@ export default function StudioPage() {
               ? (() => {
               const { generationMode, templateVersion } = readGenerationDebug(artifactContract.normalized.coverLetterResponse);
               const score = typeof analysisScore === "number" ? analysisScore : null;
-              const artifactCurrent = score !== null && score >= 80 && generationMode === "structured_baseline_template";
+              const artifactCurrent = isWorkflowDirectStudioEligible(score) && generationMode === "structured_baseline_template";
               const hasMissingStructuredBaseline = readMissingStructuredBaselineSignal(artifactContract.normalized.coverLetterResponse);
-              const reason = score !== null && score < 80
+              const reason = !isWorkflowDirectStudioEligible(score)
                 ? "below_80"
-                : score !== null && score >= 80 && hasMissingStructuredBaseline
+                : isWorkflowDirectStudioEligible(score) && hasMissingStructuredBaseline
                   ? "missing_structured_baseline"
-                  : score !== null && score >= 80 && generationMode !== "structured_baseline_template"
+                  : isWorkflowDirectStudioEligible(score) && generationMode !== "structured_baseline_template"
                     ? "stale_legacy"
                     : "current";
               return (

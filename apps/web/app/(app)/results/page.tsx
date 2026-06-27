@@ -17,6 +17,7 @@ import { CareerAlignmentProgress } from "./components/CareerAlignmentProgress";
 import { CareerGravity } from "./components/CareerGravity";
 import { CareerAdjacencyRadar } from "./components/CareerAdjacencyRadar";
 import { FitImprovementOpportunities } from "./components/FitImprovementOpportunities";
+import { WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR } from "@shared/workflowThresholds";
 import {
   formatErrorMessage,
   parseComplianceError,
@@ -71,6 +72,7 @@ import { resolvePairGenerationLifecycle } from "@/lib/pairGenerationLifecycle";
 import { tryAcquirePairGenerationLatch, releasePairGenerationLatch } from "@/lib/pairGenerationLatch";
 import { logDecisionFlowEvent } from "@/lib/decisionFlowDebug";
 import { isDocumentGenerationUnlocked, isMomentumGenerationAllowed } from "@/lib/documentGenerationGate";
+import { isWorkflowDirectStudioEligible } from "@shared/workflowThresholds";
 import { ResultsDocumentsTeaserSection } from "@/components/results/ResultsDocumentsTeaserSection";
 import { getArtifactExistence } from "@/src/lib/studio/artifactAuthority";
 import { WorkflowAuthorityPanel } from "@/components/workflow/WorkflowAuthorityPanel";
@@ -846,7 +848,7 @@ export function getOpportunityVerdict(score?: number | null): {
     return {
       label: "Competitive match",
       explanation:
-        typeof score === "number" && score >= 80
+        isWorkflowDirectStudioEligible(score)
           ? "You can win this role with focused tailoring."
           : "You can win this with focused tailoring.",
     };
@@ -1089,7 +1091,7 @@ export function OpportunityMapSection({
   );
   const blockedByEvidence = readiness.status === "blocked";
   const lowFitScore = typeof score === "number" && !isDocumentGenerationUnlocked(score);
-  const strongFitScore = typeof score === "number" && score >= 80;
+  const strongFitScore = isWorkflowDirectStudioEligible(score);
   const isCompetitiveBlocked = Boolean(blockedState && blockedByEvidence && !lowFitScore && !strongFitScore);
   const readinessToneClass =
     readiness.status === "blocked"
@@ -1099,7 +1101,7 @@ export function OpportunityMapSection({
         : "border-emerald-300/30 bg-emerald-500/10 text-emerald-100";
   const readinessBadgeLabel = readiness.badgeLabel;
   const fitDescriptor =
-    typeof score === "number" && score >= 80
+    isWorkflowDirectStudioEligible(score)
       ? "Strong fit"
       : typeof score === "number" && isDocumentGenerationUnlocked(score)
         ? "Competitive fit"
@@ -1203,7 +1205,7 @@ export function OpportunityMapSection({
       return {
         headline: `${fitDescriptor}. Studio is available.`,
         body:
-          score !== null && score >= 80
+          isWorkflowDirectStudioEligible(score)
             ? "You can generate now. Add a few stronger examples to improve the result."
             : "Studio can open in draft mode now, and stronger grounding will improve the output.",
       };
@@ -1535,7 +1537,7 @@ function buildDiagnosticsSummary(scoreBreakdown: ScoreBreakdownShape | null): st
 
   const strongCount = scoreBreakdown.dimensions.filter((dimension) => {
     const percent = dimension.weight > 0 ? (dimension.score / dimension.weight) * 100 : 0;
-    return percent >= 80;
+    return percent >= WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR;
   }).length;
   const reviewCount = scoreBreakdown.dimensions.length - strongCount;
 
@@ -1831,7 +1833,7 @@ function percentLabelForCopy(percent?: number | null): string {
 function getBucketFromPercent(percent?: number | null): DriverBucket {
   if (typeof percent !== "number") return "pending";
   if (percent >= 90) return "strong";
-  if (percent >= 80) return "watch";
+  if (percent >= WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR) return "watch";
   return "fix";
 }
 
@@ -3290,7 +3292,7 @@ export default function ResultsPage() {
     }
   }, [studioNavigationHref]);
 
-  // Product contract: at score >= 80, Results is not a stopping point. Route directly into Studio.
+  // Product contract: at or above the direct-studio floor, Results is not a stopping point. Route directly into Studio.
   const hasTrackedResultsCompletedRef = useRef(false);
   const autoRoutedToStudioRef = useRef(false);
   const shouldAutoRouteToStudio = useMemo(
@@ -3361,7 +3363,7 @@ export default function ResultsPage() {
       });
     }
 
-    // Preserve key funnel analytics even though Results UI no longer renders for score >= 80.
+    // Preserve key funnel analytics even though Results UI no longer renders for the direct-studio lane.
     trackEvent("results_completed", {
       source: "results",
       score: typeof activeScore === "number" ? activeScore : null,
@@ -3391,7 +3393,7 @@ export default function ResultsPage() {
 
   useEffect(() => {
     if (hasTrackedResultsCompletedRef.current) return;
-    if (shouldAutoRouteToStudio) return; // Score >= 80 is tracked in the auto-route lane.
+    if (shouldAutoRouteToStudio) return; // Direct-studio scores are tracked in the auto-route lane.
     if (!latest) return;
     if (typeof activeScore !== "number") return;
 
@@ -3813,7 +3815,7 @@ export default function ResultsPage() {
     recentIntent,
     summarySnippet,
   ]);
-  const isStrongFitScore = typeof activeScore === "number" && activeScore >= 80;
+  const isStrongFitScore = isWorkflowDirectStudioEligible(activeScore);
   const shouldTreatGenerationAsSystemOwned = isSystemOwnedFinalizedGeneration(activeScore);
   const hasArtifactFailure =
     resultsArtifactStatuses.resume === "failed" || resultsArtifactStatuses.coverLetter === "failed";
@@ -5284,7 +5286,7 @@ export default function ResultsPage() {
   ]);
 
   if (shouldAutoRouteToStudio) {
-    // Results is not a stopping point for score >= 80.
+    // Results is not a stopping point for direct-studio scores.
     // We still run effects (including analytics + router.replace), but render no Results UI.
     return null;
   }
@@ -5369,7 +5371,7 @@ export default function ResultsPage() {
             }}
             primaryAction={(() => {
               const action = workflowSurfaceAuthority.primaryAction;
-              const shouldShowOpenStudioCta = typeof activeScore === "number" && activeScore >= 70;
+              const shouldShowOpenStudioCta = isDocumentGenerationUnlocked(activeScore);
               if (action.destination === "studio_unlock") {
                 return { label: action.label, href: studioUnlockHref, testId: "results-hero-primary-cta" };
               }

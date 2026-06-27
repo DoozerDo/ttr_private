@@ -20,6 +20,7 @@ import {
   getResultsHref,
   getStudioHref,
 } from "@/src/navigation/routes";
+import { isWorkflowGenerationUnlocked } from "@shared/workflowThresholds";
 
 export type ProductDecisionScorePresentationMode = "normal" | "caution" | "fix_first";
 
@@ -113,7 +114,7 @@ function normalizeGenerationReadinessForResults(
     };
   }
 
-  if (typeof score === "number" && score < 70 && readiness.status === "ready") {
+  if (!isWorkflowGenerationUnlocked(score) && readiness.status === "ready") {
     return {
       ...readiness,
       status: "blocked",

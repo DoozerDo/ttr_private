@@ -1,18 +1,24 @@
+import {
+  WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR,
+  WORKFLOW_UNLOCK_SCORE_FLOOR,
+  isWorkflowDirectStudioEligible,
+  isWorkflowGenerationUnlocked,
+} from "@shared/workflowThresholds";
+
 export type DocumentGenerationMode = "draft" | "finalized";
 
-const GENERATION_SCORE_FLOOR = 70;
-const FINALIZED_SCORE_FLOOR = 80;
+export const DOCUMENT_GENERATION_UNLOCK_SCORE_FLOOR = WORKFLOW_UNLOCK_SCORE_FLOOR;
+export const FINALIZED_DOCUMENT_GENERATION_SCORE_FLOOR = WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR;
 
 export function shouldGenerateDocuments(score: number | null | undefined): boolean {
-  return typeof score === "number" && Number.isFinite(score) && score >= GENERATION_SCORE_FLOOR;
+  return isWorkflowGenerationUnlocked(score);
 }
 
 export function resolveDocumentGenerationMode(score: number | null | undefined): DocumentGenerationMode {
   if (!shouldGenerateDocuments(score)) return "draft";
-  return typeof score === "number" && score >= FINALIZED_SCORE_FLOOR ? "finalized" : "draft";
+  return isWorkflowDirectStudioEligible(score) ? "finalized" : "draft";
 }
 
 export function isSystemOwnedFinalizedGeneration(score: number | null | undefined): boolean {
   return resolveDocumentGenerationMode(score) === "finalized";
 }
-

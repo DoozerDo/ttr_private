@@ -9,3 +9,4 @@ export * from "./roleMatchFinalPass";
 export * from "./studioGenerationPipelineVersion";
 export * from "./isReusableGeneratedArtifact";
 export * from "./workflowContract";
+export * from "./workflowThresholds";

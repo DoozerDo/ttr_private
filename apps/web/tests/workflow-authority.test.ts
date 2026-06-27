@@ -17,7 +17,7 @@ function readiness(overrides?: Partial<GenerationReadiness>): GenerationReadines
 }
 
 describe("resolveWorkflowAuthority", () => {
-  it("returns READY + suppressFailureMessaging when any usable output exists (resume success + cover fail)", () => {
+  it("returns BLOCKED + suppressFailureMessaging when any usable output exists but readiness is blocked", () => {
     const result = resolveWorkflowAuthority({
       score: 75,
       generationReadiness: readiness({ blocked: true, status: "blocked" }),
@@ -28,12 +28,12 @@ describe("resolveWorkflowAuthority", () => {
       isHydrating: false,
     });
 
-    expect(result.workflowState).toBe("READY");
+    expect(result.workflowState).toBe("BLOCKED");
     expect(result.suppressFailureMessaging).toBe(true);
-    expect(result.primaryAction).toBe("RETRY");
-    expect(result.headline).toBe("Your application is ready");
-    expect(result.body).toBe("Review your generated materials and use the next step that fits this role.");
-    expect(result.nextStepHint).toBe("Retry generation to complete your materials.");
+    expect(result.primaryAction).toBe("BLOCKED");
+    expect(result.headline).toBe("Generation is blocked");
+    expect(result.body).toBe("Resolve the current blockers before continuing.");
+    expect(result.nextStepHint).toBe("Resolve blockers before continuing.");
   });
 
   it("returns READY for score >= 80 even when no artifacts exist", () => {

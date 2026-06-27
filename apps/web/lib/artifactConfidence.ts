@@ -1,5 +1,6 @@
 import type { GenerationProductConfidence } from "@/lib/generationProductReadiness";
 import { normalizeUserFacingRequirementLabel } from "@/lib/generationReadiness";
+import { WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR } from "@shared/workflowThresholds";
 import { FALLBACK_RENDERED_TEXT, sanitizeRenderedTextList, sanitizeRenderedTextValue } from "@/lib/renderedText";
 
 export type ArtifactType = "resume" | "cover_letter";
@@ -230,7 +231,7 @@ export function buildArtifactQualityModel(input: ArtifactQualityInput): Artifact
   });
 
   const confidence: ArtifactConfidence =
-    typeof input.score === "number" && input.score >= 80
+    typeof input.score === "number" && input.score >= WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR
       ? missingEvidenceCount === 0
         ? "HIGH"
         : "MEDIUM"

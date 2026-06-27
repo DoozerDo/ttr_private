@@ -1,3 +1,5 @@
+import { WORKFLOW_UNLOCK_SCORE_FLOOR } from "@shared/workflowThresholds";
+
 export type NextMoveAction = "generate" | "studio" | "improve" | "stop";
 
 export type NextMove = {
@@ -17,7 +19,7 @@ export function getNextMove(score: number): NextMove {
     };
   }
 
-  if (score >= 70) {
+  if (score >= WORKFLOW_UNLOCK_SCORE_FLOOR) {
     return {
       label: "Open Studio",
       action: "studio",

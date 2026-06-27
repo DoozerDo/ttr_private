@@ -1,4 +1,5 @@
 import { getResultsHref, getStudioHref } from "@/src/navigation/routes";
+import { isWorkflowDirectStudioEligible, isWorkflowGenerationUnlocked } from "@shared/workflowThresholds";
 
 export type ResultsStudioRedirectInput = {
   from: "results" | "studio";
@@ -65,7 +66,7 @@ export function resolveResultsStudioRedirect(
     if (input.locked) {
       redirectTo = null;
       reason = "results_locked_no_auto_route";
-    } else if (typeof input.score === "number" && input.score >= 80) {
+    } else if (isWorkflowDirectStudioEligible(input.score)) {
       redirectTo = getStudioHref({
         baselineId,
         jobId,
@@ -75,9 +76,9 @@ export function resolveResultsStudioRedirect(
       reason = "results_auto_route_score_gte_80";
     }
   } else {
-    // Studio -> Results redirect is allowed only for true low-fit (<70) gating,
+    // Studio -> Results redirect is allowed only for true low-fit (below the unlock floor) gating,
     // and only when we have exact pair context (to prevent cross-page ping pong).
-    if (typeof input.score === "number" && input.score < 70 && !input.hasAnyUsableOutput) {
+    if (typeof input.score === "number" && !isWorkflowGenerationUnlocked(input.score) && !input.hasAnyUsableOutput) {
       redirectTo = buildResultsLockedHref({ baselineId: baselineId!, jobId: jobId!, analysisId: analysisId! });
       reason = "studio_low_fit_redirect_score_lt_70";
     }

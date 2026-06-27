@@ -2,6 +2,7 @@ import type { GenerationReadiness } from "@/lib/generationReadiness";
 import type { WorkflowAuthorityResult } from "@/lib/resolveWorkflowAuthority";
 import type { PostUnlockOutcomeState } from "@/lib/postUnlockOutcomeModel";
 import type { WorkflowSurfaceAuthorityModel, WorkflowSurfaceCanonicalState } from "@/lib/workflowSurfaceAuthorityModel";
+import { isWorkflowFitReviewBand } from "@shared/workflowThresholds";
 
 export type {
   WorkflowSurfaceAuthorityModel,
@@ -55,7 +56,7 @@ export function resolveWorkflowSurfaceAuthority(input: {
   const eligibleForGenerationReady =
     !unlockFlowActive &&
     !input.postUnlockOutcomeState &&
-    // Product rule: score >= 80 means generation is allowed. Readiness is informational only and must
+    // Product rule: scores at or above the direct-studio floor mean generation is allowed. Readiness is informational only and must
     // not gate Studio generation entry/auto-start.
     workflowSupportsImmediateGeneration &&
     !hasAnyOutput &&
@@ -198,7 +199,7 @@ export function resolveWorkflowSurfaceAuthority(input: {
   }
 
   // Fit Review recovery band: treat as unlock-required (single-lane).
-  if (typeof score === "number" && score >= 70 && score <= 84) {
+  if (isWorkflowFitReviewBand(score)) {
     return {
       canonicalState: "unlock_required",
       headline: "One focused update is required.",

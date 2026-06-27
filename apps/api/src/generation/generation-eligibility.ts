@@ -3,6 +3,7 @@ import type { Baseline } from '../baseline/baseline.entity';
 import type { BaselineVersion } from '../baseline/baseline-version.entity';
 import type { Job } from '../jobs/job.entity';
 import type { GenerationEvidenceBundle } from './generation-evidence-resolver';
+import { WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR } from '@shared/workflowThresholds';
 
 export type GenerationEligibilityWarningCode =
   | 'baseline_template_not_ready'
@@ -110,7 +111,7 @@ export function decideGenerationEligibility(params: {
       },
     };
   }
-  if (score < 80) {
+  if (score < WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR) {
     return {
       eligible: false,
       warnings,

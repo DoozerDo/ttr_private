@@ -4,6 +4,7 @@ import type {
 } from "@/lib/generationProductReadiness";
 import { normalizeUserFacingRequirementLabel } from "@/lib/generationReadiness";
 import { FALLBACK_RENDERED_TEXT, sanitizeRenderedTextValue } from "@/lib/renderedText";
+import { WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR } from "@shared/workflowThresholds";
 
 type ResultsScoreInput = {
   score: number | null;
@@ -114,7 +115,7 @@ function compactText(value: string | null | undefined): string {
 }
 
 function fitLabelForScore(score: number | null): ResultsBlockedState["fitLabel"] {
-  if (typeof score === "number" && Number.isFinite(score) && score >= 80) {
+  if (typeof score === "number" && Number.isFinite(score) && score >= WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR) {
     return "Strong fit";
   }
   return "Competitive fit";

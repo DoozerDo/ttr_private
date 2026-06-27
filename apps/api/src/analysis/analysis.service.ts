@@ -82,6 +82,7 @@ import type {
 } from './cx-fit-scoring-v2';
 import { CX_FIT_SCORER_VERSION } from './cx-fit-scoring-v2';
 import type { CxFitV2Result } from './fit-scoring.service';
+import { WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR } from '@shared/workflowThresholds';
 
 import {
   DEFAULT_LEGACY_CALIBRATION_WEIGHTS,
@@ -1509,7 +1510,7 @@ export class AnalysisService {
     return {
       score: input.score,
       verdict:
-        input.score >= 80
+        input.score >= WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR
           ? 'apply'
           : input.score >= 60
             ? 'consider'
