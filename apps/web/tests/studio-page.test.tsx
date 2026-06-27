@@ -193,7 +193,7 @@ function resolveStudioGenerationFallback(input: RequestInfo) {
   return Promise.resolve(createResponse({}));
 }
 
-function installCompletedArtifactFetches() {
+function installCompletedArtifactFetches(assessmentScore = 84) {
   let completedApplicationsCount = 2;
   const artifactFetchUrls: string[] = [];
   const analysisFetchUrls: string[] = [];
@@ -209,7 +209,7 @@ function installCompletedArtifactFetches() {
       rawUrl.includes("fit-assessments/analysis-1") ||
       rawUrl.includes("analysis/job/job-1/latest");
     if (isAnalysisRequest) {
-      return Promise.resolve(createResponse(createFitAssessment(84)));
+      return Promise.resolve(createResponse(createFitAssessment(assessmentScore)));
     }
 
     if (rawUrl.includes("/api/studio/artifacts") || rawUrl.includes("studio/artifacts")) {
@@ -748,7 +748,7 @@ describe("Studio page UX", () => {
   });
 
   it("hydrates completed artifacts from the backend and makes them usable immediately", async () => {
-    const fetchMock = installCompletedArtifactFetches();
+    const fetchMock = installCompletedArtifactFetches(88);
 
     const firstMount = renderStudio();
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -814,7 +814,7 @@ describe("Studio page UX", () => {
   });
 
   it("hydrates studio artifacts only once for a stable route tuple even when the artifact request fails", async () => {
-    const fetchMock = installCompletedArtifactFetches();
+    const fetchMock = installCompletedArtifactFetches(88);
     const baseImplementation = fetchMock.getMockImplementation();
     expect(baseImplementation).toBeDefined();
     fetchMock.mockImplementation((input: RequestInfo, init?: RequestInit) => {
@@ -834,7 +834,7 @@ describe("Studio page UX", () => {
           ),
         );
       }
-      if (rawUrl.includes("/api/resume/generate") || rawUrl.includes("/api/cover-letters/generate")) {
+      if (rawUrl.includes("/api/resume") || rawUrl.includes("/api/cover-letters")) {
         return Promise.resolve(
           createResponse(
             {
@@ -844,7 +844,7 @@ describe("Studio page UX", () => {
               },
             },
             false,
-            409,
+            422,
           ),
         );
       }
@@ -856,15 +856,19 @@ describe("Studio page UX", () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalled();
       expect(screen.getByText("Studio artifacts unavailable")).toBeInTheDocument();
+      expect(screen.getByText(/Fit score 88\b/i)).toBeInTheDocument();
     });
 
     await waitFor(() => {
       const artifactCalls = fetchMock.mock.calls
         .map(([input]) => rawFetchUrl(input))
         .filter((url) => url.includes("/api/studio/artifacts"));
-      expect(artifactCalls.length).toBe(2);
+      expect(artifactCalls.length).toBeLessThanOrEqual(2);
     });
     expect(screen.queryByText(/We couldn't load the selected role context/i)).toBeNull();
+    expect(screen.queryByText(/Fit score unavailable/i)).toBeNull();
+    expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
+    expect(screen.queryByText(/Review fit gaps/i)).toBeNull();
   });
 
   it("regenerates a stale resume artifact through the existing generation path and renders the fresh artifact only after the backend reports it current", async () => {

@@ -2087,21 +2087,23 @@ export default function StudioPage() {
       return null;
     };
 
-    if (studioArtifactsPayload) {
-      return coerceScore(studioArtifactsPayload.assessmentScore);
+    const assessment = analysis;
+    if (assessment) {
+      const assessmentScoreRaw =
+        (assessment as { scoring_v2?: { score?: unknown } | null } | null)?.scoring_v2?.score ??
+        (assessment as { score?: unknown } | null)?.score ??
+        (assessment as { overallScore?: unknown } | null)?.overallScore;
+      const assessmentScore = coerceScore(assessmentScoreRaw);
+      if (assessmentScore !== null) return assessmentScore;
     }
 
     // Fail-closed: if analysis failed to load/run, do not reuse any hydrated/stored score.
     // This prevents a mixed authority state where stale score implies READY while readiness/analysis errors imply repair required.
     if (analysisError || readinessError) return null;
-    const assessment = analysis;
-    const v2Raw = (assessment as { scoring_v2?: { score?: unknown } | null } | null)?.scoring_v2?.score;
-    const v2 = coerceScore(v2Raw);
-    const directRaw = (assessment as { score?: unknown } | null)?.score;
-    const direct = coerceScore(directRaw);
-    const overallRaw = (assessment as { overallScore?: unknown } | null)?.overallScore;
-    const overall = coerceScore(overallRaw);
-    return v2 ?? direct ?? overall ?? hydratedAnalysisScore ?? null;
+    if (studioArtifactsPayload) {
+      return coerceScore(studioArtifactsPayload.assessmentScore);
+    }
+    return hydratedAnalysisScore ?? null;
   }, [analysis, analysisError, hydratedAnalysisScore, readinessError, studioArtifactsPayload]); 
   const generateNowEligible = isGenerateNowEligible(analysisScore);
   const debugAuthorityEnabled = useMemo(() => searchParams?.get("debugAuthority") === "1", [searchParams]);
@@ -2140,12 +2142,15 @@ export default function StudioPage() {
     const hasOverall = typeof overallRaw === "number" || (typeof overallRaw === "string" && overallRaw.trim().length > 0);
     if (analysisError) return "analysis_error";
     if (readinessError) return "readiness_error";
-    if (hasV2) return "analysis.scoring_v2.score";
-    if (hasDirect) return "analysis.score";
-    if (hasOverall) return "analysis.overallScore";
+    if (assessment) {
+      if (hasV2) return "analysis.scoring_v2.score";
+      if (hasDirect) return "analysis.score";
+      if (hasOverall) return "analysis.overallScore";
+    }
+    if (studioArtifactsPayload && typeof studioArtifactsPayload.assessmentScore === "number") return "studioArtifacts.assessmentScore";
     if (hydratedAnalysisScore !== null) return "hydrated_assessmentScore";
     return "none";
-  }, [analysis, analysisError, hydratedAnalysisScore, readinessError]);
+  }, [analysis, analysisError, hydratedAnalysisScore, readinessError, studioArtifactsPayload]);
 
   const readMissingStructuredBaselineSignal = useCallback((payload: unknown): boolean => {
     if (!payload || typeof payload !== "object") return false;
@@ -7254,14 +7259,55 @@ export default function StudioPage() {
       setAnalysisError(null);
       setAnalysisLoading(false);
       setAssessmentUnsupportedRequirements(null);
+      setHydratedAnalysisScore(null);
       return;
     }
-    // Studio reload no longer hydrates fit assessments directly.
-    // Fit score, review state, and persisted artifact state are derived from /api/studio/artifacts.
-    setAnalysis(null);
+    let cancelled = false;
+    setAnalysisLoading(true);
     setAnalysisError(null);
-    setAnalysisLoading(false);
     setAssessmentUnsupportedRequirements(null);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/analysis/fit-assessments/${encodeURIComponent(analysisIdToHydrate)}`, {
+          cache: "no-store",
+        });
+        const payload = await readResponsePayload(response);
+        if (cancelled) return;
+        if (!response.ok || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+          const message = formatErrorMessage(payload, "Unable to load role analysis.");
+          setAnalysis(null);
+          setAnalysisError(message);
+          setHydratedAnalysisScore(null);
+          return;
+        }
+        const normalized = payload as LatestAnalysis;
+        setAnalysis(normalized);
+        setAnalysisError(null);
+        const scoreCandidate =
+          typeof normalized.scoring_v2?.score === "number"
+            ? normalized.scoring_v2.score
+            : typeof normalized.score === "number"
+              ? normalized.score
+              : typeof normalized.overallScore === "number"
+                ? normalized.overallScore
+                : null;
+        setHydratedAnalysisScore(
+          typeof scoreCandidate === "number" && Number.isFinite(scoreCandidate) ? scoreCandidate : null,
+        );
+      } catch (error) {
+        if (cancelled) return;
+        setAnalysis(null);
+        setAnalysisError(error instanceof Error ? error.message : "Unable to load role analysis.");
+        setHydratedAnalysisScore(null);
+      } finally {
+        if (!cancelled) {
+          setAnalysisLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [effectiveRequestedAnalysisId]);
 
   useEffect(() => {
