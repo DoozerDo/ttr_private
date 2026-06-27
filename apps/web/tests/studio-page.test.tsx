@@ -813,6 +813,60 @@ describe("Studio page UX", () => {
     ).toBeNull();
   });
 
+  it("hydrates studio artifacts only once for a stable route tuple even when the artifact request fails", async () => {
+    const fetchMock = installCompletedArtifactFetches();
+    const baseImplementation = fetchMock.getMockImplementation();
+    expect(baseImplementation).toBeDefined();
+    fetchMock.mockImplementation((input: RequestInfo, init?: RequestInit) => {
+      const rawUrl = rawFetchUrl(input);
+      if (rawUrl.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse(
+            {
+              error: {
+                code: "studio_artifacts_read_state_failed",
+                exceptionName: "UnprocessableEntityException",
+                exceptionMessage: "Cover letter generation failed validation",
+              },
+            },
+            false,
+            422,
+          ),
+        );
+      }
+      if (rawUrl.includes("/api/resume/generate") || rawUrl.includes("/api/cover-letters/generate")) {
+        return Promise.resolve(
+          createResponse(
+            {
+              error: {
+                code: "generation_blocked_for_hydration_test",
+                message: "Generation disabled in hydration loop regression",
+              },
+            },
+            false,
+            409,
+          ),
+        );
+      }
+      return baseImplementation?.(input, init);
+    });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+      expect(screen.getByText("Studio artifacts unavailable")).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      const artifactCalls = fetchMock.mock.calls
+        .map(([input]) => rawFetchUrl(input))
+        .filter((url) => url.includes("/api/studio/artifacts"));
+      expect(artifactCalls.length).toBe(2);
+    });
+    expect(screen.queryByText(/We couldn't load the selected role context/i)).toBeNull();
+  });
+
   it("regenerates a stale resume artifact through the existing generation path and renders the fresh artifact only after the backend reports it current", async () => {
     const fetchMock = installStaleArtifactRegenerationFetches({ staleResume: true, staleCover: false });
 

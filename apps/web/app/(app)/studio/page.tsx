@@ -1445,6 +1445,14 @@ export default function StudioPage() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [studioArtifactsError, setStudioArtifactsError] = useState<string | null>(null);
   const [readinessError, setReadinessError] = useState<string | null>(null);
+  const analysisErrorRef = useRef<string | null>(null);
+  const readinessErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    analysisErrorRef.current = analysisError;
+  }, [analysisError]);
+  useEffect(() => {
+    readinessErrorRef.current = readinessError;
+  }, [readinessError]);
   const [assessmentUnsupportedRequirements, setAssessmentUnsupportedRequirements] = useState<string[] | null>(null);
   const [contextHydrationMessage, setContextHydrationMessage] = useState<string | null>(null);
   const [generationReadiness, setGenerationReadiness] =
@@ -1575,6 +1583,7 @@ export default function StudioPage() {
   useEffect(() => {
     studioArtifactsPayloadRef.current = studioArtifactsPayload;
   }, [studioArtifactsPayload]);
+  const applyStudioArtifactsPayloadRef = useRef<(payload: BackendStudioArtifactsResponse) => void>(() => {});
   const [studioArtifactPairStatus, setStudioArtifactPairStatus] = useState<
     "missing" | "in_progress" | "failed" | "completed"
   >("missing");
@@ -2461,7 +2470,7 @@ export default function StudioPage() {
     const backendAssessmentScoreRaw = (payload as any)?.assessmentScore;
     if (backendAssessmentScoreRaw !== undefined && backendAssessmentScoreRaw !== null) {
       // Fail-closed: do not accept stale persisted assessmentScore when analysis/readiness is in an error state.
-      if (analysisError || readinessError) return;
+      if (analysisErrorRef.current || readinessErrorRef.current) return;
       const candidate =
         typeof backendAssessmentScoreRaw === "number"
           ? backendAssessmentScoreRaw
@@ -2680,7 +2689,10 @@ export default function StudioPage() {
     // If hydration confirms artifacts are missing (or only failed with no usable artifacts), allow auto-generation
     // to proceed afterwards. Only suppress while artifacts are in-flight or completed.
     suppressAutoGenerationRef.current = pairStatus === "in_progress" || pairStatus === "completed";
-  }, [analysisError, readinessError]);
+  }, []);
+  useEffect(() => {
+    applyStudioArtifactsPayloadRef.current = applyStudioArtifactsPayload;
+  }, [applyStudioArtifactsPayload]);
 
   function normalizeStudioArtifactsBackendPayload(payload: unknown): BackendStudioArtifactsResponse | null {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
@@ -2777,7 +2789,7 @@ export default function StudioPage() {
             setResolvedAssessmentIdFromArtifacts(resolvedAssessmentId);
           }
         }
-        applyStudioArtifactsPayload(normalized);
+        applyStudioArtifactsPayloadRef.current(normalized);
         setStudioArtifactsHydrated(true);
       } catch (error) {
         if (process.env.NODE_ENV !== "production") {
@@ -2799,7 +2811,6 @@ export default function StudioPage() {
       suppressAutoGenerationRef.current = false;
     };
   }, [
-    applyStudioArtifactsPayload,
     effectiveBaselineId,
     effectiveBaselineVersionId,
     effectiveJobId,
@@ -2847,7 +2858,7 @@ export default function StudioPage() {
         if (response.ok && payload && typeof payload === "object" && !Array.isArray(payload)) {
           const normalized = normalizeStudioArtifactsBackendPayload(payload);
           if (!normalized) continue;
-          applyStudioArtifactsPayload(normalized);
+          applyStudioArtifactsPayloadRef.current(normalized);
           setStudioArtifactsHydrated(true);
 
           const resumeData = extractResumeResponseFromStudioArtifacts(normalized);
@@ -15513,7 +15524,7 @@ export default function StudioPage() {
         </pre>
       ) : null}
       {mounted ? (
-        studioArtifactsPayload ? (
+        studioArtifactsPayload || studioArtifactsHydrated || studioArtifactsError ? (
           studioContent
         ) : isStateInvalid ? (
           invalidStateFallback
