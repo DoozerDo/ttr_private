@@ -1,3 +1,4 @@
+import { UnprocessableEntityException } from '@nestjs/common';
 import { StudioArtifactLifecycleStatus } from './studio-artifact.entity';
 import { StudioArtifactsService } from './studio-artifacts.service';
 import type { CustomerWorkflowState } from '../workflow/customer-workflow.service';
@@ -2538,6 +2539,217 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
     expect(state.coverLetter?.usableCurrent).toBe(true);
     expect(state.coverLetter?.responseBody).not.toBeNull();
     expect(state.coverLetter?.actions?.canExport).toBe(true);
+  });
+
+  it('downgrades cover letter validation errors during Studio recovery to a degraded 200 response', async () => {
+    const stored: any = {
+      id: 'artifact-current-failed',
+      createdAt: new Date('2026-06-03T00:00:00.000Z'),
+      updatedAt: new Date('2026-06-03T00:01:00.000Z'),
+      resumeStatus: StudioArtifactLifecycleStatus.FAILED,
+      resumeInputsHash: 'hash-1',
+      resumeResponseBody: {
+        status: 'failed',
+        error: { code: 'legacy_failed' },
+      },
+      resumeContent: null,
+      resumeFailureCode: 'legacy_failed',
+      resumeFailureMessage: 'previous generation failed',
+      resumeGenerationStartedAt: null,
+      resumeGeneratedAt: null,
+      resumeFailedAt: new Date('2026-06-03T00:00:30.000Z'),
+      resumeMetadata: { analysisId: 'analysis-1' },
+      coverLetterStatus: StudioArtifactLifecycleStatus.MISSING,
+      coverLetterInputsHash: 'hash-1',
+      coverLetterResponseBody: null,
+      coverLetterContent: null,
+      coverLetterFailureCode: null,
+      coverLetterFailureMessage: null,
+      coverLetterGenerationStartedAt: null,
+      coverLetterGeneratedAt: null,
+      coverLetterFailedAt: null,
+      coverLetterMetadata: { analysisId: 'analysis-1' },
+    };
+    let pendingPatch: Record<string, unknown> | null = null;
+    const queryBuilder: any = {
+      insert: jest.fn().mockReturnThis(),
+      into: jest.fn().mockReturnThis(),
+      values: jest.fn().mockReturnThis(),
+      onConflict: jest.fn().mockReturnThis(),
+      returning: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockImplementation(async () => {
+        if (pendingPatch) {
+          Object.assign(stored, pendingPatch);
+          pendingPatch = null;
+        }
+        return {};
+      }),
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockImplementation((patch: Record<string, unknown>) => {
+        pendingPatch = patch;
+        return queryBuilder;
+      }),
+      where: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(stored),
+    };
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue(stored),
+      upsert: jest.fn().mockImplementation(async (_values: any) => ({ identifiers: [{ id: stored.id }] })),
+      createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
+    } as any;
+    const baselineRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          {
+            baseline_id: 'base-1',
+            baseline_userId: 'u-1',
+            baseline_version: 0,
+            baseline_versionNumber: 1,
+            baseline_originalFilename: 'resume.pdf',
+            baseline_mimeType: 'application/pdf',
+            baseline_storagePath: '/tmp/resume.pdf',
+            baseline_hash: null,
+            baseline_status: 'ACTIVE',
+            baseline_isActive: true,
+            baseline_archivedAt: null,
+            baseline_originalBaselineScore: null,
+            baseline_latestBaselineScore: null,
+            baseline_latestAssessmentId: null,
+            baseline_firstAnalyzedAt: null,
+            baseline_lastAnalyzedAt: null,
+            baseline_isSynthetic: false,
+            baseline_syntheticScenarioKey: null,
+            baseline_syntheticRunId: null,
+            baseline_syntheticCreatedAt: null,
+            baseline_preserveFromCleanup: false,
+          },
+        ]),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
+    } as any;
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
+    } as any;
+    const jobRepository = { findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }) } as any;
+    const fitAssessmentRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          {
+            baseline_id: 'base-1',
+            baseline_userId: 'u-1',
+            baseline_version: 0,
+            baseline_versionNumber: 1,
+            baseline_originalFilename: 'resume.pdf',
+            baseline_mimeType: 'application/pdf',
+            baseline_storagePath: '/tmp/resume.pdf',
+            baseline_hash: null,
+            baseline_status: 'ACTIVE',
+            baseline_isActive: true,
+            baseline_archivedAt: null,
+            baseline_originalBaselineScore: null,
+            baseline_latestBaselineScore: null,
+            baseline_latestAssessmentId: null,
+            baseline_firstAnalyzedAt: null,
+            baseline_lastAnalyzedAt: null,
+            baseline_isSynthetic: false,
+            baseline_syntheticScenarioKey: null,
+            baseline_syntheticRunId: null,
+            baseline_syntheticCreatedAt: null,
+            baseline_preserveFromCleanup: false,
+          },
+        ]),
+        getOne: jest.fn().mockResolvedValue({ overallScore: 83, inputsHash: 'inputs-1' }),
+      }),
+    } as any;
+    const baselineResumeV2BackfillService = { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('hash-1');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('hash-1');
+
+    const resumeService = {
+      generateResume: jest.fn().mockImplementation(async () => {
+        stored.resumeStatus = StudioArtifactLifecycleStatus.COMPLETED;
+        stored.resumeInputsHash = 'hash-1';
+        stored.resumeResponseBody = {
+          status: 'success',
+          preview: {
+            resume: {
+              heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+              summary: 'Recovered resume summary.',
+              experience: [],
+              education: [],
+              competencies: [],
+            },
+          },
+        };
+        stored.resumeContent = 'resume-content';
+        stored.resumeGeneratedAt = new Date('2026-06-03T00:02:00.000Z');
+        stored.resumeFailedAt = null;
+        stored.resumeFailureCode = null;
+        stored.resumeFailureMessage = null;
+        return { status: 'success' };
+      }),
+    } as any;
+    const coverLettersService = {
+      generateCoverLetter: jest.fn().mockRejectedValue(
+        new UnprocessableEntityException({
+          error: {
+            code: 'cover_letter_validation_failed',
+            message: 'Cover letter generation failed validation',
+            details: { validationFlags: ['generic_filler', 'missing_evidence'] },
+          },
+        }),
+      ),
+    } as any;
+    (service as any).resumeService = resumeService;
+    (service as any).coverLettersService = coverLettersService;
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    expect(resumeService.generateResume).toHaveBeenCalled();
+    expect(coverLettersService.generateCoverLetter).toHaveBeenCalled();
+    expect(state.resume?.usableCurrent).toBe(true);
+    expect(state.resume?.responseBody).toBeTruthy();
+    expect(state.coverLetter).toBeTruthy();
+    expect(state.coverLetter?.usableCurrent).toBe(false);
+    expect((state.coverLetterResult as any)?.generationState).toBe('generated_unusable');
+    expect((state.coverLetterResult as any)?.qualityStatus).toBe('failed');
+    expect((state.coverLetterResult as any)?.preview).toBeNull();
+    expect((state.coverLetterResult as any)?.exportReady).toBe(false);
+    expect((state.coverLetterResult as any)?.actions?.canRegenerate).toBe(true);
+    expect((state.coverLetterResult as any)?.correctionReasons?.some((reason: any) =>
+      String(reason?.code ?? '').includes('cover_letter_validation_failed'),
+    )).toBe(true);
+    expect((state.coverLetterResult as any)?.correctionReasons?.some((reason: any) =>
+      String(reason?.message ?? '').includes('Cover letter generation failed validation'),
+    )).toBe(true);
   });
 
   it('regenerates a current failed unusable resume artifact on Studio entry when retryAllowed is true and canonical inputs are now valid', async () => {

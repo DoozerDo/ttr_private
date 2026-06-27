@@ -1228,10 +1228,18 @@ export class StudioArtifactsService {
         oneTap: true,
         forceRegenerate: true,
       } as any;
-      await Promise.all([
-        this.resumeService.generateResume(input.userId, generationRequest),
-        this.coverLettersService.generateCoverLetter(input.userId, generationRequest),
-      ]);
+      const coverLetterRecovery = this.recoverCoverLetterArtifact({
+        userId: input.userId,
+        baselineId: input.baselineId,
+        baselineVersionId: input.baselineVersionId,
+        baselineVersionHash,
+        jobId: input.jobId,
+        jobFingerprint,
+        analysisId: input.analysisId ?? null,
+        generationRequest,
+        inputsHash: coverLetterInputsHash,
+      });
+      await Promise.all([this.resumeService.generateResume(input.userId, generationRequest), coverLetterRecovery]);
       return this.readState({ ...input, recoveryAttempted: true });
     }
 
@@ -1834,6 +1842,20 @@ export class StudioArtifactsService {
             severity: 'warning' as const,
           }))
       : [];
+    const failureReason =
+      record.status === StudioArtifactLifecycleStatus.FAILED &&
+      (record.failureCode || record.failureMessage)
+        ? {
+            code: String(record.failureCode ?? 'generation_failed'),
+            message: String(record.failureMessage ?? record.failureCode ?? 'Generation failed.'),
+            severity: 'warning' as const,
+          }
+        : null;
+    const combinedCorrectionReasons = failureReason
+      ? [...correctionReasons, failureReason].filter(
+          (reason, index, all) => all.findIndex((candidate) => candidate.code === reason.code) === index,
+        )
+      : correctionReasons;
 
     const exportReadyRaw =
       responseBody && typeof responseBody.exportReady === 'boolean' ? responseBody.exportReady : false;
@@ -1862,8 +1884,8 @@ export class StudioArtifactsService {
       correctionReasons:
         qualityStatus === 'pass'
           ? []
-          : correctionReasons.length
-            ? correctionReasons
+          : combinedCorrectionReasons.length
+            ? combinedCorrectionReasons
             : [{ code: 'needs_correction', message: 'Needs correction.', severity: 'warning' }],
       exportReady,
       exports,
@@ -1873,6 +1895,64 @@ export class StudioArtifactsService {
         canSaveToOpportunities: exportReady,
       },
     };
+  }
+
+  private isRecoverableCoverLetterValidationError(error: unknown): boolean {
+    if (error instanceof UnprocessableEntityException) return true;
+    const status = typeof (error as any)?.getStatus === 'function' ? Number((error as any).getStatus()) : null;
+    return status === 422;
+  }
+
+  private async recoverCoverLetterArtifact(input: {
+    userId: string;
+    baselineId: string;
+    baselineVersionId: string;
+    baselineVersionHash: string | null;
+    jobId: string;
+    jobFingerprint: string | null;
+    analysisId: string | null;
+    generationRequest: Record<string, unknown>;
+    inputsHash: string;
+  }): Promise<void> {
+    try {
+      await this.coverLettersService.generateCoverLetter(input.userId, input.generationRequest as any);
+    } catch (error) {
+      if (!this.isRecoverableCoverLetterValidationError(error)) {
+        throw error;
+      }
+      const response =
+        typeof (error as any)?.getResponse === 'function' ? (error as any).getResponse() : null;
+      const code =
+        (response as any)?.error?.code ??
+        (response as any)?.code ??
+        (error instanceof Error ? error.name : 'cover_letter_validation_failed');
+      const message =
+        (response as any)?.error?.message ??
+        (response as any)?.message ??
+        (error instanceof Error ? error.message : String(error));
+      const validationDetails =
+        response && typeof response === 'object'
+          ? ((response as any)?.error?.details ?? (response as any)?.details ?? null)
+          : null;
+
+      await this.recordCoverLetterFailure({
+        userId: input.userId,
+        baselineId: input.baselineId,
+        jobId: input.jobId,
+        baselineVersionId: input.baselineVersionId,
+        baselineVersionHash: input.baselineVersionHash,
+        jobFingerprint: input.jobFingerprint,
+        inputsHash: input.inputsHash,
+        failureCode: String(code || 'cover_letter_validation_failed'),
+        failureMessage: String(message || 'Cover letter generation failed validation.'),
+        metadata: {
+          analysisId: input.analysisId,
+          recoverableFailure: true,
+          validationDetails,
+        },
+        analysisId: input.analysisId,
+      });
+    }
   }
 
   async recordResumeInProgress(input: {
