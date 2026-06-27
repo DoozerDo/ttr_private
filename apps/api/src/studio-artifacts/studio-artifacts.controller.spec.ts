@@ -1,3 +1,4 @@
+import { UnprocessableEntityException } from '@nestjs/common';
 import { StudioArtifactsController } from './studio-artifacts.controller';
 
 describe('StudioArtifactsController (unit)', () => {
@@ -65,6 +66,37 @@ describe('StudioArtifactsController (unit)', () => {
     ).rejects.toMatchObject({
       status: 422,
       response: { error: { code: 'studio_artifacts_invalid_ids' } },
+    });
+  });
+
+  it('preserves recoverable artifact validation errors instead of wrapping them as generic 500s', async () => {
+    const readState = jest.fn().mockRejectedValue(
+      new UnprocessableEntityException({
+        error: {
+          code: 'cover_letter_validation_failed',
+          message: 'Cover letter generation failed validation',
+          details: { validationFlags: ['generic_filler', 'missing_evidence'] },
+        },
+      }),
+    );
+    const controller = new StudioArtifactsController({ readState } as any);
+
+    await expect(
+      controller.getState(
+        { user: { id: 'user-1' } } as any,
+        baselineId,
+        baselineVersionId,
+        jobId,
+        '44444444-4444-4444-8444-444444444444',
+      ),
+    ).rejects.toMatchObject({
+      status: 422,
+      response: {
+        error: {
+          code: 'cover_letter_validation_failed',
+          message: 'Cover letter generation failed validation',
+        },
+      },
     });
   });
 

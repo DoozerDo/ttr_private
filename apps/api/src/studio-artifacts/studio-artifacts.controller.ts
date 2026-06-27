@@ -108,6 +108,9 @@ export class StudioArtifactsController {
         table?: unknown;
         column?: unknown;
       };
+      if (error instanceof UnprocessableEntityException) {
+        throw error;
+      }
       throw new HttpException(
         {
           error: {

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, vi } from "vitest";
 
-import StudioPage from "@/app/(app)/studio/page";
+import StudioPage, { resolveStudioFailureBannerKind } from "@/app/(app)/studio/page";
 import { listBaselines } from "@/lib/baselines";
 import { listJobs } from "@/lib/jobsClient";
 import { FALLBACK_RENDERED_TEXT } from "@/lib/renderedText";
@@ -774,6 +774,44 @@ describe("Studio page UX", () => {
       screen.getAllByText("I bring verified leadership and operational experience aligned to this role.").length,
     ).toBeGreaterThan(0);
   }, 20000);
+
+  it("distinguishes artifact failures from analysis failures in the Studio banner state", () => {
+    expect(
+      resolveStudioFailureBannerKind({
+        requestedAnalysisId: "analysis-1",
+        analysisError: null,
+        analysisLoading: false,
+        studioArtifactsError: "Cover letter generation failed validation",
+      }),
+    ).toBe("artifacts");
+
+    expect(
+      resolveStudioFailureBannerKind({
+        requestedAnalysisId: "analysis-1",
+        analysisError: "Role analysis could not be verified",
+        analysisLoading: false,
+        studioArtifactsError: null,
+      }),
+    ).toBe("analysis");
+
+    expect(
+      resolveStudioFailureBannerKind({
+        requestedAnalysisId: "analysis-1",
+        analysisError: "Role analysis could not be verified",
+        analysisLoading: false,
+        studioArtifactsError: "Studio artifacts could not be loaded.",
+      }),
+    ).toBe("artifacts");
+
+    expect(
+      resolveStudioFailureBannerKind({
+        requestedAnalysisId: null,
+        analysisError: "Role analysis could not be verified",
+        analysisLoading: false,
+        studioArtifactsError: "Studio artifacts could not be loaded.",
+      }),
+    ).toBeNull();
+  });
 
   it("regenerates a stale resume artifact through the existing generation path and renders the fresh artifact only after the backend reports it current", async () => {
     const fetchMock = installStaleArtifactRegenerationFetches({ staleResume: true, staleCover: false });

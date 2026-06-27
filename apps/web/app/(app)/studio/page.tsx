@@ -1039,6 +1039,23 @@ function trimId(value: unknown): string {
   return typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
 }
 
+export type StudioFailureBannerKind = "analysis" | "artifacts" | null;
+
+export function resolveStudioFailureBannerKind(args: {
+  requestedAnalysisId: string | null;
+  analysisError: string | null;
+  analysisLoading: boolean;
+  studioArtifactsError: string | null;
+}): StudioFailureBannerKind {
+  if (args.requestedAnalysisId && args.studioArtifactsError) {
+    return "artifacts";
+  }
+  if (args.requestedAnalysisId && args.analysisError && !args.analysisLoading) {
+    return "analysis";
+  }
+  return null;
+}
+
 function normalizeClaimText(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
@@ -1426,6 +1443,7 @@ export default function StudioPage() {
   const [hydratedAnalysisScore, setHydratedAnalysisScore] = useState<number | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [studioArtifactsError, setStudioArtifactsError] = useState<string | null>(null);
   const [readinessError, setReadinessError] = useState<string | null>(null);
   const [assessmentUnsupportedRequirements, setAssessmentUnsupportedRequirements] = useState<string[] | null>(null);
   const [contextHydrationMessage, setContextHydrationMessage] = useState<string | null>(null);
@@ -2712,11 +2730,46 @@ export default function StudioPage() {
         const payload = await readResponsePayload(response);
         if (cancelled) return;
 
-        if (!response.ok) return;
-        if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
+        if (!response.ok) {
+          const errorRecord =
+            payload && typeof payload === "object" && !Array.isArray(payload)
+              ? (payload as Record<string, unknown>)
+              : null;
+          const nestedError =
+            errorRecord && typeof errorRecord.error === "object" && !Array.isArray(errorRecord.error)
+              ? (errorRecord.error as Record<string, unknown>)
+              : null;
+          const message =
+            typeof nestedError?.exceptionMessage === "string"
+              ? nestedError.exceptionMessage
+              : typeof nestedError?.message === "string"
+                ? nestedError.message
+                : typeof errorRecord?.message === "string"
+                  ? errorRecord.message
+                  : "Studio artifacts could not be loaded.";
+          if (!cancelled) {
+            setStudioArtifactsError(message);
+            setStudioArtifactsHydrated(true);
+          }
+          return;
+        }
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+          if (!cancelled) {
+            setStudioArtifactsError("Studio artifacts could not be loaded.");
+            setStudioArtifactsHydrated(true);
+          }
+          return;
+        }
 
         const normalized = normalizeStudioArtifactsBackendPayload(payload);
-        if (!normalized) return;
+        if (!normalized) {
+          if (!cancelled) {
+            setStudioArtifactsError("Studio artifacts could not be loaded.");
+            setStudioArtifactsHydrated(true);
+          }
+          return;
+        }
+        if (!cancelled) setStudioArtifactsError(null);
         if (!requestedAnalysisId) {
           const resolvedAssessmentId = trimId((normalized as { assessmentId?: unknown }).assessmentId);
           if (resolvedAssessmentId) {
@@ -2729,6 +2782,12 @@ export default function StudioPage() {
       } catch (error) {
         if (process.env.NODE_ENV !== "production") {
           console.error("[STUDIO_ARTIFACTS_FETCH_ERROR]", error);
+        }
+        if (!cancelled) {
+          setStudioArtifactsError(
+            error instanceof Error ? error.message : "Studio artifacts could not be loaded.",
+          );
+          setStudioArtifactsHydrated(true);
         }
       }
     })();
@@ -12891,29 +12950,33 @@ export default function StudioPage() {
 
     // Studio can be entered before analysisId exists; artifacts hydration must still be allowed.
     const requiredIdsMissing = !effectiveJobId || !effectiveBaselineVersionId || !effectiveBaselineId;
-    const analysisMissingOrIncomplete =
-      Boolean(effectiveRequestedAnalysisId) &&
-      (!analysis || analysisScore === null || Boolean(analysisError && !analysisLoading));
 
     const baselineSourceUnavailable = !effectiveBaselineId && !selectedBaselineId && !requestedBaselineId;
+    const analysisValidationFailed = Boolean(analysisError && !analysisLoading);
 
     return (
       requiredIdsMissing ||
-      analysisMissingOrIncomplete ||
+      (analysisValidationFailed && !studioArtifactsPayload && !studioArtifactsError) ||
       companyUnknownOrEmpty ||
       roleUnknownOrEmpty ||
       baselineSourceUnavailable
     );
   })();
+  const studioFailureBannerKind = resolveStudioFailureBannerKind({
+    requestedAnalysisId: effectiveRequestedAnalysisId,
+    analysisError,
+    analysisLoading,
+    studioArtifactsError,
+  });
 
   const invalidStateFallback = (
     <PageShell className="space-y-4 pb-4">
       <div data-testid="studio-invalid-state-fallback">
         <WorkflowActivityBanner tracker={workflowActivityBannerTracker} />
-        <Alert intent="warning" title="We couldnâ€™t load your analysis">
+        <Alert intent="warning" title="We couldnâ€™t load the selected role context">
           <div className="space-y-3">
             <p className="text-sm text-slate-100">
-              Something changed or couldnâ€™t be verified. Reload your analysis to continue.
+              Something changed or couldnâ€™t be verified. Reload the role context to continue.
             </p>
             <div>
               <FormButton onClick={() => void router.push(resultsHref)}>Run Analyze again</FormButton>
@@ -13975,9 +14038,14 @@ export default function StudioPage() {
           Select a role from Results to generate documents.
         </Alert>
       ) : null}
-      {requestedAnalysisId && analysisError && !uiHasRenderablePair && !studioArtifactsPayload ? (
+      {studioFailureBannerKind === "analysis" ? (
         <Alert intent="warning" title="Role analysis unavailable">
           {analysisError}
+        </Alert>
+      ) : null}
+      {studioFailureBannerKind === "artifacts" ? (
+        <Alert intent="warning" title="Studio artifacts unavailable">
+          {studioArtifactsError}
         </Alert>
       ) : null}
       {versionsError && !qualifiedForStudioOrchestration && !uiHasRenderablePair ? (
