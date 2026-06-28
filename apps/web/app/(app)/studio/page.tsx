@@ -3954,10 +3954,11 @@ export default function StudioPage() {
   }, [activeGenerationReadiness.reasonCodes, activeGenerationReadiness.reasons, persistedArtifactAbsenceReasonCodes]);
 
   const studioReadinessBlocksGeneration = Boolean(
-    resumeV2Authority.blocksGeneration ||
-      (activeGenerationReadiness.blocked &&
-        !resumeV2FallbackAttemptable &&
-        activeGenerationReadinessBlockingReasonCodes.length > 0),
+    !qualifiedForGeneration &&
+      (resumeV2Authority.blocksGeneration ||
+        (activeGenerationReadiness.blocked &&
+          !resumeV2FallbackAttemptable &&
+          activeGenerationReadinessBlockingReasonCodes.length > 0)),
   );
   const studioDraftMode = 
     resolveDocumentGenerationMode(analysisScore) === "draft" && isFromUnlock && !hasGeneratedOnce; 
