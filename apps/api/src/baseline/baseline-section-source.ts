@@ -99,12 +99,15 @@ export function resolveBaselineSectionsForGeneration(
   baseline: Pick<Baseline, 'id' | 'sections' | 'parsedRecords'>,
 ): BaselineSection[] {
   const directSections = (baseline.sections ?? []).slice().sort((a, b) => a.order - b.order);
-  if (directSections.length > 0) {
-    const directStructured = extractStructuredBaselineFromSections(directSections as BaselineSection[]);
-    if ((directStructured.experience ?? []).length > 0) {
-      return directSections;
+  const directStructuredExperienceCount = (() => {
+    if (!directSections.length) return 0;
+    try {
+      const structured = extractStructuredBaselineFromSections(directSections as BaselineSection[]);
+      return Array.isArray((structured as any)?.experience) ? (structured as any).experience.length : 0;
+    } catch {
+      return 0;
     }
-  }
+  })();
 
   const parsed = ((baseline.parsedRecords ?? []) as ParsedRecordLike[])
     .slice()
@@ -115,6 +118,34 @@ export function resolveBaselineSectionsForGeneration(
     })[0];
 
   const parsedSections = extractExperienceSectionsFromParsedJson(parsed?.parsedJson);
+  const parsedStructuredExperienceCount = (() => {
+    if (!parsedSections.length) return 0;
+    try {
+      const structured = extractStructuredBaselineFromSections(parsedSections as BaselineSection[]);
+      return Array.isArray((structured as any)?.experience) ? (structured as any).experience.length : 0;
+    } catch {
+      return 0;
+    }
+  })();
+
+  if (parsedStructuredExperienceCount > directStructuredExperienceCount && parsedSections.length > 0) {
+    return parsedSections.map((section, index) => ({
+      id: `parsed-experience-${index}`,
+      baselineId: baseline.id,
+      sectionType: section.sectionType,
+      title: section.title,
+      content: section.content,
+      includePolicy: BaselineIncludePolicy.ALWAYS,
+      order: index,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    })) as BaselineSection[];
+  }
+
+  if (directStructuredExperienceCount > 0) {
+    return directSections;
+  }
+
   if (parsedSections.length > 0) {
     return parsedSections.map((section, index) => ({
       id: `parsed-experience-${index}`,

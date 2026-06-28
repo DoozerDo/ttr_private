@@ -1030,6 +1030,71 @@ describe('CoverLettersService contract', () => {
     buildDraftSpy.mockRestore();
   });
 
+  it('prefers richer parsedJson experience over sparse direct sections when generating a canonical cover letter', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+    const originalScore = assessment.overallScore;
+    assessment.overallScore = 90;
+
+    try {
+      baseline.sections = [
+        {
+          ...(baseline.sections?.[0] as any),
+          content: [
+            'Sparse Co | Director | 2022 - 2023',
+            '- Led a small operating cadence.',
+          ].join('\n'),
+        } as any,
+        {
+          ...(baseline.sections?.[0] as any),
+          id: 'summary-rich-1',
+          title: 'Summary',
+          sectionType: BaselineSectionType.SUMMARY,
+          order: 1,
+          content:
+            'Operations leader focused on measurable improvements and reliable execution. ' +
+            'Builds practical operating rhythms and cross-functional collaboration across support and product.',
+        } as any,
+      ] as any;
+      baseline.parsedRecords = [
+        {
+          createdAt: new Date(),
+          parsedJson: {
+            identity: { full_name: 'Jordan Lee' },
+            experience: [
+              {
+                company: 'Example Co',
+                role_title: 'Director of Customer Operations',
+                start_date: 'Jan 2020',
+                end_date: 'Dec 2021',
+                details_text: 'Led escalation triage and operating reviews across support teams.',
+              },
+              {
+                company: 'Acme Corp',
+                role_title: 'Customer Operations Manager',
+                start_date: 'Jan 2022',
+                end_date: 'Present',
+                details_text: 'Built queue health dashboards and playbooks to improve response time.',
+              },
+            ],
+          },
+        } as any,
+      ];
+
+      const result = await service.generateCoverLetter('user-1', request as any);
+      expect(result.status).toBe('success');
+      expect(result.exportReady).toBe(true);
+      expect((result as any).content).toMatch(/\S/);
+      expect(result.generationAuthority).toBe('baseline_file');
+      expect((result as any).baselineFileUsable).toBe(true);
+    } finally {
+      baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
+      assessment.overallScore = originalScore;
+    }
+  });
+
   it('does not mark a cover letter exportReady when the quality gate needs refinement', async () => {
     const { service } = buildService();
     const buildDraftSpy = jest.spyOn(service as any, 'buildCoverLetterDraft').mockResolvedValue({

@@ -981,6 +981,99 @@ describe('ResumeService contract', () => {
     baseline.parsedRecords = originalParsed;
   });
 
+  it('prefers richer parsedJson experience over sparse direct sections when generating a canonical resume', async () => {
+    const { service } = buildService();
+    const originalScore = assessment.overallScore;
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'false';
+    assessment.overallScore = 90;
+
+    try {
+      const canonicalBaseline = {
+        ...baseline,
+        sections: [
+          {
+            ...baseSection,
+            content: [
+              'Sparse Co | Director | 2022 - 2023',
+              '- Led a small operating cadence.',
+            ].join('\n'),
+          } as any,
+          {
+            ...baseSection,
+            id: 'summary-rich-1',
+            sectionType: BaselineSectionType.SUMMARY,
+            title: 'Summary',
+            order: 1,
+            content:
+              'Operations leader with experience improving service reliability and cross-functional coordination. ' +
+              'Builds practical operating rhythms and measurable outcomes across support and product.',
+          } as any,
+        ] as any,
+        parsedRecords: [
+          {
+            createdAt: new Date(),
+            parsedJson: {
+              identity: { full_name: 'Jordan Lee' },
+              experience: [
+                {
+                  company: 'Example Co',
+                  role_title: 'Director of Customer Operations',
+                  start_date: 'Jan 2020',
+                  end_date: 'Dec 2021',
+                  details_text: 'Led escalation triage and operating reviews across support teams.',
+                },
+                {
+                  company: 'Acme Corp',
+                  role_title: 'Customer Operations Manager',
+                  start_date: 'Jan 2022',
+                  end_date: 'Present',
+                  details_text: 'Built queue health dashboards and playbooks to improve response time.',
+                },
+              ],
+            },
+            resumeV2Json: {
+              heading: {
+                name: 'Jordan Lee',
+                contactLine: 'Jordan Lee',
+                links: [],
+              },
+              summary:
+                'Operations leader focused on reliability, escalation handling, and cross-functional coordination.',
+              experience: [
+                {
+                  company: 'Sparse Co',
+                  roleTitle: 'Director',
+                  dateRange: '2022 - 2023',
+                  bullets: ['Led a small operating cadence.'],
+                },
+              ],
+            },
+          } as any,
+        ],
+      } as any;
+      jest.spyOn(service as any, 'loadCanonicalBaselineRawModel').mockResolvedValue(canonicalBaseline);
+
+      const result = await service.generateResume('user-1', baseRequest);
+      expect(result.status).toBe('success');
+      expect(result.exportReady).toBe(true);
+      expect(result.qualityGate?.status).toBe('pass');
+
+      const previewExperience = (result.preview?.resume as any)?.experience ?? [];
+      expect(previewExperience.length).toBeGreaterThanOrEqual(2);
+      expect(previewExperience.map((e: any) => String(e.company ?? ''))).toEqual(
+        expect.arrayContaining(['Example Co', 'Acme Corp']),
+      );
+      expect(
+        previewExperience.some((e: any) => String(e.company ?? '') === 'Sparse Co'),
+      ).toBe(false);
+    } finally {
+      assessment.overallScore = originalScore;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    }
+  });
+
   it('filters malformed structured-template experience headers from preview output (score >= 80 branch)', async () => {
     const { service } = buildService();
     const padding =

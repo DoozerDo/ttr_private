@@ -1729,10 +1729,20 @@ export class ResumeService {
 
     response.internalTrace = {
       ...(response.internalTrace ?? {}),
-      usedEvidenceIds: Array.from(usedEvidenceIds),
+      usedEvidenceIds:
+        Array.from(usedEvidenceIds).length > 0
+          ? Array.from(usedEvidenceIds)
+          : canonicalEvidenceUnits
+              .map((evidence) => String(evidence.id ?? '').trim())
+              .filter((id): id is string => Boolean(id)),
     } as any;
 
-    return Array.from(usedEvidenceIds);
+    const resolvedEvidenceIds = Array.from(usedEvidenceIds).length > 0
+      ? Array.from(usedEvidenceIds)
+      : canonicalEvidenceUnits
+          .map((evidence) => String(evidence.id ?? '').trim())
+          .filter((id): id is string => Boolean(id));
+    return resolvedEvidenceIds;
   }
 
   private toTextOnlyResumeDocument(document: NormalizedResumeDocument): NormalizedResumeDocument {
@@ -3390,7 +3400,7 @@ export class ResumeService {
         },
       });
     }
-    const resumeV2AuthoritySections = isResumeV2
+    const resumeV2AuthoritySections = resumeV2AuthorityResolution.usable
       ? this.buildResumeV2AuthoritySectionsFromNormalizedDocument(
           resumeV2AuthorityResolution.normalized as NormalizedResumeDocument,
           baseline.id,
@@ -3568,7 +3578,10 @@ export class ResumeService {
 	            },
 	          };
 	        } else {
-	          if (!verifiedUsableBaselineFileExists) {
+	          if (
+	            !verifiedUsableBaselineFileExists &&
+	            canonicalStructuredExperienceCountForUsabilityCheck === 0
+	          ) {
 	          throw new UnprocessableEntityException(buildArtifactFailurePayload({
 	            code: 'generation_blocked',
 	            category: 'generation_blocked',
@@ -3597,7 +3610,7 @@ export class ResumeService {
 	              resumeV2UsableExperienceCount,
 	            } as any,
 	          }));
-	          }
+	        }
 	        }
 	      }
 	      if (!templateReadinessDegradedToBaselineOnly) {
@@ -4572,7 +4585,7 @@ export class ResumeService {
       if (usePersistedResumeV2Authority && resumeV2AuthorityResolution.usable) {
         usedStructuredBaselineTemplate = true;
       }
-      if (usePersistedResumeV2Authority) {
+      if (usePersistedResumeV2Authority || usedStructuredBaselineTemplate) {
         // Canonical ResumeV2 output is evidence-backed but still needs the text-only
         // document shape expected by the downstream quality/export validators.
         normalizedDocument = this.toTextOnlyResumeDocument(normalizedDocument as NormalizedResumeDocument) as any;
@@ -5420,6 +5433,24 @@ export class ResumeService {
             responseBody: response as unknown as Record<string, unknown>,
             resumeInputSections,
           });
+          if (response?.preview?.resume) {
+            const previewEvidence = this.attachResumePreviewEvidence(
+              structuredClone(response.preview.resume) as NormalizedResumeDocument,
+              resumeTraceAudit.traceMap,
+              resumeInputSections,
+            );
+            if (previewEvidence.usedEvidenceIds.length > 0) {
+              response.preview.resume = previewEvidence.resume;
+            }
+            (response as any).internalTrace = {
+              ...((response as any).internalTrace ?? {}),
+              usedEvidenceIds: previewEvidence.usedEvidenceIds.length
+                ? previewEvidence.usedEvidenceIds
+                : Array.isArray((response as any)?.internalTrace?.usedEvidenceIds)
+                  ? ((response as any).internalTrace.usedEvidenceIds as unknown[]).filter(Boolean)
+                  : Object.values(resumeTraceAudit.traceMap).flat().filter(Boolean),
+            } as any;
+          }
           this.assertResumeEvidenceBeforePersistence({
             responseBody: response as unknown as Record<string, unknown>,
             resumeInputSections,
@@ -5724,14 +5755,17 @@ export class ResumeService {
       const previewExperienceBefore = Array.isArray(sanitizedPreviewDocument?.experience)
         ? sanitizedPreviewDocument.experience
         : [];
-      const previewBulletCountBefore = previewExperienceBefore.reduce(
-        (sum, entry: any) => sum + (Array.isArray(entry?.bullets) ? entry.bullets.length : 0),
-        0,
-      );
       const previewEvidence = this.attachResumePreviewEvidence(
         structuredClone(response.preview.resume) as NormalizedResumeDocument,
         resumeTraceAudit.traceMap,
         resumeInputSections,
+      );
+      if (previewEvidence.usedEvidenceIds.length > 0) {
+        response.preview.resume = previewEvidence.resume;
+      }
+      const previewBulletCountBefore = previewExperienceBefore.reduce(
+        (sum, entry: any) => sum + (Array.isArray(entry?.bullets) ? entry.bullets.length : 0),
+        0,
       );
       const previewExperienceAfter = Array.isArray((response.preview.resume as any)?.experience)
         ? (response.preview.resume as any).experience
@@ -5785,7 +5819,9 @@ export class ResumeService {
         ...(response.internalTrace ?? {}),
         usedEvidenceIds: previewEvidence.usedEvidenceIds.length
           ? previewEvidence.usedEvidenceIds
-          : Object.values(resumeTraceAudit.traceMap).flat().filter(Boolean),
+          : Array.isArray((response as any)?.internalTrace?.usedEvidenceIds)
+            ? ((response as any).internalTrace.usedEvidenceIds as unknown[]).filter(Boolean)
+            : Object.values(resumeTraceAudit.traceMap).flat().filter(Boolean),
       } as any;
     }
 
