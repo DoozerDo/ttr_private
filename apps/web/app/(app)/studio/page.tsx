@@ -3932,8 +3932,32 @@ export default function StudioPage() {
 
   const resumeV2FallbackAttemptable = resumeV2FallbackEvaluation.attemptable;
 
+  const persistedArtifactAbsenceReasonCodes = useMemo(
+    () =>
+      new Set([
+        "persisted_fit_assessment_missing",
+        "persisted_resume_artifact_missing",
+        "persisted_cover_letter_artifact_missing",
+      ]),
+    [],
+  );
+
+  const activeGenerationReadinessBlockingReasonCodes = useMemo(() => {
+    const reasonCodes = Array.isArray(activeGenerationReadiness.reasonCodes) ? activeGenerationReadiness.reasonCodes : [];
+    const fallbackReasonCodes = Array.isArray(activeGenerationReadiness.reasons)
+      ? activeGenerationReadiness.reasons.map((reason) => String((reason as any)?.code ?? "").trim()).filter(Boolean)
+      : [];
+
+    return Array.from(
+      new Set([...reasonCodes, ...fallbackReasonCodes].map((code) => String(code ?? "").trim()).filter(Boolean)),
+    ).filter((code) => !persistedArtifactAbsenceReasonCodes.has(code));
+  }, [activeGenerationReadiness.reasonCodes, activeGenerationReadiness.reasons, persistedArtifactAbsenceReasonCodes]);
+
   const studioReadinessBlocksGeneration = Boolean(
-    resumeV2Authority.blocksGeneration || (activeGenerationReadiness.blocked && !resumeV2FallbackAttemptable),
+    resumeV2Authority.blocksGeneration ||
+      (activeGenerationReadiness.blocked &&
+        !resumeV2FallbackAttemptable &&
+        activeGenerationReadinessBlockingReasonCodes.length > 0),
   );
   const studioDraftMode = 
     resolveDocumentGenerationMode(analysisScore) === "draft" && isFromUnlock && !hasGeneratedOnce; 

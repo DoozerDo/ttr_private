@@ -16,7 +16,7 @@ type PairStatus = "missing" | "generating" | "generated" | "completed" | "failed
 export function resolveWorkflowSurfaceAuthority(input: {
   score: number | null;
   generationReadiness: GenerationReadiness;
-  workflowAuthority: Pick<WorkflowAuthorityResult, "workflowState" | "primaryAction">;
+  workflowAuthority: Pick<WorkflowAuthorityResult, "workflowState" | "primaryAction" | "canGenerate">;
   artifact: {
     hasResume: boolean;
     hasCoverLetter: boolean;
@@ -51,8 +51,7 @@ export function resolveWorkflowSurfaceAuthority(input: {
   // Readiness is informational only. Only workflow-level authority can hard-block surfaces.
   const blocked = Boolean(input.workflowAuthority.workflowState === "BLOCKED");
 
-  const workflowSupportsImmediateGeneration =
-    input.workflowAuthority.workflowState === "READY" && input.workflowAuthority.primaryAction === "GENERATE";
+  const workflowSupportsImmediateGeneration = Boolean(input.workflowAuthority.canGenerate);
   const eligibleForGenerationReady =
     !unlockFlowActive &&
     !input.postUnlockOutcomeState &&
@@ -60,8 +59,7 @@ export function resolveWorkflowSurfaceAuthority(input: {
     // not gate Studio generation entry/auto-start.
     workflowSupportsImmediateGeneration &&
     !hasAnyOutput &&
-    !pairGenerating &&
-    !pairFailed;
+    !pairGenerating;
 
   if (unlockFlowActive) {
     return {

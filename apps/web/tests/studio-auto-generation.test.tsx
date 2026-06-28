@@ -1990,6 +1990,81 @@ describe("Studio auto-generation", () => {
     }, { timeout: 15000 });
   }, 15000);
 
+  it("starts canonical generation when qualifiedForGeneration is true and persisted resume/cover artifacts are missing or failed", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const fetchMock = installStrongFitFetches({
+      score: 84,
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "persisted_only_assessment_backed",
+        assessmentScore: 84,
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        generationContractVersion: "studio-artifacts-v1",
+        artifact: {
+          hasResume: true,
+          hasCoverLetter: false,
+          pairStatus: "failed",
+          generating: false,
+          failure: null,
+        },
+        resume: {
+          status: "failed",
+          usableCurrent: false,
+          inputsHash: true,
+          failureCode: "resume_v2_failed",
+          failureMessage: "Internal Server Error Exception",
+          responseBody: null,
+          content: null,
+          confidence: "LOW",
+          failure: {
+            code: "resume_v2_failed",
+            message: "Internal Server Error Exception",
+          },
+        },
+        coverLetter: {
+          status: "missing",
+          usableCurrent: false,
+          inputsHash: true,
+          failureCode: null,
+          failureMessage: null,
+          responseBody: null,
+          content: null,
+          confidence: "LOW",
+          failure: null,
+        },
+        diagnostics: {
+          resumeV2Readiness: {
+            hasResumeV2: true,
+            usableExperienceCount: 4,
+          },
+        },
+      },
+    });
+
+    renderStudio();
+
+    await waitFor(() => {
+      const snapshot = readOrchestrationDebugSnapshot();
+      expect(snapshot.qualifiedForGeneration).toBe(true);
+      expect(snapshot.effectiveRequestedAnalysisId).toBeTruthy();
+      expect(snapshot.orchestrationDecision).toBe("should_auto_generate");
+      expect(snapshot.studioReadinessBlocksGeneration).toBe(false);
+    }, { timeout: 15000 });
+
+    await waitFor(() => {
+      expect(countPostCalls(fetchMock, "/api/resume")).toBeGreaterThan(0);
+      expect(countPostCalls(fetchMock, "/api/cover-letters")).toBeGreaterThan(0);
+    }, { timeout: 15000 });
+  }, 15000);
+
   it("Scenario A: both previews renderable => no failure banner and no 'not generated yet' placeholders", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",

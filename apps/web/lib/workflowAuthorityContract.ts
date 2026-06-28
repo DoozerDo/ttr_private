@@ -161,7 +161,7 @@ function resolveGenerationState(input: {
   // Do not double-block here, or the UI can enter a contradictory state ("ready to generate" + "not ready yet").
   if (!input.canGenerate) return "blocked";
   if (input.surfaceCanonicalState === "generation_in_progress" || input.artifactsPair === "generating") return "generating";
-  if (input.surfaceCanonicalState === "generation_ready") return "ready";
+  if (input.surfaceCanonicalState === "generation_ready" || input.surfaceCanonicalState === "partial_documents") return "ready";
   if (input.surfaceCanonicalState === "generation_failed" || input.artifactsPair === "failed") {
     return input.retryableFailure ? "failed_retryable" : "failed_blocked";
   }
