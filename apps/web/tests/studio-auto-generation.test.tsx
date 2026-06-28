@@ -2055,7 +2055,9 @@ describe("Studio auto-generation", () => {
       const snapshot = readOrchestrationDebugSnapshot();
       expect(snapshot.qualifiedForGeneration).toBe(true);
       expect(snapshot.effectiveRequestedAnalysisId).toBeTruthy();
+      expect(snapshot.autoGenerationTriggerGuards?.contractShouldStart).toBe(true);
       expect(snapshot.orchestrationDecision).toBe("should_auto_generate");
+      expect(snapshot.orchestrationDecision).not.toBe("passive_empty_state");
       expect(snapshot.studioReadinessBlocksGeneration).toBe(false);
     }, { timeout: 15000 });
 

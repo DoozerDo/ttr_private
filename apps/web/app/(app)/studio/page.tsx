@@ -5599,11 +5599,12 @@ export default function StudioPage() {
   ]);
 
   const orchestrationDebugSnapshot = useMemo(() => {
+    const contractShouldStart = Boolean(needsAutoGeneration);
     const orchestrationDecision = (() => {
-      if (studioReadinessBlocksGeneration === true) return "blocked";
+      if (contractShouldStart) return "should_auto_generate";
       const hasAllOutputs = !missingResumeOutput && !missingCoverOutput;
       if (hasAnyArtifactPersisted && hasAllOutputs) return "hydrate_existing_artifacts";
-      if (eligibleForAutoGeneration && (missingResumeOutput || missingCoverOutput)) return "should_auto_generate";
+      if (studioReadinessBlocksGeneration === true) return "blocked";
       return "passive_empty_state";
     })();
 
@@ -5652,12 +5653,10 @@ export default function StudioPage() {
     const usedForOrchestrationDecision = {
       result: orchestrationDecision,
       inputs: {
-        studioReadinessBlocksGeneration: Boolean(studioReadinessBlocksGeneration),
+        contractShouldStart,
+        contractGenerationState: activeGenerationReadiness.status,
         hasAnyArtifactPersisted: Boolean(hasAnyArtifactPersisted),
-        qualifiedForStudioOrchestration: Boolean(qualifiedForStudioOrchestration),
         autoGenerationInFlight: Boolean(autoGenerationInFlight),
-        resumeGenerating: Boolean(resumeGenerating),
-        coverGenerating: Boolean(coverGenerating),
       },
     };
 
@@ -5695,38 +5694,36 @@ export default function StudioPage() {
 	      autoGenerationTriggerGuards: (() => {
 	        // Observability-only mirror of the auto-generation effect guards; this is used to explain
 	        // why `needsAutoGeneration=true` does not result in POST /resume or POST /cover_letter.
-	        const signature = autoGenerationSignatureRef.current;
-	    // Only treat "artifacts exist" as a suppression gate when *all* required outputs are present.
-	    // Partial artifact states (e.g. cover letter persisted, resume missing) must still auto-generate
-	    // the missing artifact.
-	    const artifactsExist = !missingResumeOutput && !missingCoverOutput;
-	        const generatingNow = Boolean(autoGenerationInFlight || resumeGenerating || coverGenerating);
-	        let latch: string | null = null;
-	        try {
-	          const storage = typeof window !== "undefined" ? window.localStorage : null;
-	          const storageKey = signature ? `ttr:studio:auto-generate:${signature}` : null;
-	          latch =
-	            storageKey && storage && typeof storage.getItem === "function"
-	              ? storage.getItem(storageKey)
-	              : null;
-	        } catch {
-	          latch = null;
-	        }
-	    const shouldBlockFromLatch =
-	      latch === "succeeded" &&
-	      artifactContract.hasUsableArtifacts &&
-	      !missingResumeOutput &&
-	      !missingCoverOutput;
-	        return {
-	          signature,
-	          latch,
-	          ready: Boolean(needsAutoGeneration),
-	          contractShouldStart: Boolean(needsAutoGeneration),
-	          suppressAutoGeneration: Boolean(suppressAutoGenerationRef.current),
-	          artifactsExist,
-	          generatingNow,
-	          shouldBlockFromLatch,
-	        };
+        const signature = autoGenerationSignatureRef.current;
+        const contractShouldStart = Boolean(needsAutoGeneration);
+        const artifactsExist = !missingResumeOutput && !missingCoverOutput;
+        const generatingNow = Boolean(autoGenerationInFlight || resumeGenerating || coverGenerating);
+        let latch: string | null = null;
+        try {
+          const storage = typeof window !== "undefined" ? window.localStorage : null;
+          const storageKey = signature ? `ttr:studio:auto-generate:${signature}` : null;
+          latch =
+            storageKey && storage && typeof storage.getItem === "function"
+              ? storage.getItem(storageKey)
+              : null;
+        } catch {
+          latch = null;
+        }
+    const shouldBlockFromLatch =
+      latch === "succeeded" &&
+      artifactContract.hasUsableArtifacts &&
+      !missingResumeOutput &&
+      !missingCoverOutput;
+        return {
+          signature,
+          latch,
+          ready: contractShouldStart,
+          contractShouldStart,
+          suppressAutoGeneration: Boolean(suppressAutoGenerationRef.current),
+          artifactsExist,
+          generatingNow,
+          shouldBlockFromLatch,
+        };
 	      })(),
 	      canProceedWithStudioDrafts,
 	      needsAutoGeneration,
@@ -12752,45 +12749,6 @@ export default function StudioPage() {
     effectiveBaselineVersionId,
     effectiveJobId,
     effectiveRequestedAnalysisId,
-  ]);
-
-  useEffect(() => {
-    // Fallback orchestration: if a user is qualified + unblocked but the contract never enters READY
-    // (e.g. hydration ordering or legacy contract drift), still auto-start generation once per scope.
-    if (!needsAutoGeneration) return;
-    if (!autoGenerationSignature) return;
-    // If `intent=generate` is present, the intent path owns first-draft generation for this session.
-    if (hasGenerateIntent) return;
-    if (suppressAutoGenerationRef.current && !studioArtifactsHydrated) return;
-    if (autoGenerationInFlight || resumeGenerating || coverGenerating) return;
-    if (!missingResumeOutput && !missingCoverOutput) return;
-    if (resumeState.artifactFailure || coverState.artifactFailure) return;
-    if (studioReadinessBlocksGeneration) return;
-
-    if (autoGenerationSignatureRef.current === autoGenerationSignature) return;
-    autoGenerationSignatureRef.current = autoGenerationSignature;
-
-    if (missingResumeOutput) {
-      void handleGenerateResume();
-    }
-    if (missingCoverOutput) {
-      void handleGenerateCoverLetter();
-    }
-  }, [
-    studioReadinessBlocksGeneration,
-    autoGenerationInFlight,
-    autoGenerationSignature,
-    coverGenerating,
-    coverState.artifactFailure,
-    hasGenerateIntent,
-    needsAutoGeneration,
-    missingCoverOutput,
-    missingResumeOutput,
-    resumeGenerating,
-    resumeState.artifactFailure,
-    studioArtifactsHydrated,
-    handleGenerateCoverLetter,
-    handleGenerateResume,
   ]);
 
   useEffect(() => {
