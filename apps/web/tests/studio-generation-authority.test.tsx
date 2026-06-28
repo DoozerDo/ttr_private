@@ -1627,10 +1627,25 @@ function setupFetchForManualRegenerateRefresh() {
   let coverGenerated = false;
   const resumeGenerateBodies: string[] = [];
   const coverGenerateBodies: string[] = [];
+  const resumeGenerateHeaders: Array<Record<string, string>> = [];
+  const coverGenerateHeaders: Array<Record<string, string>> = [];
   let latestArtifactsPayload: Record<string, unknown> | null = null;
   const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       const method = (init?.method ?? "GET").toUpperCase();
+      const headersInit = init?.headers;
+      const headersRecord: Record<string, string> = {};
+      if (headersInit && typeof headersInit === "object") {
+        if (headersInit instanceof Headers) {
+          headersInit.forEach((value, key) => {
+            headersRecord[key] = value;
+          });
+        } else {
+          Object.entries(headersInit as Record<string, string>).forEach(([key, value]) => {
+            headersRecord[key.toLowerCase()] = String(value ?? "");
+          });
+        }
+      }
       if (url.includes("/api/baselines/base-1/versions")) {
         return Promise.resolve(
           createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
@@ -1659,6 +1674,7 @@ function setupFetchForManualRegenerateRefresh() {
       }
       if (method === "POST" && (url.includes("/api/resume/generate") || url.includes("/api/resume"))) {
         resumeGenerateBodies.push(String(init?.body ?? ""));
+        resumeGenerateHeaders.push(headersRecord);
         resumeGenerated = true;
         return Promise.resolve(
           createResponse(
@@ -1713,6 +1729,7 @@ function setupFetchForManualRegenerateRefresh() {
       }
       if (method === "POST" && (url.includes("/api/cover-letters/generate") || url.includes("/api/cover-letters"))) {
         coverGenerateBodies.push(String(init?.body ?? ""));
+        coverGenerateHeaders.push(headersRecord);
         coverGenerated = true;
         return Promise.resolve(
           createResponse(
@@ -1870,7 +1887,14 @@ function setupFetchForManualRegenerateRefresh() {
       return Promise.resolve(createResponse({}));
     });
   setFetchImplementation(fetchMock);
-  return { fetchMock, resumeGenerateBodies, coverGenerateBodies, getLatestArtifactsPayload: () => latestArtifactsPayload };
+  return {
+    fetchMock,
+    resumeGenerateBodies,
+    coverGenerateBodies,
+    resumeGenerateHeaders,
+    coverGenerateHeaders,
+    getLatestArtifactsPayload: () => latestArtifactsPayload,
+  };
 }
 
 function setupResumeSuccessFetch() {
@@ -4046,7 +4070,13 @@ describe("Studio auto repair", () => {
   });
 
   it("repairs persisted failed resume and cover letter artifacts using the full Studio regeneration lane", async () => {
-    const { resumeGenerateBodies, coverGenerateBodies, getLatestArtifactsPayload } = setupFetchForManualRegenerateRefresh();
+    const {
+      resumeGenerateBodies,
+      coverGenerateBodies,
+      resumeGenerateHeaders,
+      coverGenerateHeaders,
+      getLatestArtifactsPayload,
+    } = setupFetchForManualRegenerateRefresh();
     renderStudio();
 
     await waitFor(() => {
@@ -4066,6 +4096,8 @@ describe("Studio auto repair", () => {
     expect(coverPayload.oneTap).toBe(false);
     expect(resumePayload.forceRegenerate).toBe(true);
     expect(coverPayload.forceRegenerate).toBe(true);
+    expect(resumeGenerateHeaders[0]?.["x-ttr-request-preview"]).toBeUndefined();
+    expect(coverGenerateHeaders[0]?.["x-ttr-request-preview"]).toBeUndefined();
 
     await waitFor(() => {
       expect(getLatestArtifactsPayload()).toBeTruthy();

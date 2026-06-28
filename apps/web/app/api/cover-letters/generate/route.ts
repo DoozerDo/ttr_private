@@ -36,7 +36,6 @@ export async function POST(req: NextRequest) {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${auth.token}`,
     "Content-Type": req.headers.get("content-type") ?? "application/json",
-    "X-TTR-Request-Preview": "true",
   };
 
   if (shouldBypassTier()) {
