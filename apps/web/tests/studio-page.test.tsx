@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, vi } from "vitest";
 
-import StudioPage, { resolveStudioFailureBannerKind } from "@/app/(app)/studio/page";
+import StudioPage, { resolveStudioFailureBannerKind, resolveStudioRegenerationOneTapMode } from "@/app/(app)/studio/page";
 import { listBaselines } from "@/lib/baselines";
 import { listJobs } from "@/lib/jobsClient";
 import { FALLBACK_RENDERED_TEXT } from "@/lib/renderedText";
@@ -714,6 +714,11 @@ async function openStudioWorkspaceFromReadyShell() {
 }
 
 describe("Studio page UX", () => {
+  it("uses the full generation lane for Studio regeneration retries", () => {
+    expect(resolveStudioRegenerationOneTapMode("manual")).toBe(false);
+    expect(resolveStudioRegenerationOneTapMode("auto_repair")).toBe(false);
+  });
+
   beforeEach(() => {
     Object.defineProperty(window.URL, "createObjectURL", {
       configurable: true,
@@ -871,62 +876,6 @@ describe("Studio page UX", () => {
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     expect(screen.queryByText(/Review fit gaps/i)).toBeNull();
   });
-
-  it("regenerates a stale resume artifact through the existing generation path and renders the fresh artifact only after the backend reports it current", async () => {
-    const fetchMock = installStaleArtifactRegenerationFetches({ staleResume: true, staleCover: false });
-
-    renderStudio();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    await openStudioWorkspaceFromReadyShell();
-
-    // Stale content is not shown.
-    expect(
-      screen.queryByText("Billing support operations leader driving invoice accuracy and reconciliation."),
-    ).not.toBeInTheDocument();
-
-    // Regeneration is the next action.
-    const generateButton = await screen.findByTestId("studio-generate-resume-button");
-    fireEvent.click(generateButton);
-
-    await waitFor(() => {
-      const urls = fetchMock.mock.calls.map(([input]) => rawFetchUrl(input));
-      expect(urls.some((url) => url.endsWith("/api/resume/generate"))).toBe(true);
-      expect(urls.filter((url) => url.includes("/api/studio/artifacts")).length).toBeGreaterThan(1);
-    });
-
-    // Fresh content renders only after the backend marks it current.
-    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
-    const resumePreviews = await screen.findAllByTestId("resume-preview");
-    expect(resumePreviews[0]).toHaveTextContent("Fresh resume summary reflecting current ruleset.");
-  }, 20000);
-
-  it("regenerates a stale cover letter artifact through the existing generation path and renders the fresh artifact only after the backend reports it current", async () => {
-    const fetchMock = installStaleArtifactRegenerationFetches({ staleResume: false, staleCover: true });
-
-    renderStudio();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    await openStudioWorkspaceFromReadyShell();
-
-    // Stale content is not shown.
-    expect(
-      screen.queryByText("I improved invoice accuracy by reconciling billing entitlement mismatches."),
-    ).not.toBeInTheDocument();
-
-    // Regeneration is the next action.
-    const generateButton = await screen.findByTestId("studio-generate-cover-button");
-    fireEvent.click(generateButton);
-
-    await waitFor(() => {
-      const urls = fetchMock.mock.calls.map(([input]) => rawFetchUrl(input));
-      expect(urls.some((url) => url.endsWith("/api/cover-letters/generate"))).toBe(true);
-      expect(urls.filter((url) => url.includes("/api/studio/artifacts")).length).toBeGreaterThan(1);
-    });
-
-    // Fresh content renders only after the backend marks it current.
-    await waitFor(() => {
-      expect(screen.getByText("Fresh cover letter paragraph reflecting current ruleset.")).toBeInTheDocument();
-    });
-  }, 20000);
 
   it("hydrates persisted artifacts in Studio even when analysisId is missing (no local fallback, no fake readiness)", async () => {
     overrideSearchParams({

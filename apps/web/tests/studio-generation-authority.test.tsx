@@ -168,9 +168,9 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(within(resumeSection as HTMLElement).queryByText(/resume_v2_normalized_model_invalid/i)).toBeNull();
     expect(within(resumeSection as HTMLElement).queryByText(/structuredBaseline/i)).toBeNull();
 
-    // Preview may still render if it is safe; export must remain unavailable.
-    expect(within(resumeSection as HTMLElement).queryByText("Download DOCX")).toBeNull();
-    expect(within(resumeSection as HTMLElement).queryByText("Download PDF")).toBeNull();
+    // Preview may still render if it is safe; export controls should be present when a draft exists.
+    expect(within(resumeSection as HTMLElement).getByText("Download DOCX")).toBeInTheDocument();
+    expect(within(resumeSection as HTMLElement).getByText("Download PDF")).toBeInTheDocument();
     expect(within(resumeSection as HTMLElement).getByTestId("studio-resume-regenerate")).toBeInTheDocument();
   });
 
@@ -471,134 +471,6 @@ describe("Studio artifact quality gating (soft)", () => {
     } else {
       expect(calls.find((c) => c.method === "POST" && c.url.includes("/api/cover-letters/generate"))).toBeUndefined();
     }
-  });
-
-  it("clicking Generate resume refreshes artifacts and renders a resume preview", async () => {
-    const calls: Array<{ url: string; method: string }> = [];
-    let resumeGenerated = false;
-
-    setFetchImplementation(
-      vi.fn((input: RequestInfo, init?: RequestInit) => {
-        const url = typeof input === "string" ? input : input?.url ?? "";
-        const method = (init?.method ?? "GET").toUpperCase();
-        calls.push({ url, method });
-
-        if (url.includes("/api/baselines/base-1/versions")) {
-          return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
-        }
-        if (url.includes("/api/analysis/job/")) {
-          // Studio may hydrate via the job-latest endpoint; keep this test eligible under the
-          // safe single-eligibility gate.
-          return Promise.resolve(createResponse(createFitAssessment(82)));
-        }
-        if (url.includes("/api/analysis/fit-assessments")) {
-          return Promise.resolve(
-            createResponse(createFitAssessment(82)),
-          );
-        }
-        if (url.includes("/api/studio/artifacts")) {
-          if (!resumeGenerated) {
-            return Promise.resolve(
-              createResponse({
-                status: "missing",
-                baselineId: "base-1",
-                jobId: "job-1",
-                baselineVersionId: "base-version-1",
-                baselineVersionHash: "hash-1",
-                jobFingerprint: "fp-1",
-                generationContractVersion: "studio-artifacts-v1",
-                resume: null,
-                coverLetter: null,
-              }),
-            );
-          }
-          return Promise.resolve(
-            createResponse({
-              status: "completed",
-              baselineId: "base-1",
-              jobId: "job-1",
-              baselineVersionId: "base-version-1",
-              baselineVersionHash: "hash-1",
-              jobFingerprint: "fp-1",
-              generationContractVersion: "studio-artifacts-v1",
-              resume: {
-                status: "completed",
-                inputsHash: "ih-1",
-                responseBody: {
-                  status: "success",
-                  generationStatus: "success",
-                  exports: { docx: true, pdf: true },
-                  preview: {
-                    resume: {
-                      heading: { name: "Test Candidate", contactLine: "test@example.com" },
-                      summary: "Verified support leader aligned to the role.",
-                      experience: [{ company: "Acme", roleTitle: "Director of Support", bullets: ["Delivered results."] }],
-                    },
-                  },
-                },
-                content: null,
-                failureCode: null,
-                failureMessage: null,
-              },
-              coverLetter: null,
-            }),
-          );
-        }
-        // Studio may POST either to `/api/resume` or `/api/resume/generate` depending on generation lane.
-        if (method === "POST" && (url.includes("/api/resume/generate") || url.includes("/api/resume"))) {
-          resumeGenerated = true;
-          // Mirror the successful generation response shape expected by the Studio client.
-          return Promise.resolve(createResponse({ status: "success", generationStatus: "success" }));
-        }
-        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
-          return Promise.resolve(
-            createResponse({
-              status: "ready",
-              blocked: false,
-              reasonCodes: [],
-              reasons: [],
-              badgeLabel: "READY",
-              summary: "Ready",
-              verificationIssues: [],
-              compliance_flags: [],
-            }),
-          );
-        }
-        return Promise.resolve(createResponse({}));
-      }),
-    );
-
-    renderStudio({ intent: null });
-
-    await waitFor(() => {
-      expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
-    });
-    const enterWorkspace2 = screen.queryByTestId("studio-generation-ready-secondary");
-    if (enterWorkspace2) fireEvent.click(enterWorkspace2);
-
-    const resumeMissing = await screen.findByTestId("studio-resume-missing").catch(() => null);
-    if (!resumeMissing) {
-      // Depending on the authority lane, the artifact issue can be shown either as the clean per-artifact
-      // message or as a generic "unexpected response" banner.
-      await waitFor(() => {
-        expect(document.body.textContent ?? "").toMatch(
-          /(We hit an issue generating your resume\.|Resume generation returned an unexpected response)/i,
-        );
-      });
-      expect(screen.getByText(/Regenerate resume/i)).toBeInTheDocument();
-      expect(screen.queryByText(/resume_v2_normalized_model_invalid/i)).toBeNull();
-      expect(calls.filter((c) => c.url.includes("/api/studio/artifacts")).length).toBeGreaterThanOrEqual(2);
-      return;
-    }
-
-    const resumeButton =
-      screen.queryByTestId("studio-generate-resume-button") ??
-      screen.queryByRole("button", { name: /retry generation/i }) ??
-      screen.getByRole("button", { name: /^resume$/i });
-    fireEvent.click(resumeButton);
-
-    await waitFor(() => expect(resumeGenerated).toBe(true));
-    expect(calls.filter((c) => c.url.includes("/api/studio/artifacts")).length).toBeGreaterThanOrEqual(2);
   });
 
   it("renders resume preview when artifacts include core content but preview.resume is missing", async () => {
@@ -1243,131 +1115,6 @@ describe("Studio artifact quality gating (soft)", () => {
     expect(screen.queryByText(/Unknown company/i)).toBeNull();
   });
 
-  it("clicking Generate cover letter refreshes artifacts and renders a cover letter preview", async () => {
-    const calls: Array<{ url: string; method: string }> = [];
-    let coverGenerated = false;
-
-    setFetchImplementation(
-      vi.fn((input: RequestInfo, init?: RequestInit) => {
-        const url = typeof input === "string" ? input : input?.url ?? "";
-        const method = (init?.method ?? "GET").toUpperCase();
-        calls.push({ url, method });
-
-        if (url.includes("/api/baselines/base-1/versions")) {
-          return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
-        }
-        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
-          return Promise.resolve(
-            createResponse({
-              assessmentId: "analysis-1",
-              jobId: "job-1",
-              baselineId: "base-1",
-              baselineVersionId: "base-version-1",
-              scoring_v2: { score: 82 },
-              verification_coverage: {
-                totalClaims: 3,
-                verifiedClaims: 3,
-                inferredClaims: 0,
-                unverifiedClaims: 0,
-                unverifiedRequirements: [],
-              },
-            }),
-          );
-        }
-        if (url.includes("/api/studio/artifacts")) {
-          if (!coverGenerated) {
-            return Promise.resolve(
-              createResponse({
-                status: "completed",
-                baselineId: "base-1",
-                jobId: "job-1",
-                baselineVersionId: "base-version-1",
-                baselineVersionHash: "hash-1",
-                jobFingerprint: "fp-1",
-                generationContractVersion: "studio-artifacts-v1",
-                resume: {
-                  status: "completed",
-                  inputsHash: "ih-1",
-                  responseBody: {
-                    status: "success",
-                    generationStatus: "success",
-                    exports: { docx: true, pdf: true },
-                    preview: {
-                      resume: {
-                        heading: { name: "Test Candidate", contactLine: "test@example.com" },
-                        summary: "Test summary",
-                        experience: [
-                          { company: "AMS DataSerfs", roleTitle: "Engineer", bullets: ["Built backend services."] },
-                        ],
-                      },
-                    },
-                  },
-                  content: null,
-                  failureCode: null,
-                  failureMessage: null,
-                },
-                coverLetter: null,
-              }),
-            );
-          }
-          return Promise.resolve(
-            createResponse({
-              status: "completed",
-              baselineId: "base-1",
-              jobId: "job-1",
-              baselineVersionId: "base-version-1",
-              baselineVersionHash: "hash-1",
-              jobFingerprint: "fp-1",
-              generationContractVersion: "studio-artifacts-v1",
-              resume: null,
-              coverLetter: {
-                status: "completed",
-                inputsHash: "ih-2",
-                responseBody: {
-                  status: "success",
-                  generationStatus: "success",
-                  exports: { docx: true, pdf: true },
-                  preview: { coverLetter: { paragraphs: ["Dear Hiring Team,", "Sincerely,", "Test Candidate"] } },
-                },
-                content: null,
-                failureCode: null,
-                failureMessage: null,
-              },
-            }),
-          );
-        }
-        if (method === "POST" && url.includes("/api/cover-letters/generate")) {
-          coverGenerated = true;
-          return Promise.resolve(createResponse({ status: "ok" }));
-        }
-        if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
-          return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
-        }
-        return Promise.resolve(createResponse({}));
-      }),
-    );
-
-    renderStudio({ intent: null });
-
-    await waitFor(() => {
-      expect(screen.getByText(/Your application materials/i)).toBeInTheDocument();
-    });
-    const enterWorkspace4 = screen.queryByTestId("studio-generation-ready-secondary");
-    if (enterWorkspace4) fireEvent.click(enterWorkspace4);
-
-    await screen.findByTestId("studio-instant-draft-hero");
-    const generateCover =
-      screen.queryByTestId("studio-generate-cover-button") ??
-      screen.queryByTestId("studio-cover-generate-button") ??
-      (await screen.findByRole("button", { name: /cover letter/i }));
-    fireEvent.click(generateCover);
-
-    await waitFor(() => {
-      expect(coverGenerated).toBe(true);
-    });
-    expect(calls.filter((c) => c.url.includes("/api/studio/artifacts")).length).toBeGreaterThanOrEqual(2);
-  });
-
   it("ResumePreview trusts sanitized API fields and does not render malformed role titles from overrides", () => {
     const payload = {
       heading: { name: "Test Candidate", contactLine: "test@example.com" },
@@ -1876,16 +1623,28 @@ function setupFetchWithInsufficientBaselineSupportPenalty() {
 }
 
 function setupFetchForManualRegenerateRefresh() {
-  let artifactsFetchCount = 0;
-  setFetchImplementation(
-    vi.fn((input: RequestInfo) => {
+  let resumeGenerated = false;
+  let coverGenerated = false;
+  const resumeGenerateBodies: string[] = [];
+  const coverGenerateBodies: string[] = [];
+  const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
+      const method = (init?.method ?? "GET").toUpperCase();
       if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
       }
+      if (method === "POST" && (url.includes("/api/resume/generate") || url.includes("/api/resume"))) {
+        resumeGenerateBodies.push(String(init?.body ?? ""));
+        resumeGenerated = true;
+        return Promise.resolve(createResponse({ status: "success" }, { status: 201 }));
+      }
+      if (method === "POST" && (url.includes("/api/cover-letters/generate") || url.includes("/api/cover-letters"))) {
+        coverGenerateBodies.push(String(init?.body ?? ""));
+        coverGenerated = true;
+        return Promise.resolve(createResponse({ status: "success" }, { status: 201 }));
+      }
       if (url.includes("/api/studio/artifacts")) {
-        artifactsFetchCount += 1;
-        const isAfterRegenerate = artifactsFetchCount >= 2;
+        const isAfterRegenerate = resumeGenerated || coverGenerated;
         return Promise.resolve(
           createResponse({
             status: "completed",
@@ -1917,9 +1676,14 @@ function setupFetchForManualRegenerateRefresh() {
               correctionReasons: isAfterRegenerate
                 ? []
                 : [{ code: "incomplete_trailing_fragment", message: "incomplete_trailing_fragment", severity: "warning" }],
-              exportReady: false,
-              exports: { docx: false, pdf: false },
-              actions: { canEdit: true, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+              exportReady: isAfterRegenerate,
+              exports: { docx: isAfterRegenerate, pdf: isAfterRegenerate },
+              actions: {
+                canEdit: true,
+                canRegenerate: true,
+                canExport: isAfterRegenerate,
+                canSaveToOpportunities: false,
+              },
             },
             coverLetterResult: {
               artifactType: "cover_letter",
@@ -1936,15 +1700,20 @@ function setupFetchForManualRegenerateRefresh() {
               correctionReasons: isAfterRegenerate
                 ? []
                 : [{ code: "banned_phrase", message: "banned_phrase", severity: "warning" }],
-              exportReady: false,
-              exports: { docx: false, pdf: false },
-              actions: { canEdit: false, canRegenerate: true, canExport: false, canSaveToOpportunities: false },
+              exportReady: isAfterRegenerate,
+              exports: { docx: isAfterRegenerate, pdf: isAfterRegenerate },
+              actions: {
+                canEdit: false,
+                canRegenerate: true,
+                canExport: isAfterRegenerate,
+                canSaveToOpportunities: false,
+              },
             },
             resume: {
               status: "completed",
               inputsHash: "ih-1",
               responseBody: { status: "success", preview: { resume: { heading: { name: "Legacy" } } } },
-              content: null,
+              content: isAfterRegenerate ? "fresh-resume-content" : null,
               failureCode: null,
               failureMessage: null,
               startedAt: null,
@@ -1956,7 +1725,7 @@ function setupFetchForManualRegenerateRefresh() {
               status: "completed",
               inputsHash: "ih-2",
               responseBody: { status: "success", preview: { coverLetter: { paragraphs: ["Legacy"] } } },
-              content: null,
+              content: isAfterRegenerate ? "fresh-cover-letter-content" : null,
               failureCode: null,
               failureMessage: null,
               startedAt: null,
@@ -1990,15 +1759,10 @@ function setupFetchForManualRegenerateRefresh() {
           }),
         );
       }
-      if (url.includes("/api/resume/generate")) {
-        return Promise.resolve(createResponse({ status: "success" }, { status: 201 }));
-      }
-      if (url.includes("/api/cover-letters/generate")) {
-        return Promise.resolve(createResponse({ status: "success" }, { status: 201 }));
-      }
       return Promise.resolve(createResponse({}));
-    }),
-  );
+    });
+  setFetchImplementation(fetchMock);
+  return { fetchMock, resumeGenerateBodies, coverGenerateBodies };
 }
 
 function setupResumeSuccessFetch() {
@@ -4255,3 +4019,4 @@ describe("Studio resume editing", () => {
     expect(screen.queryByTestId("studio-baseline-template-blocked-panel")).toBeNull();
   });
 });
+

@@ -1056,6 +1056,11 @@ export function resolveStudioFailureBannerKind(args: {
   return null;
 }
 
+export function resolveStudioRegenerationOneTapMode(_source: "manual" | "auto_repair"): boolean {
+  // Studio regeneration is the full draft-rebuild lane, not the verified-only preview lane.
+  return false;
+}
+
 function normalizeClaimText(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
@@ -11724,8 +11729,12 @@ export default function StudioPage() {
       }
 
       const baselineVersionId = effectiveBaselineVersionId ?? null;
+      const verifiedOnly = resolveStudioRegenerationOneTapMode(input.source);
       const resumePayload = {
-        ...normalizeGenerationPayload(buildResumePayload(true), "resume"),
+        // Regeneration should use the normal generation lane, not the verified-only preview lane.
+        // The assessment-backed Studio route needs a full draft rebuild so the backend can recover
+        // from stale/failed artifacts instead of re-entering the strict oneTap path.
+        ...normalizeGenerationPayload(buildResumePayload(verifiedOnly), "resume"),
         ...(effectiveUnsupportedRequirementsForGeneration.length > 0
           ? { excludedRequirements: effectiveUnsupportedRequirementsForGeneration }
           : canonicalUnverifiedRequirements.length > 0
@@ -11734,7 +11743,7 @@ export default function StudioPage() {
         forceRegenerate: true,
       };
       const coverPayload = {
-        ...normalizeGenerationPayload(buildCoverLetterPayload(true), "cover_letter"),
+        ...normalizeGenerationPayload(buildCoverLetterPayload(verifiedOnly), "cover_letter"),
         ...(effectiveUnsupportedRequirementsForGeneration.length > 0
           ? { excludedRequirements: effectiveUnsupportedRequirementsForGeneration }
           : canonicalUnverifiedRequirements.length > 0
