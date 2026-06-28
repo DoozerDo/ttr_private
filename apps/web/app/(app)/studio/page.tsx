@@ -12474,7 +12474,7 @@ export default function StudioPage() {
 
     // Single source of truth: the contract (READY) + required IDs.
     // Latches are used only to prevent duplicate runs after a confirmed success for the same signature.
-    let contractShouldStart = contract.generation.state === "ready" && hasRequiredIdsNow;
+    let contractShouldStart = Boolean(contract.generation.auto.shouldStart) && hasRequiredIdsNow;
     if (effectiveGenerationState === "generated_unusable") {
       const retryCount = retryCountRef.current[signature] ?? 0;
       if (retryCount >= MAX_AUTO_RETRIES) {
@@ -12490,7 +12490,7 @@ export default function StudioPage() {
         contractShouldStart = hasRequiredIdsNow;
       }
     }
-    const ready = effectiveGenerationState === "ready" || effectiveGenerationState === "generated_unusable";
+    const ready = contractShouldStart;
 
     if (
       effectiveGenerationState === "generated_unusable" &&
@@ -12615,7 +12615,7 @@ export default function StudioPage() {
       console.log("[STUDIO][AUTO_GEN][DECISION]", decision);
     }
 
-    if (!ready || !contractShouldStart) {
+    if (!contractShouldStart) {
       if (debugAutoGenerationEnabled) {
         console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "contract_not_ready_or_shouldStart_false" });
       }
