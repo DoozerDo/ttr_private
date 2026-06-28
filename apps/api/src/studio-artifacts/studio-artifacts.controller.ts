@@ -70,6 +70,18 @@ export class StudioArtifactsController {
       });
     }
 
+    if (process.env.DEBUG_STUDIO_ARTIFACTS_ROUTE_TRACE === 'true') {
+      // eslint-disable-next-line no-console
+      console.info('[studio-artifacts][controller][getState]', {
+        handler: 'StudioArtifactsController.getState',
+        userId,
+        baselineId: baselineId.trim(),
+        baselineVersionId: baselineVersionId.trim(),
+        jobId: jobId.trim(),
+        analysisId: analysisIdValue,
+      });
+    }
+
     // eslint-disable-next-line no-console
     console.log('[STUDIO_ARTIFACTS_FETCH]', {
       baselineId: baselineId.trim(),

@@ -193,7 +193,7 @@ function resolveStudioGenerationFallback(input: RequestInfo) {
   return Promise.resolve(createResponse({}));
 }
 
-function installCompletedArtifactFetches(assessmentScore = 84) {
+function installCompletedArtifactFetches(assessmentScore = 84, artifactAssessmentScore = assessmentScore) {
   let completedApplicationsCount = 2;
   const artifactFetchUrls: string[] = [];
   const analysisFetchUrls: string[] = [];
@@ -220,7 +220,7 @@ function installCompletedArtifactFetches(assessmentScore = 84) {
               jobId: "job-1",
               baselineVersionId: "base-version-1",
               baselineVersionHash: "hash-1",
-              assessmentScore: 84,
+              assessmentScore: artifactAssessmentScore,
               jobFingerprint: "job-fingerprint-1",
               generationContractVersion: "studio-artifacts-v1",
           resume: {
@@ -814,7 +814,7 @@ describe("Studio page UX", () => {
   });
 
   it("hydrates studio artifacts only once for a stable route tuple even when the artifact request fails", async () => {
-    const fetchMock = installCompletedArtifactFetches(88);
+    const fetchMock = installCompletedArtifactFetches(88, 71);
     const baseImplementation = fetchMock.getMockImplementation();
     expect(baseImplementation).toBeDefined();
     fetchMock.mockImplementation((input: RequestInfo, init?: RequestInit) => {
@@ -867,6 +867,7 @@ describe("Studio page UX", () => {
     });
     expect(screen.queryByText(/We couldn't load the selected role context/i)).toBeNull();
     expect(screen.queryByText(/Fit score unavailable/i)).toBeNull();
+    expect(screen.queryByText(/Fit score 71\b/i)).toBeNull();
     expect(screen.queryByRole("link", { name: "Start Fit Review" })).toBeNull();
     expect(screen.queryByText(/Review fit gaps/i)).toBeNull();
   });

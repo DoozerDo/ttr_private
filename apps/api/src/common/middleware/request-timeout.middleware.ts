@@ -13,13 +13,29 @@ export function requestTimeoutMiddleware(
   next: NextFunction,
 ) {
   const startedAt = Date.now();
-  const operation = resolveTimeoutOperation(req.originalUrl ?? req.url ?? '');
+  const originalUrl = req.originalUrl ?? req.url ?? '';
+  const operation = resolveTimeoutOperation(originalUrl);
   const timer = setTimeout(() => {
     if (res.headersSent || res.writableEnded) {
       return;
     }
 
     const duration = Date.now() - startedAt;
+    if (process.env.DEBUG_STUDIO_ARTIFACTS_ROUTE_TRACE === 'true' && originalUrl.includes('/studio/artifacts')) {
+      // eslint-disable-next-line no-console
+      console.warn(`${REQUEST_TIMEOUT_LOG_PREFIX} studio-artifacts-timeout`, {
+        originalUrl,
+        method: req.method,
+        elapsedMs: duration,
+        requestId:
+          (req.headers['x-request-id'] as string | undefined) ??
+          (req.headers['x-vercel-id'] as string | undefined) ??
+          (req.headers['x-trace-id'] as string | undefined) ??
+          null,
+        headersSent: res.headersSent,
+        writableEnded: res.writableEnded,
+      });
+    }
     console.warn(
       `${REQUEST_TIMEOUT_LOG_PREFIX} timeout operation=${operation} method=${req.method} path=${req.originalUrl ?? req.url} durationMs=${duration}`,
     );

@@ -699,6 +699,50 @@ export class StudioArtifactsService {
     }
   }
 
+  private buildPersistedOnlyState(input: {
+    baselineId: string;
+    jobId: string;
+    baselineVersionId: string;
+    baselineVersionHash: string | null;
+    jobFingerprint: string | null;
+    assessmentScore: number | null;
+    record: StudioArtifact | null;
+    resumeInputsHash: string;
+    coverLetterInputsHash: string;
+  }): StudioArtifactsState {
+    const resumeRecord = this.buildArtifactRecord(input.record, 'resume', input.resumeInputsHash);
+    const coverRecord = this.buildArtifactRecord(input.record, 'cover_letter', input.coverLetterInputsHash);
+
+    return {
+      status: this.resolvePairStatus(input.record, input.resumeInputsHash, input.coverLetterInputsHash),
+      baselineId: input.baselineId,
+      jobId: input.jobId,
+      baselineVersionId: input.baselineVersionId,
+      baselineVersionHash: input.baselineVersionHash,
+      jobFingerprint: input.jobFingerprint,
+      generationContractVersion: ARTIFACT_CONTRACT_VERSION,
+      assessmentScore: input.assessmentScore,
+      structuredBaselineExperienceCount: 0,
+      structuredBaselineMissingEvidenceReasons: [],
+      structuredBaselineExtractedExperiencePreview: [],
+      resume: resumeRecord,
+      coverLetter: coverRecord,
+      resumeResult: this.buildCanonicalResultFromRecord('resume', resumeRecord),
+      coverLetterResult: this.buildCanonicalResultFromRecord('cover_letter', coverRecord),
+      diagnostics: {
+        hydrationSource: 'persisted_only_assessment_backed',
+        retrievalDecisionPath: 'persisted_only_assessment_backed',
+        resumeV2Readiness: {
+          hasResumeV2: false,
+          usableExperienceCount: 0,
+          source: 'skipped_assessment_backed_fast_path',
+          valid: false,
+          failureReasons: [],
+        },
+      },
+    };
+  }
+
   async readState(input: {
     userId: string;
     baselineId: string;
@@ -709,11 +753,57 @@ export class StudioArtifactsService {
   }): Promise<StudioArtifactsState> {
     const errors: NonNullable<StudioArtifactsState['errors']> = [];
     const shouldLogIngest = process.env.RESUME_V2_INGEST_DEBUG === 'true';
+    let baselineVersion: BaselineVersion | null = null;
+    let job: Job | null = null;
+    let assessment: { overallScore?: number | null; inputsHash?: string | null } | null = null;
+    let record: StudioArtifact | null = null;
+    if (process.env.DEBUG_STUDIO_ARTIFACTS_ROUTE_TRACE === 'true') {
+      // eslint-disable-next-line no-console
+      console.info('[studio-artifacts][service][readState:start]', {
+        userId: input.userId,
+        baselineId: input.baselineId,
+        baselineVersionId: input.baselineVersionId,
+        jobId: input.jobId,
+        analysisId: input.analysisId ?? null,
+      });
+    }
     if (process.env.DEBUG_STUDIO_ARTIFACT_QUALITY === 'true') {
       // eslint-disable-next-line no-console
       console.log('[ARTIFACT_QUALITY_READ]', `baselineId=${input.baselineId} jobId=${input.jobId} baselineVersionId=${input.baselineVersionId} analysisId=${input.analysisId ?? null}`);
     }
-    const [baselineVersion, job, assessment, baseline] = await Promise.all([
+    if (input.analysisId) {
+      record = await this.studioArtifactRepository.findOne({
+        where: {
+          userId: input.userId,
+          baselineId: input.baselineId,
+          jobId: input.jobId,
+        },
+      });
+      const resumeInputsHash = record?.resumeInputsHash ?? '';
+      const coverLetterInputsHash = record?.coverLetterInputsHash ?? '';
+      if (process.env.DEBUG_STUDIO_ARTIFACTS_ROUTE_TRACE === 'true') {
+        // eslint-disable-next-line no-console
+        console.info('[studio-artifacts][service][readState:analysisId-fast-path]', {
+          analysisId: input.analysisId ?? null,
+          artifactRowFound: Boolean(record),
+          resumeInputsHash,
+          coverLetterInputsHash,
+        });
+      }
+      return this.buildPersistedOnlyState({
+        baselineId: input.baselineId,
+        jobId: input.jobId,
+        baselineVersionId: input.baselineVersionId,
+        baselineVersionHash: null,
+        jobFingerprint: null,
+        assessmentScore: null,
+        record: record ?? null,
+        resumeInputsHash,
+        coverLetterInputsHash,
+      });
+    }
+
+    [baselineVersion, job, assessment, record] = await Promise.all([
       this.baselineVersionRepository.findOne({
         where: { id: input.baselineVersionId, baselineId: input.baselineId },
       }),
@@ -727,123 +817,25 @@ export class StudioArtifactsService {
         input.jobId,
         input.baselineId,
       ),
-      (async () => {
-        const baselineRows = await this.baselineRepository
-          .createQueryBuilder('baseline')
-          .leftJoin('baseline.sections', 'sections')
-          .leftJoin('baseline.parsedRecords', 'parsedRecords')
-          .select([
-            'baseline.id',
-            'baseline.userId',
-            'baseline.version',
-            'baseline.versionNumber',
-            'baseline.originalFilename',
-            'baseline.mimeType',
-            'baseline.storagePath',
-            'baseline.hash',
-            'baseline.status',
-            'baseline.isActive',
-            'baseline.archivedAt',
-            'baseline.originalBaselineScore',
-            'baseline.latestBaselineScore',
-            'baseline.latestAssessmentId',
-            'baseline.firstAnalyzedAt',
-            'baseline.lastAnalyzedAt',
-            'baseline.isSynthetic',
-            'baseline.syntheticScenarioKey',
-            'baseline.syntheticRunId',
-            'baseline.syntheticCreatedAt',
-            'baseline.preserveFromCleanup',
-            'sections.id',
-            'sections.baselineId',
-            'sections.sectionType',
-            'sections.title',
-            'sections.content',
-            'sections.includePolicy',
-            'sections.order',
-            'sections.createdAt',
-            'sections.updatedAt',
-            'parsedRecords.id',
-            'parsedRecords.baselineId',
-            'parsedRecords.sourceFileId',
-            'parsedRecords.schemaVersion',
-            'parsedRecords.sourceFormat',
-            'parsedRecords.ingestedAt',
-            'parsedRecords.parsedJson',
-            'parsedRecords.resumeV2Json',
-            'parsedRecords.flagsJson',
-            'parsedRecords.createdAt',
-          ])
-          .where('baseline.id = :baselineId', { baselineId: input.baselineId })
-          .andWhere('baseline.userId = :userId', { userId: input.userId })
-          .orderBy('sections.order', 'ASC')
-          .addOrderBy('parsedRecords.createdAt', 'DESC')
-          .getRawMany();
-
-        if (!baselineRows.length) return null;
-
-        const firstRow = baselineRows[0] as Record<string, unknown>;
-        const baseline = {
-          id: firstRow['baseline_id'],
-          userId: firstRow['baseline_userId'],
-          version: firstRow['baseline_version'],
-          versionNumber: firstRow['baseline_versionNumber'],
-          originalFilename: firstRow['baseline_originalFilename'],
-          mimeType: firstRow['baseline_mimeType'],
-          storagePath: firstRow['baseline_storagePath'],
-          hash: firstRow['baseline_hash'],
-          status: firstRow['baseline_status'],
-          isActive: firstRow['baseline_isActive'],
-          archivedAt: firstRow['baseline_archivedAt'],
-          originalBaselineScore: firstRow['baseline_originalBaselineScore'],
-          latestBaselineScore: firstRow['baseline_latestBaselineScore'],
-          latestAssessmentId: firstRow['baseline_latestAssessmentId'],
-          firstAnalyzedAt: firstRow['baseline_firstAnalyzedAt'],
-          lastAnalyzedAt: firstRow['baseline_lastAnalyzedAt'],
-          isSynthetic: firstRow['baseline_isSynthetic'],
-          syntheticScenarioKey: firstRow['baseline_syntheticScenarioKey'],
-          syntheticRunId: firstRow['baseline_syntheticRunId'],
-          syntheticCreatedAt: firstRow['baseline_syntheticCreatedAt'],
-          preserveFromCleanup: firstRow['baseline_preserveFromCleanup'],
-          sections: [],
-          parsedRecords: [],
-        } as CanonicalBaselineReadModel;
-
-        for (const row of baselineRows) {
-          const sectionId = row['sections_id'];
-          if (sectionId) {
-            baseline.sections.push({
-              id: row['sections_id'] as string,
-              baselineId: row['sections_baselineId'] as string,
-              sectionType: row['sections_sectionType'] as any,
-              title: row['sections_title'] as string,
-              content: row['sections_content'] as string,
-              includePolicy: row['sections_includePolicy'] as any,
-              order: row['sections_order'] as number,
-              createdAt: row['sections_createdAt'] as any,
-              updatedAt: row['sections_updatedAt'] as any,
-            });
-          }
-          const parsedId = row['parsedRecords_id'];
-          if (parsedId) {
-            baseline.parsedRecords.push({
-              id: row['parsedRecords_id'] as string,
-              baselineId: row['parsedRecords_baselineId'] as string,
-              sourceFileId: row['parsedRecords_sourceFileId'] as string,
-              schemaVersion: row['parsedRecords_schemaVersion'] as string,
-              sourceFormat: row['parsedRecords_sourceFormat'] as 'docx' | 'pdf',
-              ingestedAt: row['parsedRecords_ingestedAt'] as any,
-              parsedJson: row['parsedRecords_parsedJson'] as any,
-              resumeV2Json: row['parsedRecords_resumeV2Json'] as any,
-              flagsJson: row['parsedRecords_flagsJson'] as any,
-              createdAt: row['parsedRecords_createdAt'] as any,
-            });
-          }
-        }
-
-        return baseline;
-      })(),
+      this.studioArtifactRepository.findOne({
+        where: {
+          userId: input.userId,
+          baselineId: input.baselineId,
+          jobId: input.jobId,
+        },
+      }),
     ]);
+
+    if (process.env.DEBUG_STUDIO_ARTIFACTS_ROUTE_TRACE === 'true') {
+      // eslint-disable-next-line no-console
+      console.info('[studio-artifacts][service][readState:hydrated-path]', {
+        analysisId: input.analysisId ?? null,
+        baselineVersionFound: Boolean(baselineVersion),
+        jobFound: Boolean(job),
+        assessmentFound: Boolean(assessment),
+        artifactRowFound: Boolean(record),
+      });
+    }
 
     const baselineVersionHash = baselineVersion?.hash ?? baselineVersion?.id ?? null;
     const jobFingerprint = this.computeJobFingerprint(job);
@@ -856,6 +848,124 @@ export class StudioArtifactsService {
       baselineVersionHash,
       jobFingerprint,
     });
+    let baseline: CanonicalBaselineReadModel | null = null;
+
+    baseline = await (async () => {
+      const baselineRows = await this.baselineRepository
+        .createQueryBuilder('baseline')
+        .leftJoin('baseline.sections', 'sections')
+        .leftJoin('baseline.parsedRecords', 'parsedRecords')
+        .select([
+          'baseline.id',
+          'baseline.userId',
+          'baseline.version',
+          'baseline.versionNumber',
+          'baseline.originalFilename',
+          'baseline.mimeType',
+          'baseline.storagePath',
+          'baseline.hash',
+          'baseline.status',
+          'baseline.isActive',
+          'baseline.archivedAt',
+          'baseline.originalBaselineScore',
+          'baseline.latestBaselineScore',
+          'baseline.latestAssessmentId',
+          'baseline.firstAnalyzedAt',
+          'baseline.lastAnalyzedAt',
+          'baseline.isSynthetic',
+          'baseline.syntheticScenarioKey',
+          'baseline.syntheticRunId',
+          'baseline.syntheticCreatedAt',
+          'baseline.preserveFromCleanup',
+          'sections.id',
+          'sections.baselineId',
+          'sections.sectionType',
+          'sections.title',
+          'sections.content',
+          'sections.includePolicy',
+          'sections.order',
+          'sections.createdAt',
+          'sections.updatedAt',
+          'parsedRecords.id',
+          'parsedRecords.baselineId',
+          'parsedRecords.sourceFileId',
+          'parsedRecords.schemaVersion',
+          'parsedRecords.sourceFormat',
+          'parsedRecords.ingestedAt',
+          'parsedRecords.parsedJson',
+          'parsedRecords.resumeV2Json',
+          'parsedRecords.flagsJson',
+          'parsedRecords.createdAt',
+        ])
+        .where('baseline.id = :baselineId', { baselineId: input.baselineId })
+        .andWhere('baseline.userId = :userId', { userId: input.userId })
+        .orderBy('sections.order', 'ASC')
+        .addOrderBy('parsedRecords.createdAt', 'DESC')
+        .getRawMany();
+
+      if (!baselineRows.length) return null;
+
+      const firstRow = baselineRows[0] as Record<string, unknown>;
+      const hydratedBaseline = {
+        id: firstRow['baseline_id'],
+        userId: firstRow['baseline_userId'],
+        version: firstRow['baseline_version'],
+        versionNumber: firstRow['baseline_versionNumber'],
+        originalFilename: firstRow['baseline_originalFilename'],
+        mimeType: firstRow['baseline_mimeType'],
+        storagePath: firstRow['baseline_storagePath'],
+        hash: firstRow['baseline_hash'],
+        status: firstRow['baseline_status'],
+        isActive: firstRow['baseline_isActive'],
+        archivedAt: firstRow['baseline_archivedAt'],
+        originalBaselineScore: firstRow['baseline_originalBaselineScore'],
+        latestBaselineScore: firstRow['baseline_latestBaselineScore'],
+        latestAssessmentId: firstRow['baseline_latestAssessmentId'],
+        firstAnalyzedAt: firstRow['baseline_firstAnalyzedAt'],
+        lastAnalyzedAt: firstRow['baseline_lastAnalyzedAt'],
+        isSynthetic: firstRow['baseline_isSynthetic'],
+        syntheticScenarioKey: firstRow['baseline_syntheticScenarioKey'],
+        syntheticRunId: firstRow['baseline_syntheticRunId'],
+        syntheticCreatedAt: firstRow['baseline_syntheticCreatedAt'],
+        preserveFromCleanup: firstRow['baseline_preserveFromCleanup'],
+        sections: [],
+        parsedRecords: [],
+      } as CanonicalBaselineReadModel;
+
+      for (const row of baselineRows) {
+        const sectionId = row['sections_id'];
+        if (sectionId) {
+          hydratedBaseline.sections.push({
+            id: row['sections_id'] as string,
+            baselineId: row['sections_baselineId'] as string,
+            sectionType: row['sections_sectionType'] as any,
+            title: row['sections_title'] as string,
+            content: row['sections_content'] as string,
+            includePolicy: row['sections_includePolicy'] as any,
+            order: row['sections_order'] as number,
+            createdAt: row['sections_createdAt'] as any,
+            updatedAt: row['sections_updatedAt'] as any,
+          });
+        }
+        const parsedId = row['parsedRecords_id'];
+        if (parsedId) {
+          hydratedBaseline.parsedRecords.push({
+            id: row['parsedRecords_id'] as string,
+            baselineId: row['parsedRecords_baselineId'] as string,
+            sourceFileId: row['parsedRecords_sourceFileId'] as string,
+            schemaVersion: row['parsedRecords_schemaVersion'] as string,
+            sourceFormat: row['parsedRecords_sourceFormat'] as 'docx' | 'pdf',
+            ingestedAt: row['parsedRecords_ingestedAt'] as any,
+            parsedJson: row['parsedRecords_parsedJson'] as any,
+            resumeV2Json: row['parsedRecords_resumeV2Json'] as any,
+            flagsJson: row['parsedRecords_flagsJson'] as any,
+            createdAt: row['parsedRecords_createdAt'] as any,
+          });
+        }
+      }
+
+      return hydratedBaseline;
+    })();
 
     if (shouldTraceArtifactIdentity) {
       // eslint-disable-next-line no-console
@@ -864,13 +974,6 @@ export class StudioArtifactsService {
       );
     }
 
-    const record = await this.studioArtifactRepository.findOne({
-      where: {
-        userId: input.userId,
-        baselineId: input.baselineId,
-        jobId: input.jobId,
-      },
-    });
     const rawResumeResponseBody = normalizeRecord((record as any)?.resumeResponseBody);
     const rawResumePreview = normalizeRecord(rawResumeResponseBody?.preview);
     const rawResumePreviewResume = normalizeRecord(rawResumePreview?.resume);

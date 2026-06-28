@@ -2100,11 +2100,12 @@ export default function StudioPage() {
     // Fail-closed: if analysis failed to load/run, do not reuse any hydrated/stored score.
     // This prevents a mixed authority state where stale score implies READY while readiness/analysis errors imply repair required.
     if (analysisError || readinessError) return null;
+    if (effectiveRequestedAnalysisId) return null;
     if (studioArtifactsPayload) {
       return coerceScore(studioArtifactsPayload.assessmentScore);
     }
     return hydratedAnalysisScore ?? null;
-  }, [analysis, analysisError, hydratedAnalysisScore, readinessError, studioArtifactsPayload]); 
+  }, [analysis, analysisError, effectiveRequestedAnalysisId, hydratedAnalysisScore, readinessError, studioArtifactsPayload]); 
   const generateNowEligible = isGenerateNowEligible(analysisScore);
   const debugAuthorityEnabled = useMemo(() => searchParams?.get("debugAuthority") === "1", [searchParams]);
 
@@ -2147,10 +2148,11 @@ export default function StudioPage() {
       if (hasDirect) return "analysis.score";
       if (hasOverall) return "analysis.overallScore";
     }
+    if (effectiveRequestedAnalysisId) return "analysis.awaiting_hydration";
     if (studioArtifactsPayload && typeof studioArtifactsPayload.assessmentScore === "number") return "studioArtifacts.assessmentScore";
     if (hydratedAnalysisScore !== null) return "hydrated_assessmentScore";
     return "none";
-  }, [analysis, analysisError, hydratedAnalysisScore, readinessError, studioArtifactsPayload]);
+  }, [analysis, analysisError, effectiveRequestedAnalysisId, hydratedAnalysisScore, readinessError, studioArtifactsPayload]);
 
   const readMissingStructuredBaselineSignal = useCallback((payload: unknown): boolean => {
     if (!payload || typeof payload !== "object") return false;
@@ -13434,9 +13436,9 @@ export default function StudioPage() {
                       : "Ready"}
               </p>
               <p className="text-sm text-slate-300">
-                {typeof analysisScore === "number" && !studioArtifactsPayload
+                {typeof analysisScore === "number"
                   ? `Fit score ${Math.round(analysisScore)} - `
-                  : studioArtifactsPayload && typeof studioArtifactsPayload.assessmentScore === "number"
+                  : !effectiveRequestedAnalysisId && studioArtifactsPayload && typeof studioArtifactsPayload.assessmentScore === "number"
                     ? `Fit score ${Math.round(studioArtifactsPayload.assessmentScore)} - `
                     : "Fit score unavailable - "}
                 {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} -{" "}
