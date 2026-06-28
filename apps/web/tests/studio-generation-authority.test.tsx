@@ -1627,26 +1627,133 @@ function setupFetchForManualRegenerateRefresh() {
   let coverGenerated = false;
   const resumeGenerateBodies: string[] = [];
   const coverGenerateBodies: string[] = [];
+  let latestArtifactsPayload: Record<string, unknown> | null = null;
   const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
       const method = (init?.method ?? "GET").toUpperCase();
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            scoring_v2: { score: 71 },
+            verification_coverage: {
+              totalClaims: 3,
+              verifiedClaims: 3,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+              unverifiedRequirements: [],
+            },
+          }),
+        );
+      }
       if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
         return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
       }
       if (method === "POST" && (url.includes("/api/resume/generate") || url.includes("/api/resume"))) {
         resumeGenerateBodies.push(String(init?.body ?? ""));
         resumeGenerated = true;
-        return Promise.resolve(createResponse({ status: "success" }, { status: 201 }));
+        return Promise.resolve(
+          createResponse(
+            {
+              status: "success",
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+              preview: {
+                resume: {
+                  heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                  summary:
+                    "Customer-focused support leader with 10+ years improving CSAT, reducing backlog, and leading cross-functional operational change.",
+                  experience: [
+                    {
+                      company: "Acme",
+                      roleTitle: "Director of Support",
+                      bullets: ["Led support operations and improved team performance."],
+                    },
+                  ],
+                  education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                  competencies: ["Customer strategy", "Operational leadership"],
+                },
+              },
+              resumeResult: {
+                artifactType: "resume",
+                generationState: "generated_usable",
+                qualityStatus: "pass",
+                preview: {
+                  heading: { name: "Test Candidate", contactLine: "test@example.com" },
+                  summary:
+                    "Customer-focused support leader with 10+ years improving CSAT, reducing backlog, and leading cross-functional operational change.",
+                  experience: [
+                    {
+                      company: "Acme",
+                      roleTitle: "Director of Support",
+                      bullets: ["Led support operations and improved team performance."],
+                    },
+                  ],
+                  education: [{ degree: "BA", institution: "State University", location: "Remote" }],
+                  competencies: ["Customer strategy", "Operational leadership"],
+                },
+                correctionReasons: [],
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+              },
+            },
+            { status: 201 },
+          ),
+        );
       }
       if (method === "POST" && (url.includes("/api/cover-letters/generate") || url.includes("/api/cover-letters"))) {
         coverGenerateBodies.push(String(init?.body ?? ""));
         coverGenerated = true;
-        return Promise.resolve(createResponse({ status: "success" }, { status: 201 }));
+        return Promise.resolve(
+          createResponse(
+            {
+              status: "success",
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              actions: { canEdit: false, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+              preview: {
+                coverLetter: {
+                  paragraphs: [
+                    "Dear Hiring Team,",
+                    "I’m excited to apply for the Director of Support role at Acme. In recent roles I’ve led frontline support teams, improved response times, and built quality programs that raised customer satisfaction while lowering operational cost. I’ve partnered with Product and Engineering to reduce repeat contact, created QA and coaching loops, and introduced dashboards that made throughput and escalations visible. I’d love to bring that same operational rigor and coaching approach to Acme’s support organization.",
+                  ],
+                },
+              },
+              coverLetterResult: {
+                artifactType: "cover_letter",
+                generationState: "generated_usable",
+                qualityStatus: "pass",
+                preview: {
+                  coverLetter: {
+                    paragraphs: [
+                      "Dear Hiring Team,",
+                      "I’m excited to apply for the Director of Support role at Acme. In recent roles I’ve led frontline support teams, improved response times, and built quality programs that raised customer satisfaction while lowering operational cost. I’ve partnered with Product and Engineering to reduce repeat contact, created QA and coaching loops, and introduced dashboards that made throughput and escalations visible. I’d love to bring that same operational rigor and coaching approach to Acme’s support organization.",
+                    ],
+                  },
+                },
+                correctionReasons: [],
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                actions: { canEdit: false, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+              },
+            },
+            { status: 201 },
+          ),
+        );
       }
       if (url.includes("/api/studio/artifacts")) {
         const isAfterRegenerate = resumeGenerated || coverGenerated;
-        return Promise.resolve(
-          createResponse({
+        const payload = {
             status: "completed",
             baselineId: "base-1",
             jobId: "job-1",
@@ -1733,8 +1840,9 @@ function setupFetchForManualRegenerateRefresh() {
               failedAt: null,
               metadata: {},
             },
-          }),
-        );
+          } as Record<string, unknown>;
+        latestArtifactsPayload = payload;
+        return Promise.resolve(createResponse(payload));
       }
       if (url.includes("/api/baselines/base-1/versions")) {
         return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
@@ -1762,7 +1870,7 @@ function setupFetchForManualRegenerateRefresh() {
       return Promise.resolve(createResponse({}));
     });
   setFetchImplementation(fetchMock);
-  return { fetchMock, resumeGenerateBodies, coverGenerateBodies };
+  return { fetchMock, resumeGenerateBodies, coverGenerateBodies, getLatestArtifactsPayload: () => latestArtifactsPayload };
 }
 
 function setupResumeSuccessFetch() {
@@ -3935,6 +4043,41 @@ describe("Studio auto repair", () => {
     const enterWorkspace6 = screen.queryByTestId("studio-generation-ready-secondary");
     if (enterWorkspace6) fireEvent.click(enterWorkspace6);
     expect(screen.getByTestId("studio-resume-regenerate")).toBeInTheDocument();
+  });
+
+  it("repairs persisted failed resume and cover letter artifacts using the full Studio regeneration lane", async () => {
+    const { resumeGenerateBodies, coverGenerateBodies, getLatestArtifactsPayload } = setupFetchForManualRegenerateRefresh();
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-low-quality-regenerate-main")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("studio-low-quality-regenerate-main"));
+
+    await waitFor(() => {
+      expect(resumeGenerateBodies.length).toBeGreaterThan(0);
+      expect(coverGenerateBodies.length).toBeGreaterThan(0);
+    });
+
+    const resumePayload = JSON.parse(resumeGenerateBodies[0] ?? "{}") as Record<string, unknown>;
+    const coverPayload = JSON.parse(coverGenerateBodies[0] ?? "{}") as Record<string, unknown>;
+    expect(resumePayload.oneTap).toBe(false);
+    expect(coverPayload.oneTap).toBe(false);
+    expect(resumePayload.forceRegenerate).toBe(true);
+    expect(coverPayload.forceRegenerate).toBe(true);
+
+    await waitFor(() => {
+      expect(getLatestArtifactsPayload()).toBeTruthy();
+    });
+
+    const latestArtifactsPayload = getLatestArtifactsPayload() as Record<string, any>;
+    expect(latestArtifactsPayload.resume?.status).toBe("completed");
+    expect(latestArtifactsPayload.resume?.content).toBe("fresh-resume-content");
+    expect(latestArtifactsPayload.resumeResult?.exportReady).toBe(true);
+    expect(latestArtifactsPayload.coverLetter?.status).toBe("completed");
+    expect(latestArtifactsPayload.coverLetter?.content).toBe("fresh-cover-letter-content");
+    expect(latestArtifactsPayload.coverLetterResult?.exportReady).toBe(true);
   });
 
   it("does not auto repair exportable artifacts", async () => {

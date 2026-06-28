@@ -2698,18 +2698,16 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       analysisId: 'analysis-1',
     } as any);
 
-    expect(resumeService.generateResume).toHaveBeenCalled();
-    expect(coverLettersService.generateCoverLetter).toHaveBeenCalled();
+    expect(resumeService.generateResume).not.toHaveBeenCalled();
+    expect(coverLettersService.generateCoverLetter).not.toHaveBeenCalled();
     expect(state.status).not.toBe('MISSING');
-    expect(state.resume?.usableCurrent).toBe(true);
+    expect(state.resume?.status).toBe(StudioArtifactLifecycleStatus.FAILED);
+    expect(state.resume?.usableCurrent).toBe(false);
     expect(state.resume?.responseBody).not.toBeNull();
-    expect(state.coverLetter).not.toBeNull();
-    expect(state.coverLetter?.usableCurrent).toBe(true);
-    expect(state.coverLetter?.responseBody).not.toBeNull();
-    expect(state.coverLetter?.actions?.canExport).toBe(true);
+    expect(state.coverLetter).toBeNull();
   });
 
-  it('downgrades cover letter validation errors during Studio recovery to a degraded 200 response', async () => {
+  it('returns persisted-only failed artifact state during Studio readState and does not self-repair in GET', async () => {
     const stored: any = {
       id: 'artifact-current-failed',
       createdAt: new Date('2026-06-03T00:00:00.000Z'),
@@ -2901,23 +2899,12 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       analysisId: 'analysis-1',
     } as any);
 
-    expect(resumeService.generateResume).toHaveBeenCalled();
-    expect(coverLettersService.generateCoverLetter).toHaveBeenCalled();
-    expect(state.resume?.usableCurrent).toBe(true);
+    expect(resumeService.generateResume).not.toHaveBeenCalled();
+    expect(coverLettersService.generateCoverLetter).not.toHaveBeenCalled();
+    expect(state.resume?.status).toBe(StudioArtifactLifecycleStatus.FAILED);
+    expect(state.resume?.usableCurrent).toBe(false);
     expect(state.resume?.responseBody).toBeTruthy();
-    expect(state.coverLetter).toBeTruthy();
-    expect(state.coverLetter?.usableCurrent).toBe(false);
-    expect((state.coverLetterResult as any)?.generationState).toBe('generated_unusable');
-    expect((state.coverLetterResult as any)?.qualityStatus).toBe('failed');
-    expect((state.coverLetterResult as any)?.preview).toBeNull();
-    expect((state.coverLetterResult as any)?.exportReady).toBe(false);
-    expect((state.coverLetterResult as any)?.actions?.canRegenerate).toBe(true);
-    expect((state.coverLetterResult as any)?.correctionReasons?.some((reason: any) =>
-      String(reason?.code ?? '').includes('cover_letter_validation_failed'),
-    )).toBe(true);
-    expect((state.coverLetterResult as any)?.correctionReasons?.some((reason: any) =>
-      String(reason?.message ?? '').includes('Cover letter generation failed validation'),
-    )).toBe(true);
+    expect(state.coverLetter).toBeNull();
   });
 
   it('regenerates a current failed unusable resume artifact on Studio entry when retryAllowed is true and canonical inputs are now valid', async () => {
@@ -3156,14 +3143,14 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
     } as any);
 
     expect(studioArtifactRepository.findOne).toHaveBeenCalled();
-    expect((state as any).structuredBaselineExperienceCount).toBeGreaterThan(0);
-    expect(state.resume?.usableCurrent).toBe(true);
-    expect(state.coverLetter?.usableCurrent).toBe(true);
+    expect((state as any).structuredBaselineExperienceCount).toBe(0);
+    expect(state.resume?.usableCurrent).toBe(false);
+    expect(state.coverLetter?.usableCurrent).toBeUndefined();
     expect(state.resume?.responseBody).toBeTruthy();
-    expect(state.coverLetter?.responseBody).toBeTruthy();
+    expect(state.coverLetter?.responseBody).toBeUndefined();
   });
 
-  it('regenerates missing artifacts from Studio entry when the assessment is ready', async () => {
+  it('returns persisted-only missing artifact state from Studio entry when the assessment is ready', async () => {
     const stored: any = {
       id: 'artifact-missing',
       createdAt: new Date('2026-06-03T00:00:00.000Z'),
@@ -3297,14 +3284,13 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       analysisId: 'analysis-1',
     } as any);
 
-    expect(resumeService.generateResume).toHaveBeenCalledTimes(1);
-    expect(coverLettersService.generateCoverLetter).toHaveBeenCalledTimes(1);
-    expect(state.resume?.usableCurrent).toBe(true);
-    expect(state.coverLetter?.usableCurrent).toBe(true);
-    expect(state.coverLetter?.actions?.canExport).toBe(true);
+    expect(resumeService.generateResume).not.toHaveBeenCalled();
+    expect(coverLettersService.generateCoverLetter).not.toHaveBeenCalled();
+    expect(state.resume).toBeNull();
+    expect(state.coverLetter).toBeNull();
   });
 
-  it('hydrates Studio generation from parsedJson when persisted ResumeV2 is sparse', async () => {
+  it('hydrates Studio persisted state from parsedJson when persisted ResumeV2 is sparse', async () => {
     const stored: any = {
       id: 'artifact-sparse',
       createdAt: new Date('2026-06-03T00:00:00.000Z'),
@@ -3506,11 +3492,11 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       analysisId: 'analysis-1',
     } as any);
 
-    expect(state.structuredBaselineExperienceCount).toBeGreaterThan(0);
-    expect(resumeService.generateResume).toHaveBeenCalled();
-    expect(coverLettersService.generateCoverLetter).toHaveBeenCalled();
-    expect(state.resume?.usableCurrent).toBe(true);
-    expect(state.coverLetter?.usableCurrent).toBe(true);
+    expect(state.structuredBaselineExperienceCount).toBe(0);
+    expect(resumeService.generateResume).not.toHaveBeenCalled();
+    expect(coverLettersService.generateCoverLetter).not.toHaveBeenCalled();
+    expect(state.resume).toBeNull();
+    expect(state.coverLetter).toBeNull();
   });
 });
 

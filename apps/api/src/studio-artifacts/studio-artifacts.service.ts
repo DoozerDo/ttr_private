@@ -1324,27 +1324,8 @@ export class StudioArtifactsService {
       (scoreEligibleForRecovery || (currentArtifactRetryRequested && currentInputsAreValidForRecovery)) &&
       (resumeRecoveryBlocked || coverRecoveryBlocked);
     if (shouldRecoverEligibleArtifacts) {
-      const generationRequest = {
-        baselineId: input.baselineId,
-        baselineVersionId: input.baselineVersionId,
-        jobId: input.jobId,
-        analysisId: input.analysisId ?? null,
-        oneTap: true,
-        forceRegenerate: true,
-      } as any;
-      const coverLetterRecovery = this.recoverCoverLetterArtifact({
-        userId: input.userId,
-        baselineId: input.baselineId,
-        baselineVersionId: input.baselineVersionId,
-        baselineVersionHash,
-        jobId: input.jobId,
-        jobFingerprint,
-        analysisId: input.analysisId ?? null,
-        generationRequest,
-        inputsHash: coverLetterInputsHash,
-      });
-      await Promise.all([this.resumeService.generateResume(input.userId, generationRequest), coverLetterRecovery]);
-      return this.readState({ ...input, recoveryAttempted: true });
+      // Persisted-only Studio hydration must not invoke generation here.
+      // Studio regeneration is handled by the explicit client-side repair lane.
     }
 
     // Never drop persisted artifacts from readState; currentness/staleness must be indicated via metadata flags.

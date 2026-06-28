@@ -7566,7 +7566,7 @@ export default function StudioPage() {
 
     if (
       !guardGenerationAction("resume", {
-        allowVerifiedOnlyFallback: Boolean(opts?.verifiedOnly) || generateNowEligible,
+        allowVerifiedOnlyFallback: Boolean(opts?.verifiedOnly),
       })
     ) {
       releaseStudioArtifactSingleFlight({
@@ -7718,7 +7718,7 @@ export default function StudioPage() {
     }));
     setResumeWarningFlags([]);
     setResumeAuditId(undefined);
-    const verifiedOnly = Boolean(opts?.verifiedOnly) || generateNowEligible;
+    const verifiedOnly = Boolean(opts?.verifiedOnly);
     const payload = normalizeGenerationPayload(buildResumePayload(verifiedOnly), "resume"); 
     const payloadWithRequestId = {
       ...payload,
@@ -7914,7 +7914,7 @@ export default function StudioPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ 
-              ...normalizeGenerationPayload(buildResumePayload(generateNowEligible), "resume"), 
+              ...normalizeGenerationPayload(buildResumePayload(Boolean(opts?.verifiedOnly)), "resume"), 
               trustGateMode: "strict", 
               ...(request.requestId ? { requestId: request.requestId } : {}),
               ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
@@ -7953,7 +7953,7 @@ export default function StudioPage() {
           analysisId: requestedAnalysisId || undefined,
           reasonCode: "validation_failed",
         });
-        if (generateNowEligible) {
+        if (Boolean(opts?.verifiedOnly)) {
           // Generate-now contract: do not block the artifact on trust-validation failures.
           // We keep the first successful payload so the user always gets usable documents.
           setResumeState((current) => ({
@@ -8512,7 +8512,7 @@ export default function StudioPage() {
 
     if (
       !guardGenerationAction("cover_letter", {
-        allowVerifiedOnlyFallback: Boolean(opts?.verifiedOnly) || generateNowEligible,
+        allowVerifiedOnlyFallback: Boolean(opts?.verifiedOnly),
       })
     ) {
       releaseStudioArtifactSingleFlight({
@@ -8629,7 +8629,7 @@ export default function StudioPage() {
     setCoverWarningFlags([]);
     setCoverAuditId(undefined);
     setCoverLetterComplianceBlocked(null);
-    const verifiedOnly = Boolean(opts?.verifiedOnly) || generateNowEligible;
+    const verifiedOnly = Boolean(opts?.verifiedOnly);
     const payload = normalizeGenerationPayload(buildCoverLetterPayload(verifiedOnly), "cover_letter"); 
     const payloadWithRequestId = {
       ...payload,
@@ -8805,7 +8805,7 @@ export default function StudioPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ 
-              ...normalizeGenerationPayload(buildCoverLetterPayload(generateNowEligible), "cover_letter"), 
+              ...normalizeGenerationPayload(buildCoverLetterPayload(Boolean(opts?.verifiedOnly)), "cover_letter"), 
               trustGateMode: "strict", 
               ...(request.requestId ? { requestId: request.requestId } : {}),
               ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
@@ -8849,7 +8849,7 @@ export default function StudioPage() {
           analysisId: requestedAnalysisId || undefined,
           reasonCode: "validation_failed",
         });
-        if (generateNowEligible) {
+        if (Boolean(opts?.verifiedOnly)) {
           // Generate-now contract: do not block the artifact on trust-validation failures.
           // Preserve the first successful payload so Studio always has a cover letter to refine/export.
           setCoverState((current) => ({
@@ -9030,8 +9030,18 @@ export default function StudioPage() {
 
   const handleRegenerateDraft = useCallback(async () => {
     const sessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:regenerate:${Date.now()}`;
-    await handleResumeDraft({ sessionKey });
-    await handleCoverDraft({ sessionKey });
+    await handleResumeDraft({
+      sessionKey,
+      bypassReadinessGate: true,
+      forceRegenerate: true,
+      regenerationSource: "manual_retry",
+    });
+    await handleCoverDraft({
+      sessionKey,
+      bypassReadinessGate: true,
+      forceRegenerate: true,
+      regenerationSource: "manual_retry",
+    });
   }, [effectiveBaselineId, effectiveJobId, handleCoverDraft, handleResumeDraft]);
 
   const handleGenerateDraftAnyway = useCallback(async () => {
@@ -9040,8 +9050,8 @@ export default function StudioPage() {
     setDraftAnywayRequested(true);
 
     const sessionKey = `${effectiveBaselineId ?? "base"}:${effectiveJobId ?? "job"}:draft_anyway:${Date.now()}`;
-    await handleResumeDraft({ verifiedOnly: true, bypassReadinessGate: true, sessionKey });
-    await handleCoverDraft({ verifiedOnly: true, bypassReadinessGate: true, sessionKey });
+    await handleResumeDraft({ bypassReadinessGate: true, sessionKey });
+    await handleCoverDraft({ bypassReadinessGate: true, sessionKey });
   }, [effectiveBaselineId, effectiveJobId, handleCoverDraft, handleResumeDraft]);
 
   const openClaimEditModal = useCallback(
