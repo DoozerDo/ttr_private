@@ -12458,7 +12458,15 @@ export default function StudioPage() {
     if (!studioArtifactsHydrated) return;
 
     const signature = contract.generation.auto.signature;
-    if (generationReadyAutoStartRef.current === signature) return;
+    const autoStartTraceEnabled =
+      process.env.TTR_STUDIO_AUTO_START_TRACE === "true" ||
+      (typeof window !== "undefined" &&
+        typeof window.localStorage?.getItem === "function" &&
+        window.localStorage.getItem("ttr:debug:studioAutoStartTrace") === "true");
+    const traceAutoStart = (reason: string, detail: Record<string, unknown>) => {
+      if (!autoStartTraceEnabled) return;
+      console.log("[STUDIO][AUTO_START_TRACE]", { reason, ...detail });
+    };
 
     const hasRequiredIdsNow = Boolean(effectiveBaselineVersionId && effectiveJobId);
 
@@ -12507,12 +12515,38 @@ export default function StudioPage() {
 
     // Treat "artifacts exist" as "usable artifacts exist". Unusable outputs should not suppress
     // regeneration (manual or auto) and should not trip the artifacts_already_generated lane.
-	        const artifactsExist = Boolean(hasUsableResume && hasUsableCoverLetter);
+    const artifactsExist = Boolean(hasUsableResume && hasUsableCoverLetter);
     const generatingNow =
       autoGenerationInFlight ||
       resumeGenerating ||
       coverGenerating ||
       studioArtifactPairStatus === "in_progress";
+
+    if (generationReadyAutoStartRef.current === signature) {
+      if (generatingNow || artifactsExist) {
+        traceAutoStart("signature_latched", {
+          studioArtifactsHydrated,
+          signature,
+          generationReadyAutoStartRef: generationReadyAutoStartRef.current,
+          generatingNow,
+          artifactsExist,
+        });
+        return;
+      }
+
+      traceAutoStart("signature_latch_incomplete", {
+        studioArtifactsHydrated,
+        signature,
+        generationReadyAutoStartRef: generationReadyAutoStartRef.current,
+        generatingNow,
+        artifactsExist,
+        hasUsableResume,
+        hasUsableCoverLetter,
+        hasResumeArtifactPersisted,
+        hasCoverLetterArtifactPersisted,
+        effectiveGenerationState,
+      });
+    }
 
     const storageKey = `ttr:studio:auto-generate:${signature}`;
     const lastSignatureKey = "ttr:studio:auto-generate:last-signature";
@@ -12614,26 +12648,51 @@ export default function StudioPage() {
     }
 
     if (!contractShouldStart) {
+      traceAutoStart("contract_should_start_false", {
+        studioArtifactsHydrated,
+        signature,
+        contractShouldStart,
+        hasRequiredIdsNow,
+        effectiveGenerationState,
+        wasReadyBefore,
+        isReadyNow,
+      });
       if (debugAutoGenerationEnabled) {
         console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "contract_not_ready_or_shouldStart_false" });
       }
       return;
     }
 
-	    if (
-	      suppressAutoGenerationRef.current &&
-	      !studioArtifactsHydrated &&
-	      // Narrow unblock: if we already know we need auto-generation and nothing exists/runs/blocks,
-	      // suppression must not prevent starting (prevents "should_auto_generate" deadlocks).
-	      !(needsAutoGeneration && !artifactsExist && !generatingNow && !shouldBlockFromLatch)
-	    ) {
-	      if (debugAutoGenerationEnabled) {
-	        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "suppressed_by_artifact_hydration" });
-	      }
-	      return;
-	    }
+    if (
+      suppressAutoGenerationRef.current &&
+      !studioArtifactsHydrated &&
+      // Narrow unblock: if we already know we need auto-generation and nothing exists/runs/blocks,
+      // suppression must not prevent starting (prevents "should_auto_generate" deadlocks).
+      !(needsAutoGeneration && !artifactsExist && !generatingNow && !shouldBlockFromLatch)
+    ) {
+      traceAutoStart("suppressed_by_artifact_hydration", {
+        studioArtifactsHydrated,
+        signature,
+        suppressAutoGeneration: Boolean(suppressAutoGenerationRef.current),
+        needsAutoGeneration,
+        artifactsExist,
+        generatingNow,
+        shouldBlockFromLatch,
+      });
+      if (debugAutoGenerationEnabled) {
+        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "suppressed_by_artifact_hydration" });
+      }
+      return;
+    }
 
     if (artifactsExist) {
+      traceAutoStart("artifacts_exist", {
+        studioArtifactsHydrated,
+        signature,
+        artifactsExist,
+        hasUsableResume,
+        hasUsableCoverLetter,
+      });
       if (debugAutoGenerationEnabled) {
         console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "artifacts_exist" });
       }
@@ -12641,6 +12700,14 @@ export default function StudioPage() {
     }
 
     if (generatingNow) {
+      traceAutoStart("already_generating", {
+        studioArtifactsHydrated,
+        signature,
+        generatingNow,
+        autoGenerationInFlight,
+        resumeGenerating,
+        coverGenerating,
+      });
       if (debugAutoGenerationEnabled) {
         console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "already_generating" });
       }
@@ -12648,12 +12715,30 @@ export default function StudioPage() {
     }
 
     if (shouldBlockFromLatch) {
+      traceAutoStart("latch_succeeded", {
+        studioArtifactsHydrated,
+        signature,
+        latch,
+        shouldBlockFromLatch,
+        hasUsableArtifacts: artifactContract.hasUsableArtifacts,
+      });
       if (debugAutoGenerationEnabled) {
         console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "latch_succeeded" });
       }
       return;
     }
 
+    traceAutoStart("start_generation", {
+      studioArtifactsHydrated,
+      signature,
+      contractShouldStart,
+      hasRequiredIdsNow,
+      artifactsExist,
+      generatingNow,
+      shouldBlockFromLatch,
+      suppressAutoGeneration: Boolean(suppressAutoGenerationRef.current),
+      needsAutoGeneration,
+    });
     generationReadyAutoStartRef.current = signature;
     try {
       if (storage && typeof storage.setItem === "function") {
