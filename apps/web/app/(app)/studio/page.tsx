@@ -12457,6 +12457,7 @@ export default function StudioPage() {
   useEffect(() => {
     const contract = workflowOrchestratorCore.contract;
     if (!contract) return;
+    if (!studioArtifactsHydrated) return;
 
     const signature = contract.generation.auto.signature;
     if (generationReadyAutoStartRef.current === signature) return;
@@ -12736,11 +12737,16 @@ export default function StudioPage() {
     })();
   }, [
     autoGenerationInFlight,
+    hasAnyArtifactPersisted,
     coverGenerating,
     debugAutoGenerationEnabled,
     hasUsableCoverLetter,
     hasUsableResume,
+    missingCoverOutput,
+    missingResumeOutput,
+    needsAutoGeneration,
     resumeGenerating,
+    studioArtifactsHydrated,
     studioArtifactPairStatus,
     startGenerationFromReadyShell,
     workflowOrchestratorCore.contract?.generation.state,
