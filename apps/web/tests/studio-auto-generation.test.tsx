@@ -1010,6 +1010,23 @@ describe("Studio auto-generation", () => {
       expect(countPostCalls(fetchMock, "/api/resume")).toBeGreaterThan(0);
       expect(countPostCalls(fetchMock, "/api/cover-letters")).toBeGreaterThan(0);
     }, { timeout: 15000 });
+
+    expect(countPostCalls(fetchMock, "/api/resume")).toBe(1);
+    expect(countPostCalls(fetchMock, "/api/cover-letters")).toBe(1);
+
+    const resumeBodies = readPostBodies(fetchMock, "/api/resume");
+    const coverBodies = readPostBodies(fetchMock, "/api/cover-letters");
+    expect(resumeBodies).toHaveLength(1);
+    expect(coverBodies).toHaveLength(1);
+    expect(resumeBodies[0]).toMatchObject({ forceRegenerate: true, regenerationSource: "shell_auto" });
+    expect(coverBodies[0]).toMatchObject({ forceRegenerate: true, regenerationSource: "shell_auto" });
+
+    renderStudio();
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(countPostCalls(fetchMock, "/api/resume")).toBe(1);
+    expect(countPostCalls(fetchMock, "/api/cover-letters")).toBe(1);
   }, 15000);
 
 	  it("auto-generates the partial artifact state when cover letter is already persisted", async () => {
@@ -2009,92 +2026,73 @@ describe("Studio auto-generation", () => {
       baselineVersionId: "base-version-1",
     });
 
-    const previousTraceEnv = process.env.TTR_STUDIO_AUTO_START_TRACE;
-    process.env.TTR_STUDIO_AUTO_START_TRACE = "true";
-    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
-    try {
-      const fetchMock = installStrongFitFetches({
-        score: 84,
-        readinessStatus: "ready",
-        studioArtifactsPayload: {
-          status: "persisted_only_assessment_backed",
-          assessmentScore: 84,
-          baselineId: "base-1",
-          jobId: "job-1",
-          baselineVersionId: "base-version-1",
-          generationContractVersion: "studio-artifacts-v1",
-          artifact: {
-            hasResume: true,
-            hasCoverLetter: false,
-            pairStatus: "failed",
-            generating: false,
-            failure: null,
-          },
-          resume: {
-            status: "failed",
-            usableCurrent: false,
-            inputsHash: true,
-            failureCode: "resume_v2_failed",
-            failureMessage: "Internal Server Error Exception",
-            responseBody: null,
-            content: null,
-            confidence: "LOW",
-            failure: {
-              code: "resume_v2_failed",
-              message: "Internal Server Error Exception",
-            },
-          },
-          coverLetter: {
-            status: "missing",
-            usableCurrent: false,
-            inputsHash: true,
-            failureCode: null,
-            failureMessage: null,
-            responseBody: null,
-            content: null,
-            confidence: "LOW",
-            failure: null,
-          },
-          diagnostics: {
-            resumeV2Readiness: {
-              hasResumeV2: true,
-              usableExperienceCount: 4,
-            },
+    const fetchMock = installStrongFitFetches({
+      score: 84,
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "persisted_only_assessment_backed",
+        assessmentScore: 84,
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        generationContractVersion: "studio-artifacts-v1",
+        artifact: {
+          hasResume: true,
+          hasCoverLetter: false,
+          pairStatus: "failed",
+          generating: false,
+          failure: null,
+        },
+        resume: {
+          status: "failed",
+          usableCurrent: false,
+          inputsHash: true,
+          failureCode: "resume_v2_failed",
+          failureMessage: "Internal Server Error Exception",
+          responseBody: null,
+          content: null,
+          confidence: "LOW",
+          failure: {
+            code: "resume_v2_failed",
+            message: "Internal Server Error Exception",
           },
         },
-      });
+        coverLetter: {
+          status: "missing",
+          usableCurrent: false,
+          inputsHash: true,
+          failureCode: null,
+          failureMessage: null,
+          responseBody: null,
+          content: null,
+          confidence: "LOW",
+          failure: null,
+        },
+        diagnostics: {
+          resumeV2Readiness: {
+            hasResumeV2: true,
+            usableExperienceCount: 4,
+          },
+        },
+      },
+    });
 
-      renderStudio();
+    renderStudio();
 
-      await waitFor(() => {
-        const snapshot = readOrchestrationDebugSnapshot();
-        expect(snapshot.qualifiedForGeneration).toBe(true);
-        expect(snapshot.effectiveRequestedAnalysisId).toBeTruthy();
-        expect(snapshot.autoGenerationTriggerGuards?.contractShouldStart).toBe(true);
-        expect(snapshot.orchestrationDecision).toBe("should_auto_generate");
-        expect(snapshot.orchestrationDecision).not.toBe("passive_empty_state");
-        expect(snapshot.studioReadinessBlocksGeneration).toBe(false);
-      }, { timeout: 15000 });
+    await waitFor(() => {
+      const snapshot = readOrchestrationDebugSnapshot();
+      expect(snapshot.qualifiedForGeneration).toBe(true);
+      expect(snapshot.effectiveRequestedAnalysisId).toBeTruthy();
+      expect(snapshot.autoGenerationTriggerGuards?.contractShouldStart).toBe(true);
+      expect(snapshot.orchestrationDecision).toBe("should_auto_generate");
+      expect(snapshot.orchestrationDecision).not.toBe("passive_empty_state");
+      expect(snapshot.studioReadinessBlocksGeneration).toBe(false);
+    }, { timeout: 15000 });
 
-      await waitFor(() => {
-        expect(countPostCalls(fetchMock, "/api/resume")).toBeGreaterThan(0);
-        expect(countPostCalls(fetchMock, "/api/cover-letters")).toBeGreaterThan(0);
-      }, { timeout: 15000 });
-
-      const autoStartTraces = consoleLog.mock.calls
-        .filter(([label]) => label === "[STUDIO][AUTO_START_TRACE]")
-        .map(([, payload]) => payload as Record<string, unknown>);
-
-      expect(autoStartTraces.some((entry) => entry.reason === "start_generation")).toBe(true);
-      expect(autoStartTraces.some((entry) => entry.reason === "signature_latched")).toBe(false);
-    } finally {
-      consoleLog.mockRestore();
-      if (previousTraceEnv === undefined) {
-        delete process.env.TTR_STUDIO_AUTO_START_TRACE;
-      } else {
-        process.env.TTR_STUDIO_AUTO_START_TRACE = previousTraceEnv;
-      }
-    }
+    await waitFor(() => {
+      expect(countPostCalls(fetchMock, "/api/resume")).toBeGreaterThan(0);
+      expect(countPostCalls(fetchMock, "/api/cover-letters")).toBeGreaterThan(0);
+    }, { timeout: 15000 });
   }, 15000);
 
   it("Scenario A: both previews renderable => no failure banner and no 'not generated yet' placeholders", async () => {

@@ -12457,16 +12457,9 @@ export default function StudioPage() {
     if (!contract) return;
     if (!studioArtifactsHydrated) return;
 
-    const signature = contract.generation.auto.signature;
-    const autoStartTraceEnabled =
-      process.env.TTR_STUDIO_AUTO_START_TRACE === "true" ||
-      (typeof window !== "undefined" &&
-        typeof window.localStorage?.getItem === "function" &&
-        window.localStorage.getItem("ttr:debug:studioAutoStartTrace") === "true");
-    const traceAutoStart = (reason: string, detail: Record<string, unknown>) => {
-      if (!autoStartTraceEnabled) return;
-      console.log("[STUDIO][AUTO_START_TRACE]", { reason, ...detail });
-    };
+    const contractSignature = contract.generation.auto.signature ?? null;
+    const fallbackAutoStartSignature = buildWorkflowRequestKey("auto_generation", generationWorkflowScope);
+    const signature = contractSignature ?? fallbackAutoStartSignature;
 
     const hasRequiredIdsNow = Boolean(effectiveBaselineVersionId && effectiveJobId);
 
@@ -12524,28 +12517,8 @@ export default function StudioPage() {
 
     if (generationReadyAutoStartRef.current === signature) {
       if (generatingNow || artifactsExist) {
-        traceAutoStart("signature_latched", {
-          studioArtifactsHydrated,
-          signature,
-          generationReadyAutoStartRef: generationReadyAutoStartRef.current,
-          generatingNow,
-          artifactsExist,
-        });
         return;
       }
-
-      traceAutoStart("signature_latch_incomplete", {
-        studioArtifactsHydrated,
-        signature,
-        generationReadyAutoStartRef: generationReadyAutoStartRef.current,
-        generatingNow,
-        artifactsExist,
-        hasUsableResume,
-        hasUsableCoverLetter,
-        hasResumeArtifactPersisted,
-        hasCoverLetterArtifactPersisted,
-        effectiveGenerationState,
-      });
     }
 
     const storageKey = `ttr:studio:auto-generate:${signature}`;
@@ -12648,15 +12621,6 @@ export default function StudioPage() {
     }
 
     if (!contractShouldStart) {
-      traceAutoStart("contract_should_start_false", {
-        studioArtifactsHydrated,
-        signature,
-        contractShouldStart,
-        hasRequiredIdsNow,
-        effectiveGenerationState,
-        wasReadyBefore,
-        isReadyNow,
-      });
       if (debugAutoGenerationEnabled) {
         console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "contract_not_ready_or_shouldStart_false" });
       }
@@ -12670,15 +12634,6 @@ export default function StudioPage() {
       // suppression must not prevent starting (prevents "should_auto_generate" deadlocks).
       !(needsAutoGeneration && !artifactsExist && !generatingNow && !shouldBlockFromLatch)
     ) {
-      traceAutoStart("suppressed_by_artifact_hydration", {
-        studioArtifactsHydrated,
-        signature,
-        suppressAutoGeneration: Boolean(suppressAutoGenerationRef.current),
-        needsAutoGeneration,
-        artifactsExist,
-        generatingNow,
-        shouldBlockFromLatch,
-      });
       if (debugAutoGenerationEnabled) {
         console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "suppressed_by_artifact_hydration" });
       }
@@ -12686,13 +12641,6 @@ export default function StudioPage() {
     }
 
     if (artifactsExist) {
-      traceAutoStart("artifacts_exist", {
-        studioArtifactsHydrated,
-        signature,
-        artifactsExist,
-        hasUsableResume,
-        hasUsableCoverLetter,
-      });
       if (debugAutoGenerationEnabled) {
         console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "artifacts_exist" });
       }
@@ -12700,14 +12648,6 @@ export default function StudioPage() {
     }
 
     if (generatingNow) {
-      traceAutoStart("already_generating", {
-        studioArtifactsHydrated,
-        signature,
-        generatingNow,
-        autoGenerationInFlight,
-        resumeGenerating,
-        coverGenerating,
-      });
       if (debugAutoGenerationEnabled) {
         console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "already_generating" });
       }
@@ -12715,30 +12655,12 @@ export default function StudioPage() {
     }
 
     if (shouldBlockFromLatch) {
-      traceAutoStart("latch_succeeded", {
-        studioArtifactsHydrated,
-        signature,
-        latch,
-        shouldBlockFromLatch,
-        hasUsableArtifacts: artifactContract.hasUsableArtifacts,
-      });
       if (debugAutoGenerationEnabled) {
         console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "latch_succeeded" });
       }
       return;
     }
 
-    traceAutoStart("start_generation", {
-      studioArtifactsHydrated,
-      signature,
-      contractShouldStart,
-      hasRequiredIdsNow,
-      artifactsExist,
-      generatingNow,
-      shouldBlockFromLatch,
-      suppressAutoGeneration: Boolean(suppressAutoGenerationRef.current),
-      needsAutoGeneration,
-    });
     generationReadyAutoStartRef.current = signature;
     try {
       if (storage && typeof storage.setItem === "function") {
@@ -12831,6 +12753,8 @@ export default function StudioPage() {
     studioArtifactsHydrated,
     studioArtifactPairStatus,
     startGenerationFromReadyShell,
+    autoGenerationSignature,
+    generationWorkflowScope,
     workflowOrchestratorCore.contract?.generation.state,
     workflowOrchestratorCore.contract?.generation.auto.shouldStart,
     workflowOrchestratorCore.contract?.generation.auto.signature,
@@ -12868,7 +12792,6 @@ export default function StudioPage() {
     }
     // Duplicate-generation guard: intent-driven generation must not stack on top of READY-shell auto-generation
     // or an already-started manual/auto run for this workspace.
-    if (hasAnyArtifactPersisted) return;
     if (autoGenerationInFlight || resumeGenerating || coverGenerating || studioArtifactPairStatus === "in_progress") return;
     // Ensure READY-shell auto-start cannot race this intent path on the same render tick.
     suppressAutoGenerationRef.current = true;
