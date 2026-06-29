@@ -574,6 +574,12 @@ describe("Studio auto-generation", () => {
     const coverBodies = readPostBodies(fetchMock, "/api/cover-letters");
     expect(resumeBodies.length).toBeGreaterThanOrEqual(1);
     expect(coverBodies.length).toBeGreaterThanOrEqual(1);
+    expect(
+      resumeBodies.some((body) => body?.forceRegenerate === true && body?.regenerationSource === "shell_auto"),
+    ).toBe(true);
+    expect(
+      coverBodies.some((body) => body?.forceRegenerate === true && body?.regenerationSource === "shell_auto"),
+    ).toBe(true);
 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/resume"),
