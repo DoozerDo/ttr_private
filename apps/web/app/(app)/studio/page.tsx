@@ -12507,7 +12507,7 @@ export default function StudioPage() {
 
     // Treat "artifacts exist" as "usable artifacts exist". Unusable outputs should not suppress
     // regeneration (manual or auto) and should not trip the artifacts_already_generated lane.
-	        const artifactsExist = !missingResumeOutput && !missingCoverOutput;
+	        const artifactsExist = Boolean(hasUsableResume && hasUsableCoverLetter);
     const generatingNow =
       autoGenerationInFlight ||
       resumeGenerating ||
@@ -12594,8 +12594,7 @@ export default function StudioPage() {
 	        const shouldBlockFromLatch =
 	          latch === "succeeded" &&
 	          artifactContract.hasUsableArtifacts &&
-	          !missingResumeOutput &&
-	          !missingCoverOutput;
+	          Boolean(hasUsableResume && hasUsableCoverLetter);
     const skipReason =
       contract.generation.auto.shouldStart === true
         ? null
