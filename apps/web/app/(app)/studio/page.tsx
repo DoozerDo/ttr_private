@@ -12711,7 +12711,7 @@ export default function StudioPage() {
           contractShouldStart,
           contractSignature: signature,
           latch,
-          reason: "signature_latched",
+          reason: "signature_latched_completion_aware",
         });
       }
       return;
@@ -12763,7 +12763,7 @@ export default function StudioPage() {
 
     if (!contractShouldStart) {
       if (debugAutoGenerationEnabled) {
-        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "contract_not_ready_or_shouldStart_false" });
+        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "contract_should_not_start" });
       }
       return;
     }
@@ -12783,25 +12783,33 @@ export default function StudioPage() {
 
     if (artifactsExist) {
       if (debugAutoGenerationEnabled) {
-        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "artifacts_exist" });
+        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "usable_artifacts_exist" });
       }
       return;
     }
 
     if (generatingNow) {
       if (debugAutoGenerationEnabled) {
-        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "already_generating" });
+        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "generation_in_flight" });
       }
       return;
     }
 
     if (shouldBlockFromLatch) {
       if (debugAutoGenerationEnabled) {
-        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "latch_succeeded" });
+        console.log("[STUDIO][AUTO_GEN][SKIP]", { ...decision, reason: "completion_latched" });
       }
       return;
     }
 
+    if (debugAutoGenerationEnabled) {
+      console.log("[STUDIO][AUTO_GEN][EXECUTOR_READY]", {
+        contractGenerationState: effectiveGenerationState,
+        contractShouldStart,
+        contractSignature: signature,
+        latch,
+      });
+    }
     generationReadyAutoStartRef.current = signature;
     try {
       getStudioAutoGenerationLatchStore().set(signature, "started");
