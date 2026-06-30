@@ -431,20 +431,20 @@ function buildStudioArtifactsReadiness(payload: BackendStudioArtifactsResponse |
   }
 
   return {
-    status: "blocked",
-    blocked: true,
+    status: "limited",
+    blocked: false,
     reasonCodes: missingReasonCodes,
     reasons: [{ code: "personalization_limitation", message: summary }],
-    badgeLabel: "BLOCKED",
+    badgeLabel: "LIMITED",
     summary,
     verificationIssues: missingReasonCodes.map((code) => ({
       code: "missing_baseline_evidence",
-      severity: "block",
+      severity: "warn",
       claim: null,
       source: "targeting_context",
       explanation: summary,
       sourceContext: null,
-      recommendedAction: "Restore the missing persisted Studio artifact.",
+      recommendedAction: "Generate the missing persisted Studio artifact.",
     })),
   };
 }
