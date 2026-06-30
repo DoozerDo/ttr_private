@@ -158,6 +158,42 @@ import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 import { resolveDocumentReadinessState } from "@shared/documentReadinessState";
 import { resolveWorkflowContract } from "@shared/workflowContract";
 
+type StudioAutoGenerationLatchStatus = "started" | "succeeded" | "failed";
+const STUDIO_AUTO_GENERATION_LATCH_STORE_KEY = "__ttrStudioAutoGenerationLatchStore";
+const STUDIO_GENERATION_SCOPE_GUARD_STORE_KEY = "__ttrStudioGenerationScopeGuardStore";
+
+function getStudioAutoGenerationLatchStore() {
+  const root = (typeof window !== "undefined" ? window : globalThis) as typeof globalThis & {
+    [STUDIO_AUTO_GENERATION_LATCH_STORE_KEY]?: Map<string, StudioAutoGenerationLatchStatus>;
+  };
+  if (!root[STUDIO_AUTO_GENERATION_LATCH_STORE_KEY]) {
+    root[STUDIO_AUTO_GENERATION_LATCH_STORE_KEY] = new Map<string, StudioAutoGenerationLatchStatus>();
+  }
+  return root[STUDIO_AUTO_GENERATION_LATCH_STORE_KEY]!;
+}
+
+function getStudioGenerationScopeGuardStore() {
+  const root = (typeof window !== "undefined" ? window : globalThis) as typeof globalThis & {
+    [STUDIO_GENERATION_SCOPE_GUARD_STORE_KEY]?: Map<
+      string,
+      {
+        status: "started" | "completed";
+        startedAt: number;
+      }
+    >;
+  };
+  if (!root[STUDIO_GENERATION_SCOPE_GUARD_STORE_KEY]) {
+    root[STUDIO_GENERATION_SCOPE_GUARD_STORE_KEY] = new Map<
+      string,
+      {
+        status: "started" | "completed";
+        startedAt: number;
+      }
+    >();
+  }
+  return root[STUDIO_GENERATION_SCOPE_GUARD_STORE_KEY]!;
+}
+
 function LockIcon(props: { className?: string; "aria-hidden"?: boolean }) {
   const className = props.className ?? "h-5 w-5";
   return (
@@ -1733,15 +1769,7 @@ export default function StudioPage() {
     baselineVersionId: null,
     analysisId: null,
   });
-  const generationScopeGuardRef = useRef<
-    Map<
-      string,
-      {
-        status: "started" | "completed";
-        startedAt: number;
-      }
-    >
-  >(new Map());
+  const generationScopeGuardRef = useRef(getStudioGenerationScopeGuardStore());
 
   const buildGenerationScopeKey = useCallback(
     (input: {
@@ -7297,6 +7325,28 @@ export default function StudioPage() {
     setAssessmentUnsupportedRequirements(null);
     void (async () => {
       try {
+        const hydrateFromAnalysisRun = async () => {
+          if (!effectiveBaselineId || !effectiveJobId) return null;
+          const runResponse = await fetch("/api/analysis/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              baselineId: effectiveBaselineId,
+              jobId: effectiveJobId,
+            }),
+          });
+          const runPayload = await readResponsePayload(runResponse);
+          if (
+            !runResponse.ok ||
+            !runPayload ||
+            typeof runPayload !== "object" ||
+            Array.isArray(runPayload)
+          ) {
+            return null;
+          }
+          return runPayload as LatestAnalysis;
+        };
+
         const response = await fetch(`/api/analysis/fit-assessments/${encodeURIComponent(analysisIdToHydrate)}`, {
           cache: "no-store",
         });
@@ -7310,8 +7360,6 @@ export default function StudioPage() {
           return;
         }
         const normalized = payload as LatestAnalysis;
-        setAnalysis(normalized);
-        setAnalysisError(null);
         const scoreCandidate =
           typeof normalized.scoring_v2?.score === "number"
             ? normalized.scoring_v2.score
@@ -7320,6 +7368,34 @@ export default function StudioPage() {
               : typeof normalized.overallScore === "number"
                 ? normalized.overallScore
                 : null;
+
+        if (
+          typeof scoreCandidate === "number" &&
+          Number.isFinite(scoreCandidate) &&
+          scoreCandidate < 80
+        ) {
+          const canonical = await hydrateFromAnalysisRun();
+          if (cancelled) return;
+          if (canonical) {
+            setAnalysis(canonical);
+            setAnalysisError(null);
+            const canonicalScore =
+              typeof canonical.scoring_v2?.score === "number"
+                ? canonical.scoring_v2.score
+                : typeof canonical.score === "number"
+                  ? canonical.score
+                  : typeof canonical.overallScore === "number"
+                    ? canonical.overallScore
+                    : null;
+            setHydratedAnalysisScore(
+              typeof canonicalScore === "number" && Number.isFinite(canonicalScore) ? canonicalScore : null,
+            );
+            return;
+          }
+        }
+
+        setAnalysis(normalized);
+        setAnalysisError(null);
         setHydratedAnalysisScore(
           typeof scoreCandidate === "number" && Number.isFinite(scoreCandidate) ? scoreCandidate : null,
         );
@@ -7526,13 +7602,14 @@ export default function StudioPage() {
     }
 
     const artifactType: StudioArtifactType = "resume";
+    const shouldReleaseScopeOnFailure = opts?.regenerationSource === "manual_retry";
     const scopeGuard = tryStartGenerationForScope({
       baselineId: effectiveBaselineId ?? null,
       baselineVersionId: effectiveBaselineVersionId ?? null,
       jobId: effectiveJobId ?? null,
       analysisId: requestedAnalysisId ?? null,
       artifactType: "resume",
-      allowDuplicate: Boolean(opts?.forceRegenerate),
+      allowDuplicate: opts?.regenerationSource === "manual_retry",
     });
     if (!scopeGuard.started) {
       return finish(
@@ -7553,7 +7630,9 @@ export default function StudioPage() {
       requestId: flightRequestId,
     });
     if (!flight.acquired) {
-      releaseGenerationScope(scopeGuard.key);
+      if (shouldReleaseScopeOnFailure) {
+        releaseGenerationScope(scopeGuard.key);
+      }
       if (process.env.NODE_ENV === "development") {
         console.debug("[studioSingleFlight]", {
           artifactType,
@@ -7815,7 +7894,9 @@ export default function StudioPage() {
       ) {
         // Request finished, but Studio moved to a different workflow scope. Release so we don't deadlock
         // if the user returns to this same pair.
-        releaseGenerationScope(scopeGuard.key);
+        if (shouldReleaseScopeOnFailure) {
+          releaseGenerationScope(scopeGuard.key);
+        }
         releaseStudioArtifactSingleFlight({
           baselineId: effectiveBaselineId ?? null,
           jobId: effectiveJobId ?? null,
@@ -7997,7 +8078,9 @@ export default function StudioPage() {
           error: GENERATION_TRUST_FALLBACK_ERROR,
         }));
         lastFailureSignatureRef.current = generationInputSignature;
-        releaseGenerationScope(scopeGuard.key);
+        if (shouldReleaseScopeOnFailure) {
+          releaseGenerationScope(scopeGuard.key);
+        }
         return false;
       }
 
@@ -8079,7 +8162,9 @@ export default function StudioPage() {
         },
       }));
       setStudioArtifactPairStatus("failed");
-      releaseGenerationScope(scopeGuard.key);
+      if (shouldReleaseScopeOnFailure) {
+        releaseGenerationScope(scopeGuard.key);
+      }
       return false;
     } finally {
       if (timeoutId !== null) window.clearTimeout(timeoutId);
@@ -8399,6 +8484,7 @@ export default function StudioPage() {
     if (opts?.forceRegenerate) {
       console.log("[ARTIFACT_REGENERATE_OVERRIDE]", { artifactType: "cover_letter" });
     }
+    const shouldReleaseScopeOnFailure = opts?.regenerationSource === "manual_retry";
     const fail = (args: {
       errorCode: string;
       errorMessage: string;
@@ -8478,7 +8564,7 @@ export default function StudioPage() {
       jobId: effectiveJobId ?? null,
       analysisId: requestedAnalysisId ?? null,
       artifactType: "cover_letter",
-      allowDuplicate: Boolean(opts?.forceRegenerate),
+      allowDuplicate: opts?.regenerationSource === "manual_retry",
     });
     if (!scopeGuard.started) {
       return finish(
@@ -8499,7 +8585,9 @@ export default function StudioPage() {
       requestId: flightRequestId,
     });
     if (!flight.acquired) {
-      releaseGenerationScope(scopeGuard.key);
+      if (shouldReleaseScopeOnFailure) {
+        releaseGenerationScope(scopeGuard.key);
+      }
       if (process.env.NODE_ENV === "development") {
         console.debug("[studioSingleFlight]", {
           artifactType,
@@ -8892,7 +8980,9 @@ export default function StudioPage() {
           error: GENERATION_TRUST_FALLBACK_ERROR,
         }));
         lastFailureSignatureRef.current = generationInputSignature;
-        releaseGenerationScope(scopeGuard.key);
+        if (shouldReleaseScopeOnFailure) {
+          releaseGenerationScope(scopeGuard.key);
+        }
         return fail({
           errorCode: "trust_validation_failed",
           errorMessage: GENERATION_TRUST_FALLBACK_ERROR,
@@ -8948,7 +9038,9 @@ export default function StudioPage() {
         activeCoverGenerationRef.current?.requestId !== request.requestId
       ) {
         finishStudioGenerationRequest("cover_letter", request, "blocked", requestScope);
-        releaseGenerationScope(scopeGuard.key);
+        if (shouldReleaseScopeOnFailure) {
+          releaseGenerationScope(scopeGuard.key);
+        }
         return fail({
           errorCode: "stale_request_scope",
           errorMessage: "Cover letter generation aborted because the workflow scope changed.",
@@ -8981,7 +9073,9 @@ export default function StudioPage() {
         },
       }));
       setStudioArtifactPairStatus("failed");
-      releaseGenerationScope(scopeGuard.key);
+      if (shouldReleaseScopeOnFailure) {
+        releaseGenerationScope(scopeGuard.key);
+      }
       return fail({
         errorCode: requestFinalStatus === "timeout" ? "generation_timeout" : "generation_failed",
         errorMessage: message,
@@ -11792,7 +11886,11 @@ export default function StudioPage() {
             if (typeof window.localStorage.removeItem === "function") {
               window.localStorage.removeItem(storageKey);
             }
+            if (typeof window.sessionStorage?.removeItem === "function") {
+              window.sessionStorage.removeItem(storageKey);
+            }
           }
+          getStudioAutoGenerationLatchStore().delete(signature ?? "");
         } catch {
           // ignore
         }
@@ -12515,15 +12613,10 @@ export default function StudioPage() {
       coverGenerating ||
       studioArtifactPairStatus === "in_progress";
 
-    if (generationReadyAutoStartRef.current === signature) {
-      if (generatingNow || artifactsExist) {
-        return;
-      }
-    }
-
     const storageKey = `ttr:studio:auto-generate:${signature}`;
     const lastSignatureKey = "ttr:studio:auto-generate:last-signature";
     const storage = typeof window !== "undefined" ? window.localStorage : null;
+    const sessionStorage = typeof window !== "undefined" ? window.sessionStorage : null;
 
     const hadRequiredIdsBefore = autoGenerationHadRequiredIdsRef.current;
     autoGenerationHadRequiredIdsRef.current = hasRequiredIdsNow;
@@ -12561,17 +12654,59 @@ export default function StudioPage() {
     } catch {
       latch = null;
     }
+    if (!latch) {
+      try {
+        latch = sessionStorage && typeof sessionStorage.getItem === "function" ? sessionStorage.getItem(storageKey) : null;
+      } catch {
+        latch = null;
+      }
+    }
+    if (!latch) {
+      try {
+        const latchStore = getStudioAutoGenerationLatchStore();
+        latch = latchStore.get(signature) ?? null;
+      } catch {
+        // ignore
+      }
+    }
 
     // If the contract just became READY, clear any stale latch for this signature so it cannot override authority.
     if (!wasReadyBefore && isReadyNow) {
       try {
-        if (storage && typeof storage.removeItem === "function") {
-          storage.removeItem(storageKey);
+        if (latch === "failed") {
+          if (storage && typeof storage.removeItem === "function") {
+            storage.removeItem(storageKey);
+          }
+          if (sessionStorage && typeof sessionStorage.removeItem === "function") {
+            sessionStorage.removeItem(storageKey);
+          }
+          try {
+            getStudioAutoGenerationLatchStore().delete(signature);
+          } catch {
+            // ignore
+          }
           latch = null;
         }
       } catch {
         // ignore
       }
+    }
+
+    const autoStartAlreadyAttempted =
+      generationReadyAutoStartRef.current === signature ||
+      latch === "started" ||
+      (latch === "succeeded" && artifactsExist);
+    if (autoStartAlreadyAttempted) {
+      if (debugAutoGenerationEnabled) {
+        console.log("[STUDIO][AUTO_GEN][SKIP]", {
+          contractGenerationState: effectiveGenerationState,
+          contractShouldStart,
+          contractSignature: signature,
+          latch,
+          reason: "signature_latched",
+        });
+      }
+      return;
     }
 
     // Instrumentation: run on every dependency change for this effect scope.
@@ -12598,10 +12733,8 @@ export default function StudioPage() {
       }
     }
 
-	        const shouldBlockFromLatch =
-	          latch === "succeeded" &&
-	          artifactContract.hasUsableArtifacts &&
-	          Boolean(hasUsableResume && hasUsableCoverLetter);
+    const shouldBlockFromLatch =
+      latch === "succeeded" && artifactContract.hasUsableArtifacts && Boolean(hasUsableResume && hasUsableCoverLetter);
     const skipReason =
       contract.generation.auto.shouldStart === true
         ? null
@@ -12663,6 +12796,10 @@ export default function StudioPage() {
 
     generationReadyAutoStartRef.current = signature;
     try {
+      getStudioAutoGenerationLatchStore().set(signature, "started");
+      if (sessionStorage && typeof sessionStorage.setItem === "function") {
+        sessionStorage.setItem(storageKey, "started");
+      }
       if (storage && typeof storage.setItem === "function") {
         // If we're about to legitimately start generation, clear any stale failed latch for the same
         // signature (or the immediately previous signature, if present). This prevents "failed"
@@ -12683,6 +12820,7 @@ export default function StudioPage() {
     } catch {
       // ignore
     }
+    setAutoGenerationInFlight(true);
 
     void (async () => {
       try {
@@ -12692,6 +12830,10 @@ export default function StudioPage() {
         const coverSucceeded = coverResult?.ok === true && coverResult.status === "success";
         const latchSucceeded = ok || (resumeSucceeded && coverSucceeded);
         try {
+          getStudioAutoGenerationLatchStore().set(signature, latchSucceeded ? "succeeded" : "failed");
+          if (sessionStorage && typeof sessionStorage.setItem === "function") {
+            sessionStorage.setItem(storageKey, latchSucceeded ? "succeeded" : "failed");
+          }
           if (storage && typeof storage.setItem === "function") {
             storage.setItem(storageKey, latchSucceeded ? "succeeded" : "failed");
             storage.setItem(lastSignatureKey, signature);
@@ -12717,6 +12859,10 @@ export default function StudioPage() {
         }
       } catch (error) {
         try {
+          getStudioAutoGenerationLatchStore().set(signature, "failed");
+          if (sessionStorage && typeof sessionStorage.setItem === "function") {
+            sessionStorage.setItem(storageKey, "failed");
+          }
           if (storage && typeof storage.setItem === "function") storage.setItem(storageKey, "failed");
         } catch {
           // ignore

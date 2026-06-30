@@ -4119,7 +4119,18 @@ export class AnalysisService {
         );
       }
 
-      const assessment = this.fitAssessmentRepository.create({
+      const existingAssessment = baseline.latestAssessmentId
+        ? await this.fitAssessmentRepository.findOne({
+            where: {
+              id: baseline.latestAssessmentId,
+              userId,
+              jobId: resolvedJobId,
+              baselineId: baseline.id,
+            },
+          })
+        : null;
+
+      const assessmentPayload = {
         userId,
         jobId: resolvedJobId,
         baselineId: baseline.id,
@@ -4136,7 +4147,14 @@ export class AnalysisService {
         confidenceReasons: confidenceResult.confidenceReasons,
         scoringReliability,
         ...(scoringReliabilityReason ? { scoringReliabilityReason } : {}),
-      });
+      };
+
+      const assessment = existingAssessment
+        ? {
+            ...existingAssessment,
+            ...assessmentPayload,
+          }
+        : this.fitAssessmentRepository.create(assessmentPayload);
       if (syntheticMetadata?.isSynthetic) {
         applySyntheticMetadata(assessment, syntheticMetadata);
       }

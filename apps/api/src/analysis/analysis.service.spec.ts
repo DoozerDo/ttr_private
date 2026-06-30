@@ -1603,6 +1603,98 @@ const sampleScoringV2: CxFitV2Result = {
     );
   });
 
+  it('updates the persisted latest assessment row so by-id reads back the canonical result', async () => {
+    const existingAssessment: FitAssessment = {
+      id: 'fit-stale',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: baseline.version,
+      overallScore: 71,
+      verdict: FitAssessmentVerdict.CONSIDER,
+      dimensionScores: {
+        experienceAlignment: 18,
+        leadershipLevel: 15,
+        technicalPlatformFit: 14,
+        industryContext: 12,
+        strategicTacticalFit: 12,
+      },
+      strengths: ['stale'],
+      gaps: ['stale gap'],
+      complianceFlags: [],
+      scoringV2: {
+        ...sampleScoringV2,
+        score: 71,
+      },
+      inputsHash: 'stale-hash',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    baselineRepository.createQueryBuilder.mockReturnValue({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue({
+        ...baseline,
+        latestAssessmentId: existingAssessment.id,
+        sections: baselineSections,
+        parsedRecords: baseline.parsedRecords,
+      }),
+    });
+
+    fitAssessmentRepository.findOne.mockImplementation(({ where }) => {
+      if (where?.id === existingAssessment.id) {
+        return Promise.resolve(existingAssessment);
+      }
+      return Promise.resolve(null);
+    });
+
+    let persistedAssessment: FitAssessment | null = null;
+    fitAssessmentRepository.save.mockImplementation(async (payload) => {
+      persistedAssessment = {
+        ...(payload as FitAssessment),
+        id: (payload as FitAssessment).id ?? 'fit-fresh',
+        createdAt: existingAssessment.createdAt,
+        updatedAt: new Date(),
+      } as FitAssessment;
+      return persistedAssessment;
+    });
+
+    const runResult = await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+      baselineVersion: baseline.version,
+    });
+
+    expect(runResult.assessmentId).toBe(existingAssessment.id);
+    expect(runResult.overallScore).toBe(sampleScoringV2.score);
+    expect(fitAssessmentRepository.findOne).toHaveBeenCalledWith({
+      where: {
+        id: existingAssessment.id,
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'b-1',
+      },
+    });
+    expect(persistedAssessment?.id).toBe(existingAssessment.id);
+    expect(persistedAssessment?.overallScore).toBe(sampleScoringV2.score);
+    expect(persistedAssessment?.scoringV2?.score).toBe(sampleScoringV2.score);
+
+    fitAssessmentQueryBuilder.getOne.mockResolvedValueOnce(persistedAssessment);
+
+    const readResult = await service.getFitAssessmentById(
+      'user-1',
+      existingAssessment.id,
+    );
+
+    expect(readResult.assessmentId).toBe(existingAssessment.id);
+    expect(readResult.overallScore).toBe(sampleScoringV2.score);
+    expect(readResult.scoring_v2?.score).toBe(sampleScoringV2.score);
+  });
+
   it('loads the canonical baseline for runFitAssessment without verifiedBaseline and scores once', async () => {
     const selectedJob = {
       ...defaultJobRecord,
