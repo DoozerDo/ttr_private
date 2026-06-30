@@ -12692,10 +12692,18 @@ export default function StudioPage() {
       }
     }
 
-    const autoStartAlreadyAttempted =
-      generationReadyAutoStartRef.current === signature ||
-      latch === "started" ||
+    const signatureLatched = generationReadyAutoStartRef.current === signature;
+    const signatureLatchIsCompletionAware =
+      signatureLatched && (generatingNow || artifactsExist);
+    const storageLatchIsCompletionAware =
+      (latch === "started" && (generatingNow || artifactsExist)) ||
       (latch === "succeeded" && artifactsExist);
+    const autoStartAlreadyAttempted =
+      signatureLatchIsCompletionAware || storageLatchIsCompletionAware;
+
+    if (signatureLatched && !signatureLatchIsCompletionAware && !storageLatchIsCompletionAware) {
+      generationReadyAutoStartRef.current = null;
+    }
     if (autoStartAlreadyAttempted) {
       if (debugAutoGenerationEnabled) {
         console.log("[STUDIO][AUTO_GEN][SKIP]", {
