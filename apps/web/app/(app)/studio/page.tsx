@@ -2581,7 +2581,7 @@ export default function StudioPage() {
         !isMinimalResumeArtifactPayload(authorityPayload.resume.responseBody)
       ) {
         setStudioArtifactPairStatus("completed");
-        suppressAutoGenerationRef.current = true;
+        suppressAutoGenerationRef.current = false;
         setStudioArtifactsPayload(authorityPayload);
       }
       return;
