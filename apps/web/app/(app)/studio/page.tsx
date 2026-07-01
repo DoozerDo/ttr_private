@@ -3209,15 +3209,11 @@ export default function StudioPage() {
       } else if (pairStatus !== "missing" || !hasExistingPresenterResponses) {
         setStudioArtifactPairStatus(pairStatus);
       }
-      // If hydration confirms artifacts are missing (or only failed with no usable persisted artifacts),
-      // allow auto-generation to proceed afterwards. Only suppress while artifacts are in-flight or completed.
+      // Only suppress auto-generation while generation is actively in-flight or both artifacts are truly
+      // completed. Persisted failed/unusable artifacts must not suppress shell_auto.
       suppressAutoGenerationRef.current =
         pairStatus === "in_progress" ||
-        pairStatus === "completed" ||
-        (pairStatus === "missing" &&
-          Boolean(resumeResponse) &&
-          Boolean(coverResponse) &&
-          !isMinimalResumeArtifactPayload(resumeResponse));
+        pairStatus === "completed";
     };
 
     void (async () => {

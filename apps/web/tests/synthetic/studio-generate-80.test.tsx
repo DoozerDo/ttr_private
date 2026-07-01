@@ -270,6 +270,62 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
     expect(coverPosts).toBe(1);
   }, 120_000);
 
+  it("shell_auto regenerates once when persisted artifacts are failed/unusable", async () => {
+    persisted.resume = {
+      responseBody: {
+        status: "failed",
+        generationStatus: "error",
+        exportReady: false,
+        resumeResult: {
+          artifactType: "resume",
+          generationState: "generated_unusable",
+          qualityStatus: "failed",
+          exportReady: false,
+          preview: {
+            summary: "Stale failed resume.",
+            experience: [],
+            skillsAndTools: { tools: [] },
+          },
+        },
+      },
+    };
+    persisted.coverLetter = {
+      responseBody: {
+        status: "failed",
+        generationStatus: "error",
+        exportReady: false,
+        coverLetterResult: {
+          artifactType: "cover_letter",
+          generationState: "generated_unusable",
+          qualityStatus: "failed",
+          exportReady: false,
+          preview: { paragraphs: [] },
+        },
+      },
+    };
+
+    const StudioPage = (await import("@/app/(app)/studio/page")).default;
+    render(<StudioPage />);
+
+    await waitFor(() => {
+      expect(resumePosts).toBe(1);
+      expect(coverPosts).toBe(1);
+    }, { timeout: 120_000 });
+
+    await expect(screen.findByTestId("studio-resume-ready-panel")).resolves.toBeTruthy();
+    await expect(screen.findByTestId("studio-cover-ready-panel")).resolves.toBeTruthy();
+    expect(screen.queryByText(/Resume draft needs edits/i)).toBeNull();
+    expect(screen.queryByText(/Cover letter unavailable/i)).toBeNull();
+
+    cleanup();
+    render(<StudioPage />);
+
+    await expect(screen.findByTestId("studio-resume-ready-panel")).resolves.toBeTruthy();
+    await expect(screen.findByTestId("studio-cover-ready-panel")).resolves.toBeTruthy();
+    expect(resumePosts).toBe(1);
+    expect(coverPosts).toBe(1);
+  }, 120_000);
+
   it("score 83 + usable baseline completes generate + persist + reload loop", async () => {
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
