@@ -3310,8 +3310,8 @@ export class CoverLettersService {
   }
 
   private detectKeywordStuffing(paragraphs: string[]) {
-    const tokenCounts = new Map<string, number>();
     for (const paragraph of paragraphs) {
+      const tokenCounts = new Map<string, number>();
       const tokens =
         paragraph
           .toLowerCase()
@@ -3320,8 +3320,11 @@ export class CoverLettersService {
       for (const token of tokens) {
         tokenCounts.set(token, (tokenCounts.get(token) ?? 0) + 1);
       }
+      if ([...tokenCounts.values()].some((count) => count >= 10)) {
+        return true;
+      }
     }
-    return [...tokenCounts.values()].some((count) => count >= 10);
+    return false;
   }
 
   private detectJobDescriptionEcho(

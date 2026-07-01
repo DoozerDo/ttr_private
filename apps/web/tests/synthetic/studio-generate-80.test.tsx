@@ -1,15 +1,15 @@
 import React from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 
 // Studio is a client component that depends on Next's navigation hooks.
 vi.mock("next/navigation", () => {
   const searchParams = new URLSearchParams();
   searchParams.set("baselineId", "base-80");
-  searchParams.set("baselineVersionId", "basev-1");
+  searchParams.set("baselineVersionId", "base-version-1");
   searchParams.set("jobId", "job-80");
-  searchParams.set("intent", "generate");
+  searchParams.set("analysisId", "analysis-80");
+  searchParams.set("assessmentId", "analysis-80");
   searchParams.set("debugAuthority", "1");
   return {
     usePathname: () => "/studio",
@@ -36,7 +36,8 @@ vi.mock("@/lib/assessmentSource", () => ({
   fetchLatestAssessmentForBaseline: async () => ({
     assessmentId: "analysis-80",
     baselineId: "base-80",
-    score: 85,
+    baselineVersionId: "base-version-1",
+    score: 88,
     createdAt: "2026-05-27T00:00:00.000Z",
     complianceFlags: [],
     scoringReliability: "ok",
@@ -80,35 +81,67 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
   };
 
   const renderableResume = {
-    resumeResult: {
-      artifactType: "resume",
-      generationState: "generated_usable",
-      qualityStatus: "pass",
-      qualityGate: { status: "pass", reasons: [] },
-      exportReady: true,
-      exports: { docx: true, pdf: true },
-      preview: {
+    ok: true,
+    status: "success",
+    generationStatus: "success",
+    exportReady: true,
+    blocked: false,
+    baselineId: "base-80",
+    baselineVersionId: "base-version-1",
+    jobId: "job-80",
+    sections: [],
+    compliance_flags: [],
+    compliance_blocked: false,
+    audit_id: "audit-resume-80",
+    auditId: "audit-resume-80",
+    baseline_version_hash: "hash-80",
+    quality: "optimized",
+    traceMap: {},
+    debugTrace: { passed: true, failures: [], traceCoverage: 100, unusedEvidence: [], selectedEvidence: [] },
+    exports: { docx: true, pdf: true },
+    preview: {
+      resume: {
         summary: "Support Operations leader.",
         experience: [{ company: "Acme", roleTitle: "Ops Lead", dateRange: "2022-2026", bullets: ["Did thing."] }],
         skillsAndTools: { tools: ["Zendesk"] },
       },
-      correctionReasons: [],
-      actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
     },
+    trackerEntryId: null,
+    trackerStatus: null,
+    opportunityId: null,
+    claimRiskSummary: null,
+    gapAnalysis: null,
+    gapGuidance: null,
+    display: { title: "Resume generated", description: "Verified baseline evidence was assembled into a draft.", reasons: [] },
+    safeDisplay: { title: "Resume generated", description: "Verified baseline evidence was assembled into a draft.", reasons: [] },
+    internal: {},
   };
 
   const renderableCover = {
-    coverLetterResult: {
-      artifactType: "cover_letter",
-      generationState: "generated_usable",
-      qualityStatus: "pass",
-      qualityGate: { status: "pass", reasons: [] },
-      exportReady: true,
-      exports: { docx: true, pdf: true },
-      preview: { paragraphs: ["Hello.", "I am a fit.", "Thanks."] },
-      correctionReasons: [],
-      actions: { canEdit: false, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
-    },
+    ok: true,
+    status: "success",
+    generationStatus: "success",
+    exportReady: true,
+    baselineId: "base-80",
+    baselineVersionId: "base-version-1",
+    jobId: "job-80",
+    content: "Hello.\n\nI am a fit.\n\nThanks.",
+    generatorType: "template",
+    generatorVersion: "test",
+    closingTemplateKey: "default",
+    generationInputsHash: "hash-80",
+    preview: { coverLetter: { paragraphs: ["Hello.", "I am a fit.", "Thanks."] } },
+    compliance_flags: [],
+    audit_id: "audit-cover-80",
+    auditId: "audit-cover-80",
+    baseline_version_hash: "hash-80",
+    exports: { docx: true, pdf: true },
+    display: { title: "Cover letter generated successfully", description: "Your cover letter draft is ready for preview and export.", reasons: [] },
+    safeDisplay: { title: "Cover letter generated successfully", description: "Your cover letter draft is ready for preview and export.", reasons: [] },
+    traceMap: {},
+    debugTrace: { passed: true, failures: [], traceCoverage: 100, unusedEvidence: [], selectedEvidence: [] },
+    evidenceDetailsMap: {},
+    internal: {},
   };
 
   beforeEach(() => {
@@ -118,7 +151,7 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
     persisted.coverLetter = null;
 
     // JSDOM localStorage is the only state allowed to survive "reload" in this test.
-    window.localStorage.clear();
+    window.localStorage?.clear?.();
 
     // Mock fetch at the boundary the Studio UI uses.
     vi.stubGlobal(
@@ -132,8 +165,8 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
           return jsonResponse({
             resume: persisted.resume,
             coverLetter: persisted.coverLetter,
-            resumeResult: persisted.resume ? (persisted.resume.responseBody as any)?.resumeResult ?? null : null,
-            coverLetterResult: persisted.coverLetter ? (persisted.coverLetter.responseBody as any)?.coverLetterResult ?? null : null,
+            resumeResult: persisted.resume ? (persisted.resume.responseBody as any) : null,
+            coverLetterResult: persisted.coverLetter ? (persisted.coverLetter.responseBody as any) : null,
             generationContractVersion: persisted.generationContractVersion,
           });
         }
@@ -143,25 +176,44 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
         if (url === "/api/cover-letters/readiness" && method === "POST") return jsonResponse(baselineUsableReadinessPayload);
 
         // Generation: must succeed exactly once each and must persist artifacts (Studio reload reads them back).
-        if (url === "/api/resume/generate" && method === "POST") {
+        if ((url === "/api/resume" || url === "/api/resume/generate") && method === "POST") {
           resumePosts += 1;
           // Persist into the same store returned by /api/studio/artifacts.
           persisted.resume = { responseBody: renderableResume };
           return jsonResponse(renderableResume);
         }
-        if (url === "/api/cover-letters/generate" && method === "POST") {
+        if ((url === "/api/cover-letters" || url === "/api/cover-letters/generate") && method === "POST") {
           coverPosts += 1;
           persisted.coverLetter = { responseBody: renderableCover };
           return jsonResponse(renderableCover);
         }
 
         // Studio pulls baselines for identity; minimal happy-path response.
+        if (url.includes("/api/baselines/") && url.includes("/blocks")) {
+          return jsonResponse({
+            baseline_version_id: "base-version-1",
+            baseline_version_hash: "hash-80",
+            blocks: [
+              { id: "block-1", section_type: "EXPERIENCE", title: "Professional Experience", content: "Acme | Ops Lead", include_tag: "always", order_index: 1 },
+            ],
+          });
+        }
         if (url.startsWith("/api/baselines")) return jsonResponse([{ id: "base-80", status: "ACTIVE" }]);
         if (url.startsWith("/api/jobs")) return jsonResponse([{ id: "job-80", title: "Local scoring validation role", company: "TargetThisRole" }]);
 
         // Fit assessments list route used by assessmentSource in non-mocked paths; keep safe.
         if (url.startsWith("/api/analysis/fit-assessments")) {
-          return jsonResponse({ assessments: [{ id: "analysis-80", baselineId: "base-80", overallScore: 85, createdAt: "2026-05-27T00:00:00.000Z" }] });
+          return jsonResponse({
+            assessmentId: "analysis-80",
+            id: "analysis-80",
+            baselineId: "base-80",
+            baselineVersionId: "base-version-1",
+            overallScore: 88,
+            score: 88,
+            scoring_v2: { score: 88 },
+            scoringV2: { score: 88 },
+            createdAt: "2026-05-27T00:00:00.000Z",
+          });
         }
 
         // Anything else: fail fast so the regression catches new hidden dependencies.
@@ -177,31 +229,17 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
   });
 
   it("proves the beta loop contract without external API availability", async () => {
-    const user = userEvent.setup();
-
     // Import lazily so mocks apply.
     const StudioPage = (await import("@/app/(app)/studio/page")).default;
     render(<StudioPage />);
 
-    // 1) usable verified baseline exists (readiness endpoints resolved) and 2) score>=80 (mocked assessment).
-    // 3) Generation controls are available: "not generated yet" shells must include generate CTAs.
+    // shell_auto should start without user clicks once the READY contract is hydrated.
     await waitFor(() => {
-      expect(screen.queryByText(/generation unavailable/i)).toBeNull();
+      expect(resumePosts).toBe(1);
+      expect(coverPosts).toBe(1);
     });
 
-    // Trigger resume generation.
-    const resumeGenerateButton = await screen.findByTestId("studio-generate-resume-button");
-    await user.click(resumeGenerateButton);
-
-    // Trigger cover letter generation.
-    const coverGenerateButton = await screen.findByTestId("studio-generate-cover-button");
-    await user.click(coverGenerateButton);
-
-    // 4/5) Exactly once each.
-    await waitFor(() => expect(resumePosts).toBe(1));
-    await waitFor(() => expect(coverPosts).toBe(1));
-
-    // 6) Persisted artifacts render in Studio after generation.
+    // 2/3) Persisted artifacts render in Studio after generation.
     await expect(screen.findByTestId("studio-resume-ready-panel")).resolves.toBeTruthy();
     await expect(screen.findByTestId("studio-cover-ready-panel")).resolves.toBeTruthy();
     await expect(screen.findByTestId("studio-materials-completeness")).resolves.toBeTruthy();
@@ -217,7 +255,7 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
     cleanup();
     render(<StudioPage />);
 
-    // 7) Reload renders both generated artifacts; 8/9/10/11) no contradictory prompts.
+    // Reload renders both generated artifacts; no contradictory prompts.
     await expect(screen.findByTestId("studio-resume-ready-panel")).resolves.toBeTruthy();
     await expect(screen.findByTestId("studio-cover-ready-panel")).resolves.toBeTruthy();
     await expect(screen.findByTestId("studio-materials-completeness")).resolves.toBeTruthy();
@@ -233,8 +271,6 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
   }, 120_000);
 
   it("score 83 + usable baseline completes generate + persist + reload loop", async () => {
-    const user = userEvent.setup();
-
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : String((input as any)?.url ?? input);
@@ -244,8 +280,8 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
         return jsonResponse({
           resume: persisted.resume,
           coverLetter: persisted.coverLetter,
-          resumeResult: persisted.resume ? (persisted.resume.responseBody as any)?.resumeResult ?? null : null,
-          coverLetterResult: persisted.coverLetter ? (persisted.coverLetter.responseBody as any)?.coverLetterResult ?? null : null,
+          resumeResult: persisted.resume ? (persisted.resume.responseBody as any) : null,
+          coverLetterResult: persisted.coverLetter ? (persisted.coverLetter.responseBody as any) : null,
           generationContractVersion: persisted.generationContractVersion,
         });
       }
@@ -273,9 +309,9 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
     render(<StudioPage />);
 
     const resumeGenerateButton = await screen.findByTestId("studio-generate-resume-button");
-    await user.click(resumeGenerateButton);
+    fireEvent.click(resumeGenerateButton);
     const coverGenerateButton = await screen.findByTestId("studio-generate-cover-button");
-    await user.click(coverGenerateButton);
+    fireEvent.click(coverGenerateButton);
 
     await waitFor(() => expect(resumePosts).toBe(1));
     await waitFor(() => expect(coverPosts).toBe(1));
@@ -295,8 +331,6 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
   }, 120_000);
 
   it("does not show mixed authority when score is present but readiness fails with 400", async () => {
-    const user = userEvent.setup();
-
     // Override assessment score to 83 (the reported production contradiction) while forcing readiness to 400.
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {

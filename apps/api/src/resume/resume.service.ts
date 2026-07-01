@@ -6314,12 +6314,10 @@ export class ResumeService {
       responseKeys: response && typeof response === 'object' ? Object.keys(response as any) : [],
     });
 
-    if (!usePersistedResumeV2Authority || !resumeV2AuthorityResolution.usable) {
-      this.seedCanonicalEvidenceIntoGuardedResumePreview({
-        responseBody: response as unknown as Record<string, unknown>,
-        resumeInputSections,
-      });
-    }
+    this.seedCanonicalEvidenceIntoGuardedResumePreview({
+      responseBody: response as unknown as Record<string, unknown>,
+      resumeInputSections,
+    });
     this.assertResumeEvidenceBeforePersistence({
       responseBody: response as unknown as Record<string, unknown>,
       resumeInputSections,

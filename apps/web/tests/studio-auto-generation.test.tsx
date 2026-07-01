@@ -2914,6 +2914,7 @@ describe("Studio auto-generation", () => {
 
     expect(resumePostsAfter).toBe(resumePostsBefore);
     expect(coverPostsAfter).toBe(coverPostsBefore);
+    view.unmount();
   });
 
   it("does not duplicate resume generation across a remount while the request is in flight", async () => {

@@ -5738,6 +5738,93 @@ describe('ResumeService contract', () => {
     }
   });
 
+  it('persists a usable export-ready resume from authoritative ResumeV2 without falling into the internal evidence assertion failure', async () => {
+    const { service, studioArtifactsService } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsedRecords = (baseline as any).parsedRecords;
+    const originalScore = assessment.overallScore;
+    const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
+    assessment.overallScore = 83;
+    try {
+      (studioArtifactsService.readState as jest.Mock).mockResolvedValueOnce({
+        status: 'ready',
+        baselineId: baseline.id,
+        jobId: job.id,
+        baselineVersionId: baselineVersion.id,
+        baselineVersionHash: baselineVersion.hash,
+        jobFingerprint: 'job-fingerprint-1',
+        generationContractVersion: 'studio-artifacts-v1',
+        assessmentScore: assessment.overallScore,
+        resume: {
+          status: 'COMPLETED',
+          artifactCurrent: true,
+          usableCurrent: true,
+        },
+        coverLetter: {
+          status: 'COMPLETED',
+          artifactCurrent: true,
+          usableCurrent: true,
+        },
+      } as any);
+      baseline.sections = [];
+      (baseline as any).parsedRecords = [
+        {
+          id: 'parsed-usable',
+          baselineId: baseline.id,
+          baselineVersionId: baselineVersion.id,
+          createdAt: new Date('2026-03-01T00:00:00.000Z'),
+          flagsJson: {
+            reviewState: {
+              verified: true,
+            },
+          },
+          resumeV2Json: {
+            heading: { name: 'Test Candidate', contactLine: 'test@example.com' },
+            summary: 'Verified baseline summary.',
+            experience: [
+              {
+                company: 'Acme',
+                roleTitle: 'Engineer',
+                startDate: '2020-01',
+                endDate: '2021-01',
+                bullets: ['Delivered support improvements.'],
+              },
+            ],
+          },
+        },
+      ];
+
+      const result = await service.generateResume(
+        'user-1',
+        {
+          ...baseRequest,
+          forceRegenerate: true,
+          oneTap: false,
+          analysisId: 'analysis-verified',
+        } as any,
+        { preflightOnly: false, skipReadinessGate: true, enforceOneTap: false },
+      );
+
+      expect(result).toMatchObject({
+        ok: true,
+        status: 'success',
+        generationStatus: 'success',
+        exportReady: true,
+        exports: { docx: true, pdf: true },
+      });
+      expect(String((result as any).content ?? '')).toMatch(/\S+/);
+      expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
+      expect(studioArtifactsService.recordResumeFailure).not.toHaveBeenCalled();
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsedRecords;
+      assessment.overallScore = originalScore;
+      if (typeof originalFlag === 'string') process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
+      else delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
+    }
+  });
+
   it('keeps ResumeV2 authority sections visible to structured extraction by emitting sectionType on generated baseline sections', () => {
     const { service } = buildService();
     const buildSections = (service as any).buildResumeV2AuthoritySectionsFromNormalizedDocument as (

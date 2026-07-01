@@ -272,6 +272,59 @@ describe('cover letter post-processing', () => {
     expect(postProcessed.generation.content).toContain('Core Loop Candidate');
   });
 
+  it('does not flag keyword stuffing when support vocabulary is spread across paragraphs naturally', () => {
+    const { service } = buildService();
+    const jobContext = {
+      title: 'Support Operations Director',
+      company: 'Example SaaS',
+      responsibilities: [
+        'Own support operations, escalations, and workflow clarity',
+        'Partner with product and engineering on incident response',
+      ],
+      requirements: [
+        'Lead customer support teams with operational rigor',
+        'Improve service quality, queue health, and stakeholder communication',
+      ],
+    };
+    const generation = {
+      document: {
+        senderHeading: { name: 'Synthetic Runner' },
+        salutation: 'Dear Hiring Team,',
+        opening: 'I am excited to apply for the Support Operations Director role at Example SaaS.',
+        bodyParagraphs: [
+          'I have led support operations, incident response, and queue health improvements with clear operating rhythms.',
+          'My work has partnered product and engineering teams on service quality, workflow clarity, and stakeholder updates.',
+          'I would welcome the chance to help your support organization keep reliability, escalation handling, and service quality visible.',
+        ],
+        closingParagraph: 'Thank you for your consideration.',
+        signoff: 'Sincerely,',
+        signatureName: 'Synthetic Runner',
+      },
+      content:
+        'Dear Hiring Team,\n\n' +
+        'I am excited to apply for the Support Operations Director role at Example SaaS.\n\n' +
+        'I have led support operations, incident response, and queue health improvements with clear operating rhythms.\n\n' +
+        'My work has partnered product and engineering teams on service quality, workflow clarity, and stakeholder updates.\n\n' +
+        'I would welcome the chance to help your support organization keep reliability, escalation handling, and service quality visible.\n\n' +
+        'Thank you for your consideration.\n\n' +
+        'Sincerely,\n\n' +
+        'Synthetic Runner',
+      wordCount: 150,
+      greeting: 'Dear Hiring Team,',
+      paragraphs: ['Opening.', 'Body one.', 'Body two.'],
+      closingParagraphs: ['Closing.'],
+      paragraphEvidence: [],
+    };
+
+    const postProcessed = (service as any).applyCoverLetterPostProcessing(
+      generation,
+      jobContext,
+      'Synthetic Runner',
+    );
+
+    expect(postProcessed.flags).not.toContain('keyword_stuffing');
+  });
+
   it('still flags keyword_echo_overuse when JD keywords are repeated excessively', () => {
     const { service } = buildService();
     const jobContext = {

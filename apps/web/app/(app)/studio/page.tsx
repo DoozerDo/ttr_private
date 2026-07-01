@@ -8010,32 +8010,40 @@ export default function StudioPage() {
       if (presenter.status === "unknown") {
         throw new Error("Resume generation returned an unexpected response. Please try again.");
       }
-      const validatedResult = await generateWithRetry({
-        generate: async (strictMode) => {
-          if (!strictMode) return responsePayload;
-          const retryResponse = await fetch("/api/resume", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ 
-              ...normalizeGenerationPayload(buildResumePayload(Boolean(opts?.verifiedOnly)), "resume"), 
-              trustGateMode: "strict", 
-              ...(request.requestId ? { requestId: request.requestId } : {}),
-              ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
-              ...(opts?.regenerationSource ? { regenerationSource: opts.regenerationSource } : {}),
-            }), 
-          }); 
-          const retryPayload = await readResponsePayload(retryResponse);
-          if (!retryResponse.ok) {
-            throw new Error(formatErrorMessage(retryPayload, "Resume generation failed."));
-          }
-          const retryPresenter = presentResumeGeneration(retryPayload);
-          if (retryPresenter.status !== "success") {
-            throw new Error("Resume retry did not return a usable document.");
-          }
-          return retryPayload;
-        },
-        validate: (payload) => validateResumeOutput(payload),
-      });
+      const validatedResult =
+        opts?.regenerationSource === "shell_auto"
+          ? (() => {
+              const validation = validateResumeOutput(responsePayload);
+              return validation.valid
+                ? ({ success: true, output: responsePayload, attempts: 1 } as const)
+                : ({ success: false, attempts: 1, reasons: validation.reasons } as const);
+            })()
+          : await generateWithRetry({
+              generate: async (strictMode) => {
+                if (!strictMode) return responsePayload;
+                const retryResponse = await fetch("/api/resume", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ 
+                    ...normalizeGenerationPayload(buildResumePayload(Boolean(opts?.verifiedOnly)), "resume"), 
+                    trustGateMode: "strict", 
+                    ...(request.requestId ? { requestId: request.requestId } : {}),
+                    ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
+                    ...(opts?.regenerationSource ? { regenerationSource: opts.regenerationSource } : {}),
+                  }), 
+                }); 
+                const retryPayload = await readResponsePayload(retryResponse);
+                if (!retryResponse.ok) {
+                  throw new Error(formatErrorMessage(retryPayload, "Resume generation failed."));
+                }
+                const retryPresenter = presentResumeGeneration(retryPayload);
+                if (retryPresenter.status !== "success") {
+                  throw new Error("Resume retry did not return a usable document.");
+                }
+                return retryPayload;
+              },
+              validate: (payload) => validateResumeOutput(payload),
+            });
       if (
         isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
         activeResumeGenerationRef.current?.requestId !== request.requestId
@@ -8908,33 +8916,41 @@ export default function StudioPage() {
           http: { status: response.status, responsePayload },
         });
       }
-      const validatedResult = await generateWithRetry({
-        generate: async (strictMode) => {
-          if (!strictMode) return responsePayload;
-          const retryResponse = await fetch("/api/cover-letters", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ 
-              ...normalizeGenerationPayload(buildCoverLetterPayload(Boolean(opts?.verifiedOnly)), "cover_letter"), 
-              trustGateMode: "strict", 
-              ...(request.requestId ? { requestId: request.requestId } : {}),
-              ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
-              ...(opts?.regenerationSource ? { regenerationSource: opts.regenerationSource } : {}),
-            }), 
-          }); 
-          const retryPayload = await readResponsePayload(retryResponse);
-          if (!retryResponse.ok) {
-            throw new Error(formatErrorMessage(retryPayload, "Cover letter generation failed."));
-          }
-          const retryPresenter = presentCoverLetterGeneration(retryPayload);
-          if (retryPresenter.status !== "success") {
-            throw new Error("Cover letter retry did not return a usable document.");
-          }
-          return retryPayload;
-        },
-        validate: (payload) =>
-          validateCoverLetterOutput(payload, coverLetterJobDescriptionText ?? ""),
-      });
+      const validatedResult =
+        opts?.regenerationSource === "shell_auto"
+          ? (() => {
+              const validation = validateCoverLetterOutput(responsePayload, coverLetterJobDescriptionText ?? "");
+              return validation.valid
+                ? ({ success: true, output: responsePayload, attempts: 1 } as const)
+                : ({ success: false, attempts: 1, reasons: validation.reasons } as const);
+            })()
+          : await generateWithRetry({
+              generate: async (strictMode) => {
+                if (!strictMode) return responsePayload;
+                const retryResponse = await fetch("/api/cover-letters", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ 
+                    ...normalizeGenerationPayload(buildCoverLetterPayload(Boolean(opts?.verifiedOnly)), "cover_letter"), 
+                    trustGateMode: "strict", 
+                    ...(request.requestId ? { requestId: request.requestId } : {}),
+                    ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
+                    ...(opts?.regenerationSource ? { regenerationSource: opts.regenerationSource } : {}),
+                  }), 
+                }); 
+                const retryPayload = await readResponsePayload(retryResponse);
+                if (!retryResponse.ok) {
+                  throw new Error(formatErrorMessage(retryPayload, "Cover letter generation failed."));
+                }
+                const retryPresenter = presentCoverLetterGeneration(retryPayload);
+                if (retryPresenter.status !== "success") {
+                  throw new Error("Cover letter retry did not return a usable document.");
+                }
+                return retryPayload;
+              },
+              validate: (payload) =>
+                validateCoverLetterOutput(payload, coverLetterJobDescriptionText ?? ""),
+            });
       if (
         isWorkflowRequestStale(requestScope, currentWorkflowScopeRef.current) ||
         activeCoverGenerationRef.current?.requestId !== request.requestId
@@ -9271,6 +9287,9 @@ export default function StudioPage() {
     if (!verifiedClaimParams.length) return;
     if (studioArtifactPresentationStateRef.current === "hydrated") return;
     if (hasCompletedGeneration || studioArtifactPairStatus === "completed") return;
+    if (needsAutoGeneration || autoGenerationInFlight || resumeGenerating || coverGenerating || studioArtifactPairStatus === "in_progress") {
+      return;
+    }
     const nextKey = verifiedClaimParams.map(normalizeClaimText).sort().join("|");
     if (processedVerificationRef.current === nextKey) return;
     processedVerificationRef.current = nextKey;
