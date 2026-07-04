@@ -17,6 +17,7 @@ RUN npm ci --no-audit --no-fund
 FROM node:20.19.5 AS builder
 ARG GIT_SHA=unknown
 WORKDIR /usr/src/app
+ENV NEXT_PUBLIC_GIT_SHA=${GIT_SHA}
 COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY --from=deps /usr/src/app/package*.json ./
 COPY --from=deps /usr/src/app/apps/api/package*.json ./apps/api/
@@ -36,4 +37,3 @@ COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app ./
 EXPOSE 8080
 CMD ["sh","-lc","npm -w apps/web run start -- -H 0.0.0.0 -p ${PORT:-8080}"]
-

@@ -2063,8 +2063,8 @@ describe("Studio auto-generation", () => {
       baselineId: "base-1",
       baselineVersionId: "base-version-1",
     });
-    const previousWebBuildMarker = process.env.NEXT_PUBLIC_APP_VERSION;
-    process.env.NEXT_PUBLIC_APP_VERSION = "web-test-build-123";
+    const previousWebBuildMarker = process.env.NEXT_PUBLIC_GIT_SHA;
+    process.env.NEXT_PUBLIC_GIT_SHA = "web-test-build-123";
     const staleResumeScopeKey = "v1|resume|base-1|base-version-1|job-1|analysis-1";
     const staleCoverScopeKey = "v1|cover_letter|base-1|base-version-1|job-1|analysis-1";
     try {
@@ -2234,9 +2234,9 @@ describe("Studio auto-generation", () => {
       expect(screen.getByText(/COMPATIBILITY:.*88/i)).toBeInTheDocument();
     }, { timeout: 15000 });
     if (previousWebBuildMarker === undefined) {
-      delete process.env.NEXT_PUBLIC_APP_VERSION;
+      delete process.env.NEXT_PUBLIC_GIT_SHA;
     } else {
-      process.env.NEXT_PUBLIC_APP_VERSION = previousWebBuildMarker;
+      process.env.NEXT_PUBLIC_GIT_SHA = previousWebBuildMarker;
     }
   }, 15000);
 

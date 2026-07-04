@@ -5677,9 +5677,8 @@ export default function StudioPage() {
   ]);
 
   const studioBuildMarker =
-    process.env.NEXT_PUBLIC_APP_VERSION ??
-    process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ??
     process.env.NEXT_PUBLIC_GIT_SHA ??
+    process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ??
     process.env.NEXT_PUBLIC_COMMIT_SHA ??
     null;
 
