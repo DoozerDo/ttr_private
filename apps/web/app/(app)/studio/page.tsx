@@ -3214,6 +3214,29 @@ export default function StudioPage() {
       suppressAutoGenerationRef.current =
         pairStatus === "in_progress" ||
         pairStatus === "completed";
+
+      // If hydration only found failed/unusable artifacts, treat that as a recoverable starting point:
+      // clear any stale latch so the READY auto-start effect can invoke the canonical executor.
+      if (pairStatus !== "completed" && pairStatus !== "in_progress" && needsAutoGeneration) {
+        try {
+          const hydrationStorage = typeof window !== "undefined" ? window.localStorage : null;
+          const hydrationSessionStorage = typeof window !== "undefined" ? window.sessionStorage : null;
+          generationReadyAutoStartRef.current = null;
+          if (studioArtifactStorageKey) {
+            if (hydrationStorage && typeof hydrationStorage.removeItem === "function") {
+              hydrationStorage.removeItem(studioArtifactStorageKey);
+            }
+            if (hydrationSessionStorage && typeof hydrationSessionStorage.removeItem === "function") {
+              hydrationSessionStorage.removeItem(studioArtifactStorageKey);
+            }
+          }
+          if (studioArtifactStorageKey) {
+            getStudioAutoGenerationLatchStore().delete(studioArtifactStorageKey);
+          }
+        } catch {
+          // ignore
+        }
+      }
     };
 
     void (async () => {
