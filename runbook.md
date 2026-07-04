@@ -196,6 +196,7 @@ docker compose -f infra/docker/docker-compose.local.yml up -d --build
 cd infra/terraform
 terraform init
 terraform apply \
+  -var="git_sha=$(git rev-parse HEAD)" \
   -var="do_token=YOUR_DO_TOKEN" \
   -var='ssh_key_fingerprints=["YOUR_SSH_FINGERPRINT"]' \
   -var='allowed_ssh_cidrs=["YOUR_OFFICE_CIDR/32"]'
@@ -222,13 +223,14 @@ terraform apply \
 
 ### Deploy a new version
 ```
-export DEPLOY_HOST=YOUR_DROPLET_IP
-export GHCR_USERNAME=YOUR_GHCR_USERNAME
-export GHCR_TOKEN=YOUR_GHCR_PAT
-export DEPLOY_ENV_FILE=/tmp/targetthisrole.dev.env
-./infra/deploy/deploy-dev.sh
+cd infra/terraform
+terraform apply \
+  -var="git_sha=$(git rev-parse HEAD)" \
+  -var="do_token=YOUR_DO_TOKEN" \
+  -var='ssh_key_fingerprints=["YOUR_SSH_FINGERPRINT"]' \
+  -var='allowed_ssh_cidrs=["YOUR_OFFICE_CIDR/32"]'
 ```
-This copies `infra/docker/docker-compose.dev.yml` and `infra/docker/Caddyfile.dev` to `/opt/targetthisrole` on the droplet and runs `docker compose` from there.
+This updates the droplet bootstrap path, writes the resolved `GIT_SHA` into `/opt/targetthisrole/.env`, and runs the canonical `up.sh` preflight before Docker Compose starts the web and API containers.
 
 ### Verify
 - API health through the proxy: `https://app.dev.targetthisrole.ai/api/health`

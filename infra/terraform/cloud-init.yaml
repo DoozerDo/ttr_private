@@ -31,6 +31,18 @@ runcmd:
     #!/usr/bin/env bash
     set -euo pipefail
     cd /opt/targetthisrole
+    GIT_SHA="$(awk -F= '/^GIT_SHA=/{print $2; exit}' .env)"
+    if [[ -z "${GIT_SHA}" || "${GIT_SHA}" == "unknown" ]]; then
+      echo "ERROR: production build identity unavailable. The deployed web bundle must provide a real commit SHA." >&2
+      exit 1
+    fi
+    echo "Deploy preflight:"
+    echo "  - canonical deploy script path: /opt/targetthisrole/up.sh"
+    echo "  - compose file path: /opt/targetthisrole/docker-compose.yml"
+    echo "  - env file path: /opt/targetthisrole/.env"
+    echo "  - GIT_SHA present: yes"
+    echo "  - build arg GIT_SHA=${GIT_SHA}"
+    docker compose --env-file .env -f docker-compose.yml pull
     docker compose --env-file .env -f docker-compose.yml up -d
     EOF
   - chmod +x /opt/targetthisrole/up.sh

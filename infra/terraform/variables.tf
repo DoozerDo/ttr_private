@@ -89,6 +89,16 @@ variable "ghcr_token" {
   sensitive   = true
 }
 
+variable "git_sha" {
+  description = "Commit SHA for the deployed web bundle."
+  type        = string
+
+  validation {
+    condition     = trimspace(var.git_sha) != "" && lower(trimspace(var.git_sha)) != "unknown"
+    error_message = "git_sha is required and must not be unknown."
+  }
+}
+
 variable "ssh_private_key_path" {
   description = "Path to private key used by Terraform provisioners (local machine path)"
   type        = string

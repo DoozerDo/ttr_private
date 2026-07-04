@@ -104,6 +104,7 @@ resource "null_resource" "app_bootstrap" {
     caddy_email   = var.caddy_email
     postgres_host = digitalocean_database_cluster.postgres.host
     postgres_port = tostring(digitalocean_database_cluster.postgres.port)
+    git_sha       = var.git_sha
   }
 
   connection {
@@ -133,8 +134,9 @@ resource "null_resource" "app_bootstrap" {
     inline = [
       "cd /opt/targetthisrole",
       "docker login ghcr.io -u ${var.ghcr_username} -p ${var.ghcr_token}",
-      "docker compose --env-file .env -f docker-compose.yml pull",
-      "docker compose --env-file .env -f docker-compose.yml up -d",
+      "cat >/opt/targetthisrole/up.sh <<'EOF'\n#!/usr/bin/env bash\nset -euo pipefail\ncd /opt/targetthisrole\nGIT_SHA=\"$(awk -F= '/^GIT_SHA=/{print $2; exit}' .env)\"\nif [[ -z \"$${GIT_SHA}\" || \"$${GIT_SHA}\" == \"unknown\" ]]; then\n  echo \"ERROR: production build identity unavailable. The deployed web bundle must provide a real commit SHA.\" >&2\n  exit 1\nfi\necho \"Deploy preflight:\"\necho \"  - canonical deploy script path: /opt/targetthisrole/up.sh\"\necho \"  - compose file path: /opt/targetthisrole/docker-compose.yml\"\necho \"  - env file path: /opt/targetthisrole/.env\"\necho \"  - GIT_SHA present: yes\"\necho \"  - build arg GIT_SHA=$${GIT_SHA}\"\ndocker compose --env-file .env -f docker-compose.yml pull\ndocker compose --env-file .env -f docker-compose.yml up -d\nEOF",
+      "chmod +x /opt/targetthisrole/up.sh",
+      "/opt/targetthisrole/up.sh",
       "docker ps"
     ]
   }
