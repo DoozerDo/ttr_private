@@ -21,6 +21,7 @@ import { getMessageForResumeQualityReason, validateCoverLetterQuality, validateR
 import { buildExportPayload } from "../lib/exportPayload";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
 import { sanitizeRenderedTextValue } from "@/lib/renderedText";
+import { resolveWebBuildMarker } from "@/lib/webBuildMarker";
 import { resolveWorkflowOrchestrator, resolveWorkflowUnlockContext } from "@/lib/workflowOrchestrator";
 import { WorkflowAuthorityPanel } from "@/components/workflow/WorkflowAuthorityPanel";
 import { WorkflowActivityBanner } from "@/components/workflow/WorkflowActivityBanner";
@@ -5676,11 +5677,7 @@ export default function StudioPage() {
     requestedAnalysisId,
   ]);
 
-  const studioBuildMarker =
-    process.env.NEXT_PUBLIC_GIT_SHA ??
-    process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ??
-    process.env.NEXT_PUBLIC_COMMIT_SHA ??
-    null;
+  const studioBuildMarker = resolveWebBuildMarker();
 
   const orchestrationDebugSnapshot = useMemo(() => {
     const contractShouldStart = Boolean(needsAutoGeneration);

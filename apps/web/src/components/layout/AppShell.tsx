@@ -8,6 +8,7 @@ import { BetaGuideNudge } from "./BetaGuideNudge";
 import { UnlockPathBar } from "./UnlockPathBar";
 import { readLastAnalysis, type StoredAnalysisRecord } from "@/app/(app)/lib/session";
 import { ClientRequestTimeoutError, fetchWithTimeout } from "@/lib/fetchWithTimeout";
+import { resolveWebBuildMarker } from "@/lib/webBuildMarker";
 import { subscribeBaselineUpdated } from "@/src/lib/baseline-sync";
 import {
   ReportBugProvider,
@@ -16,11 +17,7 @@ import {
 
 const isDev = process.env.NODE_ENV === "development";
 const isDebugBuildIdEnabled = process.env.NEXT_PUBLIC_DEBUG_BUILD_ID === "true";
-const resolvedBuildSha =
-  process.env.NEXT_PUBLIC_GIT_SHA ??
-  process.env.NEXT_PUBLIC_RAILWAY_GIT_COMMIT_SHA ??
-  process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ??
-  "unknown";
+const resolvedBuildSha = resolveWebBuildMarker();
 const shortBuildSha = resolvedBuildSha.slice(0, 7);
 
 type StoredContext = {
