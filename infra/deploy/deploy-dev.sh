@@ -14,16 +14,31 @@ if [[ -z "${GIT_SHA}" ]]; then
   exit 1
 fi
 
+REMOTE_ENV_FILE="$(mktemp)"
+cleanup() {
+  rm -f "${REMOTE_ENV_FILE}" "${REMOTE_ENV_FILE}.tmp"
+}
+trap cleanup EXIT
+
+if [[ -n "${DEPLOY_ENV_FILE}" ]]; then
+  cp "${DEPLOY_ENV_FILE}" "${REMOTE_ENV_FILE}"
+else
+  : > "${REMOTE_ENV_FILE}"
+fi
+
+grep -v '^GIT_SHA=' "${REMOTE_ENV_FILE}" > "${REMOTE_ENV_FILE}.tmp" || true
+mv "${REMOTE_ENV_FILE}.tmp" "${REMOTE_ENV_FILE}"
+printf 'GIT_SHA=%s\n' "${GIT_SHA}" >> "${REMOTE_ENV_FILE}"
+
+echo "Deploy preflight: GIT_SHA=${GIT_SHA}"
+
 ssh "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p ${DEPLOY_PATH}"
 
 scp infra/docker/docker-compose.dev.yml "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/docker-compose.dev.yml"
 scp infra/docker/Caddyfile "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/Caddyfile"
-
-if [[ -n "${DEPLOY_ENV_FILE}" ]]; then
-  scp "${DEPLOY_ENV_FILE}" "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/.env"
-fi
+scp "${REMOTE_ENV_FILE}" "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/.env"
 
 ssh "${DEPLOY_USER}@${DEPLOY_HOST}" "\
   echo '${GHCR_TOKEN}' | sudo docker login ghcr.io -u '${GHCR_USERNAME}' --password-stdin && \
-  GIT_SHA='${GIT_SHA}' sudo docker compose -f ${DEPLOY_PATH}/docker-compose.dev.yml pull && \
-  GIT_SHA='${GIT_SHA}' sudo docker compose -f ${DEPLOY_PATH}/docker-compose.dev.yml up -d"
+  sudo docker compose --env-file ${DEPLOY_PATH}/.env -f ${DEPLOY_PATH}/docker-compose.dev.yml pull && \
+  sudo docker compose --env-file ${DEPLOY_PATH}/.env -f ${DEPLOY_PATH}/docker-compose.dev.yml up -d"
