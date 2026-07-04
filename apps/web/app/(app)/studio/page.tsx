@@ -5677,7 +5677,8 @@ export default function StudioPage() {
     requestedAnalysisId,
   ]);
 
-  const studioBuildMarker = resolveWebBuildMarker();
+  const webBuildMarker = resolveWebBuildMarker();
+  const studioBuildMarker = webBuildMarker.marker;
 
   const orchestrationDebugSnapshot = useMemo(() => {
     const contractShouldStart = Boolean(needsAutoGeneration);
@@ -5757,6 +5758,7 @@ export default function StudioPage() {
 
     return {
       webBuildMarker: studioBuildMarker,
+      webBuildMarkerMissing: webBuildMarker.missing,
       qualifiedForGeneration,
       qualifiedForStudioOrchestration,
       activeGenerationReadiness,

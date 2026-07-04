@@ -12,7 +12,11 @@ describe("resolveWebBuildMarker", () => {
 
     const { resolveWebBuildMarker } = await import("../lib/webBuildMarker");
 
-    expect(resolveWebBuildMarker()).toBe("abc123def456");
+    expect(resolveWebBuildMarker()).toEqual({
+      marker: "abc123def456",
+      source: "NEXT_PUBLIC_GIT_SHA",
+      missing: false,
+    });
   });
 
   it("falls back to Railway commit metadata when NEXT_PUBLIC_GIT_SHA is absent", async () => {
@@ -21,16 +25,22 @@ describe("resolveWebBuildMarker", () => {
 
     const { resolveWebBuildMarker } = await import("../lib/webBuildMarker");
 
-    expect(resolveWebBuildMarker()).toBe("railway-commit-789");
+    expect(resolveWebBuildMarker()).toEqual({
+      marker: "railway-commit-789",
+      source: "NEXT_PUBLIC_RAILWAY_GIT_COMMIT_SHA",
+      missing: false,
+    });
   });
 
-  it("fails closed in production when no build marker is available", async () => {
+  it("returns an explicit production-missing marker state when no build marker is available", async () => {
     vi.stubEnv("NODE_ENV", "production");
 
     const { resolveWebBuildMarker } = await import("../lib/webBuildMarker");
 
-    expect(() => resolveWebBuildMarker()).toThrow(
-      /Missing production web build marker/i,
-    );
+    expect(resolveWebBuildMarker()).toEqual({
+      marker: "unknown",
+      source: null,
+      missing: true,
+    });
   });
 });

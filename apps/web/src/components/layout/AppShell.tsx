@@ -17,7 +17,8 @@ import {
 
 const isDev = process.env.NODE_ENV === "development";
 const isDebugBuildIdEnabled = process.env.NEXT_PUBLIC_DEBUG_BUILD_ID === "true";
-const resolvedBuildSha = resolveWebBuildMarker();
+const webBuildMarker = resolveWebBuildMarker();
+const resolvedBuildSha = webBuildMarker.marker;
 const shortBuildSha = resolvedBuildSha.slice(0, 7);
 
 type StoredContext = {
@@ -618,6 +619,14 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
   return (
     <ReportBugProvider userId={userId}>
       <div className="flex min-h-screen bg-[var(--bg-app)] text-[var(--text-primary)]">
+        {webBuildMarker.missing ? (
+          <div
+            className="border-b border-amber-400/40 bg-amber-500/10 px-6 py-2 text-xs text-amber-100"
+            data-testid="web-build-marker-diagnostic"
+          >
+            Production build identity unavailable. The deployed web bundle must provide a real commit SHA.
+          </div>
+        ) : null}
         <div className="flex min-h-screen flex-1 flex-col">
           <main
             className={`flex-1 overflow-y-auto bg-[var(--bg-app)] pt-10 pb-8 ${

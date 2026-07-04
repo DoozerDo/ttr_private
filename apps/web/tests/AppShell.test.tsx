@@ -993,4 +993,5 @@ describe("AppShell unlock path navigation", () => {
       expect(mockRouterPush).toHaveBeenCalledWith("/target?baselineId=base-active");
     });
   });
+
 });
