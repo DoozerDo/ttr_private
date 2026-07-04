@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 
 const { spawnSync } = require("node:child_process");
+const { resolveBuildSha } = require("./build-identity.cjs");
+
+const { sha } = resolveBuildSha();
 
 const env = {
   ...process.env,
+  GIT_SHA: sha,
+  NEXT_PUBLIC_GIT_SHA: sha,
   BROWSERSLIST_IGNORE_OLD_DATA:
     process.env.BROWSERSLIST_IGNORE_OLD_DATA ?? "1",
   BASELINE_BROWSER_MAPPING_IGNORE_OLD_DATA:

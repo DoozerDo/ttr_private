@@ -7,6 +7,12 @@ DEPLOY_PATH=${DEPLOY_PATH:-/opt/targetthisrole}
 GHCR_USERNAME=${GHCR_USERNAME:?"Set GHCR_USERNAME for ghcr.io login."}
 GHCR_TOKEN=${GHCR_TOKEN:?"Set GHCR_TOKEN for ghcr.io login."}
 DEPLOY_ENV_FILE=${DEPLOY_ENV_FILE:-}
+GIT_SHA=${GIT_SHA:-$(git rev-parse HEAD 2>/dev/null || true)}
+
+if [[ -z "${GIT_SHA}" ]]; then
+  echo "ERROR: Unable to resolve GIT_SHA for production deploy. Run from a git checkout or set GIT_SHA explicitly." >&2
+  exit 1
+fi
 
 ssh "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p ${DEPLOY_PATH}"
 
@@ -19,5 +25,5 @@ fi
 
 ssh "${DEPLOY_USER}@${DEPLOY_HOST}" "\
   echo '${GHCR_TOKEN}' | sudo docker login ghcr.io -u '${GHCR_USERNAME}' --password-stdin && \
-  sudo docker compose -f ${DEPLOY_PATH}/docker-compose.dev.yml pull && \
-  sudo docker compose -f ${DEPLOY_PATH}/docker-compose.dev.yml up -d"
+  GIT_SHA='${GIT_SHA}' sudo docker compose -f ${DEPLOY_PATH}/docker-compose.dev.yml pull && \
+  GIT_SHA='${GIT_SHA}' sudo docker compose -f ${DEPLOY_PATH}/docker-compose.dev.yml up -d"
