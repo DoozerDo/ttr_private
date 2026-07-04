@@ -47,6 +47,8 @@ services:
     build:
       context: ../..
       dockerfile: apps/web/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     restart: unless-stopped
     env_file:
       - ../../apps/web/.env.local

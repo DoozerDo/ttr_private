@@ -212,6 +212,13 @@ function Invoke-ComposeRebuild {
         [switch]$NoDeps
     )
 
+    if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable("GIT_SHA"))) {
+        $gitSha = (git rev-parse HEAD 2>$null).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($gitSha)) {
+            $env:GIT_SHA = $gitSha
+        }
+    }
+
     # Full schema rebuild mode explicitly tears down volumes to avoid
     # persistent local Postgres drift versus migration history.
     if ($ResetDbVolume) {
