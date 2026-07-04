@@ -3217,11 +3217,27 @@ export default function StudioPage() {
 
       // If hydration only found failed/unusable artifacts, treat that as a recoverable starting point:
       // clear any stale latch so the READY auto-start effect can invoke the canonical executor.
-      if (pairStatus !== "completed" && pairStatus !== "in_progress" && needsAutoGeneration) {
+      if (pairStatus !== "completed" && pairStatus !== "in_progress") {
         try {
           const hydrationStorage = typeof window !== "undefined" ? window.localStorage : null;
           const hydrationSessionStorage = typeof window !== "undefined" ? window.sessionStorage : null;
           generationReadyAutoStartRef.current = null;
+          const hydrationScopeKeys = [
+            buildGenerationScopeKey({
+              artifactType: "resume",
+              baselineId: effectiveBaselineId ?? null,
+              baselineVersionId: effectiveBaselineVersionId ?? null,
+              jobId: effectiveJobId ?? null,
+              analysisId: requestedAnalysisId ?? null,
+            }),
+            buildGenerationScopeKey({
+              artifactType: "cover_letter",
+              baselineId: effectiveBaselineId ?? null,
+              baselineVersionId: effectiveBaselineVersionId ?? null,
+              jobId: effectiveJobId ?? null,
+              analysisId: requestedAnalysisId ?? null,
+            }),
+          ];
           if (studioArtifactStorageKey) {
             if (hydrationStorage && typeof hydrationStorage.removeItem === "function") {
               hydrationStorage.removeItem(studioArtifactStorageKey);
@@ -3230,6 +3246,10 @@ export default function StudioPage() {
               hydrationSessionStorage.removeItem(studioArtifactStorageKey);
             }
           }
+          hydrationScopeKeys.forEach((key) => {
+            generationScopeGuardRef.current.delete(key);
+            getStudioAutoGenerationLatchStore().delete(key);
+          });
           if (studioArtifactStorageKey) {
             getStudioAutoGenerationLatchStore().delete(studioArtifactStorageKey);
           }

@@ -2063,6 +2063,16 @@ describe("Studio auto-generation", () => {
       baselineId: "base-1",
       baselineVersionId: "base-version-1",
     });
+    const staleResumeScopeKey = "v1|resume|base-1|base-version-1|job-1|analysis-1";
+    const staleCoverScopeKey = "v1|cover_letter|base-1|base-version-1|job-1|analysis-1";
+    try {
+      (window as any).__ttrStudioGenerationScopeGuardStore = new Map([
+        [staleResumeScopeKey, { status: "started", startedAt: Date.now() - 60_000 }],
+        [staleCoverScopeKey, { status: "started", startedAt: Date.now() - 60_000 }],
+      ]);
+    } catch {
+      // ignore
+    }
 
     const failedArtifactsPayload = {
       status: "persisted_only_assessment_backed",
