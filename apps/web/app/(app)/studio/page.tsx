@@ -3033,7 +3033,12 @@ export default function StudioPage() {
       return;
     }
     const clearFailedHydrationGenerationScopes = () => {
-      if (studioArtifactPairStatus === "completed" || studioArtifactPairStatus === "in_progress") {
+      if (
+        (hasUsableResume && hasUsableCoverLetter) ||
+        autoGenerationInFlight ||
+        resumeGenerating ||
+        coverGenerating
+      ) {
         return;
       }
       try {

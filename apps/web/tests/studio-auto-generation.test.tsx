@@ -506,7 +506,7 @@ describe("Studio auto-generation", () => {
     });
     setFetchImplementation(fetchMock);
 
-    renderStudio();
+    const rendered = renderStudio();
 
     await waitFor(() => {
       expect(screen.getByTestId("studio-generation-readiness")).toBeInTheDocument();
