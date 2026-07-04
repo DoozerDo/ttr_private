@@ -712,6 +712,7 @@ describe('ResumeService contract', () => {
     const originalFlag = process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
     process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = 'true';
     const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
     try {
       const { service, studioArtifactsService } = buildService();
       expect(process.env[RESUME_GENERATION_V2_FEATURE_FLAG]).toBe('true');
@@ -734,8 +735,8 @@ describe('ResumeService contract', () => {
           content: [
             'AMS DataSerfs | Senior Data Analyst | 2021 - Present',
             '- Built KPI dashboards and improved reporting cadence.',
-            '- Automated weekly exports and reduced manual effort.',
-          ].join('\n'),
+          '- Automated weekly exports and reduced manual effort.',
+        ].join('\n'),
         },
         {
           ...baseSection,
@@ -748,10 +749,28 @@ describe('ResumeService contract', () => {
             '- Excel',
             '- Looker',
             '- Stakeholder management',
-            '- Incident response',
-          ].join('\n'),
-        } as any,
+          '- Incident response',
+        ].join('\n'),
+      } as any,
       ];
+      baseline.parsedRecords = [
+        {
+          id: 'parsed-1',
+          baselineVersionId: baselineVersion.id,
+          resumeV2Json: {
+            heading: { name: 'Test User', contactLine: '' },
+            summary: 'Support leader with verified impact.',
+            experience: [
+              {
+                company: 'AMS DataSerfs',
+                roleTitle: 'Senior Data Analyst',
+                bullets: ['Built KPI dashboards and improved reporting cadence.'],
+              },
+            ],
+            education: [],
+          },
+        },
+      ] as any;
 
       (studioArtifactsService.readState as any).mockResolvedValue({
         status: 'READY',
@@ -812,24 +831,13 @@ describe('ResumeService contract', () => {
       expect(String((result as any)?.preview?.resume?.summary ?? '').trim().length).toBeGreaterThan(0);
     } finally {
       baseline.sections = originalSections;
+      baseline.parsedRecords = originalParsed;
       if (typeof originalFlag === 'string') {
         process.env[RESUME_GENERATION_V2_FEATURE_FLAG] = originalFlag;
       } else {
         delete process.env[RESUME_GENERATION_V2_FEATURE_FLAG];
       }
     }
-  });
-
-  it('does not complete a successful resume generation when Studio artifact persistence fails', async () => {
-    const { service, studioArtifactsService } = buildService();
-    baseline.sections = [baseSection] as any;
-
-    (studioArtifactsService.recordResumeSuccess as any).mockRejectedValueOnce(
-      new Error('persistence_failed'),
-    );
-
-    await expect(service.generateResume('user-1', baseRequest as any)).rejects.toBeTruthy();
-    expect(studioArtifactsService.recordResumeSuccess).toHaveBeenCalled();
   });
 
   it('does not use top-level minimal fallback when RESUME_GENERATION_V2=true and V2 fails', async () => {

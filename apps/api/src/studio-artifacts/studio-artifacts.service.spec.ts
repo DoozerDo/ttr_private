@@ -1917,6 +1917,81 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
     });
   });
 
+  it('updates the existing authoritative resume artifact row in place when a successful shell_auto resume generation persists against the same scope', async () => {
+    const insertExecute = jest.fn()
+      .mockResolvedValueOnce({ raw: [] })
+      .mockResolvedValueOnce({ raw: [{ id: 'artifact-resume-9' }] });
+    const updateExecute = jest.fn().mockResolvedValue({ affected: 1 });
+    const findOne = jest.fn().mockResolvedValue({
+      id: 'artifact-resume-9',
+      resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+      resumeContent: 'resume-content',
+      resumeMetadata: { auditId: 'audit-1' },
+    });
+
+    const insertBuilder = {
+      insert: () => insertBuilder,
+      into: () => insertBuilder,
+      values: jest.fn(() => insertBuilder),
+      onConflict: () => insertBuilder,
+      returning: () => insertBuilder,
+      execute: insertExecute,
+    };
+    const updateBuilder = {
+      update: () => updateBuilder,
+      set: jest.fn(() => updateBuilder),
+      where: () => updateBuilder,
+      execute: updateExecute,
+    };
+    const createQueryBuilder = jest
+      .fn()
+      .mockImplementationOnce(() => insertBuilder as any)
+      .mockImplementationOnce(() => updateBuilder as any);
+    const repo = { createQueryBuilder, findOne } as any;
+    const service = buildServiceWithRepo(repo);
+
+    const artifactId = await service.recordResumeSuccess({
+      userId: 'u-1',
+      baselineId: 'b-1',
+      jobId: 'j-1',
+      baselineVersionId: 'bv-1',
+      baselineVersionHash: 'hash-1',
+      jobFingerprint: 'job-fp-1',
+      inputsHash: 'inputs-1',
+      analysisId: 'analysis-1',
+      responseBody: {
+        internalTrace: { usedEvidenceIds: ['e-1'] },
+        preview: {
+          resume: {
+            heading: { name: 'Test User', contactLine: 'Test City' },
+            summary: 'Supported summary from evidence.',
+            summaryEvidenceIds: ['e-1'],
+            experience: [
+              {
+                company: 'Acme',
+                roleTitle: 'Support Operations Lead',
+                dateRange: '2021 - Present',
+                bullets: [
+                  {
+                    text: 'Improved SLA adherence through clearer triage and escalation routing.',
+                    sourceEvidenceIds: ['e-1'],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+      content: 'resume-content',
+      metadata: { auditId: 'audit-1' },
+    });
+
+    expect(artifactId).toBe('artifact-resume-9');
+    expect(insertExecute).toHaveBeenCalledTimes(1);
+    expect(updateExecute).toHaveBeenCalledTimes(1);
+    expect(findOne).toHaveBeenCalledWith({ where: { userId: 'u-1', baselineId: 'b-1', jobId: 'j-1' } });
+  });
+
   it('persists a canonical cover letter artifact row with baseline/job/analysis context and payload metadata', async () => {
     const insertExecute = jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-cover-1' }] });
     const createQueryBuilder = jest.fn(() => ({

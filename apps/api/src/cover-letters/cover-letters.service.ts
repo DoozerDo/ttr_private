@@ -1081,20 +1081,31 @@ export class CoverLettersService {
           // ignore diagnostics failures
         }
       }
-      await this.applicationsService.upsertApplicationForPair({
-        userId,
-        baselineId: studioArtifactContext.baselineId,
-        jobId: studioArtifactContext.jobId,
-        companyName: draft.job.company ?? draft.jobContext.company ?? draft.job.title ?? 'Unknown company',
-        roleTitle: draft.job.title ?? draft.jobContext.title ?? 'Untitled role',
-        jobUrl: draft.job.canonicalUrl ?? draft.job.sourceUrl ?? null,
-        analysisId: draft.analysisAssessment.id ?? input.analysisId ?? null,
-        baselineVersionId: draft.baselineVersion.id,
-        fitScore: draft.analysisAssessment.overallScore ?? null,
-        resumeArtifactId: draft.complianceResult.audit.id,
-        resumeArtifactType: 'cover',
-        resumeArtifactFormat: 'docx',
-      });
+      try {
+        await this.applicationsService.upsertApplicationForPair({
+          userId,
+          baselineId: studioArtifactContext.baselineId,
+          jobId: studioArtifactContext.jobId,
+          companyName: draft.job.company ?? draft.jobContext.company ?? draft.job.title ?? 'Unknown company',
+          roleTitle: draft.job.title ?? draft.jobContext.title ?? 'Untitled role',
+          jobUrl: draft.job.canonicalUrl ?? draft.job.sourceUrl ?? null,
+          analysisId: draft.analysisAssessment.id ?? input.analysisId ?? null,
+          baselineVersionId: draft.baselineVersion.id,
+          fitScore: draft.analysisAssessment.overallScore ?? null,
+          resumeArtifactId: draft.complianceResult.audit.id,
+          resumeArtifactType: 'cover',
+          resumeArtifactFormat: 'docx',
+        });
+      } catch (sideEffectError) {
+        this.logger.warn('[cover-letter-generation] application write failed after cover-letter persistence', {
+          userId,
+          baselineId: studioArtifactContext.baselineId,
+          jobId: studioArtifactContext.jobId,
+          analysisId: draft.analysisAssessment.id ?? input.analysisId ?? null,
+          errorName: sideEffectError instanceof Error ? sideEffectError.name : typeof sideEffectError,
+          errorMessage: sideEffectError instanceof Error ? sideEffectError.message : String(sideEffectError),
+        });
+      }
 
       if (
         (process.env.NODE_ENV ?? 'development') !== 'production' &&

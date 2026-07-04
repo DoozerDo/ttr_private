@@ -5520,9 +5520,10 @@ export class ResumeService {
     // In verified-only (`oneTap`) generation we intentionally avoid creating/updating downstream
     // application/opportunity records. Those are tied to tailored generation and can otherwise
     // create misleading "ready" states during limited recovery.
-    const trackerEntry = request.oneTap
-      ? null
-      : await this.applicationsService.upsertPreparedFromResumeGeneration(
+    let trackerEntry: { id: string; status?: string } | null = null;
+    if (!request.oneTap) {
+      try {
+        trackerEntry = await this.applicationsService.upsertPreparedFromResumeGeneration(
           {
             userId,
             jobId: job?.id ?? null,
@@ -5537,9 +5538,21 @@ export class ResumeService {
           },
           syntheticMetadata,
         );
-    const opportunity = request.oneTap
-      ? null
-      : await this.opportunitiesService.createFromResumeStudio(
+      } catch (sideEffectError) {
+        this.logger.warn('[resume-generation] prepared application write failed after resume persistence', {
+          userId,
+          baselineId: baseline.id,
+          jobId: job?.id ?? jobId ?? null,
+          analysisId,
+          errorName: sideEffectError instanceof Error ? sideEffectError.name : typeof sideEffectError,
+          errorMessage: sideEffectError instanceof Error ? sideEffectError.message : String(sideEffectError),
+        });
+      }
+    }
+    let opportunity: { id: string } | null = null;
+    if (!request.oneTap) {
+      try {
+        opportunity = await this.opportunitiesService.createFromResumeStudio(
           userId,
           {
             companyName: job?.company ?? 'Unknown company',
@@ -5552,6 +5565,17 @@ export class ResumeService {
           },
           syntheticMetadata,
         );
+      } catch (sideEffectError) {
+        this.logger.warn('[resume-generation] opportunity write failed after resume persistence', {
+          userId,
+          baselineId: baseline.id,
+          jobId: job?.id ?? jobId ?? null,
+          analysisId,
+          errorName: sideEffectError instanceof Error ? sideEffectError.name : typeof sideEffectError,
+          errorMessage: sideEffectError instanceof Error ? sideEffectError.message : String(sideEffectError),
+        });
+      }
+    }
 
     const quality =
         latestAssessment &&

@@ -224,6 +224,7 @@ const buildService = (options?: {
     coverRepo,
     workflowIdempotencyService,
     studioArtifactsService,
+    applicationsService,
     fitRepo,
     baselineResumeV2BackfillService,
   };
@@ -611,6 +612,21 @@ describe('CoverLettersService contract', () => {
 
     await expect(service.generateCoverLetter('user-1', request as any)).rejects.toBeTruthy();
     expect(studioArtifactsService.recordCoverLetterSuccess).toHaveBeenCalled();
+  });
+
+  it('keeps the authoritative cover letter artifact successful when downstream application writes fail after success persistence', async () => {
+    const { service, studioArtifactsService, applicationsService } = buildService();
+
+    (applicationsService.upsertApplicationForPair as any).mockRejectedValueOnce(
+      new Error('application_write_failed'),
+    );
+
+    await expect(service.generateCoverLetter('user-1', request as any)).resolves.toMatchObject({
+      status: 'success',
+      exportReady: expect.any(Boolean),
+    });
+    expect(studioArtifactsService.recordCoverLetterSuccess).toHaveBeenCalled();
+    expect(studioArtifactsService.recordCoverLetterFailure).not.toHaveBeenCalled();
   });
 
   it('selects strong ResumeV2 evidence blocks for cover letter (drops weak/suppressed fragments when strong roles exist)', async () => {
