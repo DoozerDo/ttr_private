@@ -12,6 +12,7 @@ RUN npm ci --no-audit --no-fund
 FROM node:20.19.5 AS builder
 ARG GIT_SHA=unknown
 WORKDIR /usr/src/app
+ENV GIT_SHA=${GIT_SHA}
 ENV NEXT_PUBLIC_GIT_SHA=${GIT_SHA}
 COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY --from=deps /usr/src/app/package*.json ./
