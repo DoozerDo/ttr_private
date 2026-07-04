@@ -48,7 +48,7 @@ services:
       context: ../..
       dockerfile: apps/web/Dockerfile
       args:
-        GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_SHA: ${GIT_SHA:?Set GIT_SHA before building the web image}
     working_dir: /usr/src/app
     restart: unless-stopped
     depends_on:

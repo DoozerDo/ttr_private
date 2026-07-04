@@ -1,5 +1,4 @@
 FROM node:20.19.5 AS deps
-ARG GIT_SHA=unknown
 WORKDIR /usr/src/app
 
 # Install web app dependencies from service-local lockfile
@@ -10,7 +9,7 @@ COPY packages ./packages
 RUN npm ci --no-audit --no-fund
 
 FROM node:20.19.5 AS builder
-ARG GIT_SHA=unknown
+ARG GIT_SHA
 WORKDIR /usr/src/app
 ENV GIT_SHA=${GIT_SHA}
 ENV NEXT_PUBLIC_GIT_SHA=${GIT_SHA}
@@ -20,11 +19,11 @@ COPY --from=deps /usr/src/app/apps/api/package*.json ./apps/api/
 COPY --from=deps /usr/src/app/apps/web/package*.json ./apps/web/
 COPY --from=deps /usr/src/app/packages ./packages
 COPY . .
-RUN echo "GIT_SHA=$GIT_SHA" > BUILD_SHA
+RUN test -n "$GIT_SHA" && [ "$GIT_SHA" != "unknown" ] && printf 'GIT_SHA=%s\n' "$GIT_SHA" > BUILD_SHA
 RUN npm run build
 
 FROM node:20.19.5-slim AS runtime
-ARG GIT_SHA=unknown
+ARG GIT_SHA
 WORKDIR /usr/src/app
 ENV NODE_ENV=production
 LABEL org.opencontainers.image.revision=$GIT_SHA
