@@ -3328,10 +3328,13 @@ export class CoverLettersService {
           .toLowerCase()
           .match(/[a-z0-9]+/g)
           ?.filter((token) => token.length >= 4) ?? [];
+      if (tokens.length < 24) {
+        continue;
+      }
       for (const token of tokens) {
         tokenCounts.set(token, (tokenCounts.get(token) ?? 0) + 1);
       }
-      if ([...tokenCounts.values()].some((count) => count >= 10)) {
+      if ([...tokenCounts.values()].some((count) => count >= 10 && count / tokens.length >= 0.45)) {
         return true;
       }
     }

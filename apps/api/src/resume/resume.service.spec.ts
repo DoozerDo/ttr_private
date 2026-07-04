@@ -5053,13 +5053,7 @@ describe('ResumeService contract', () => {
         resume: {
           heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
           summary: 'Supported summary.',
-          experience: [
-            {
-              company: 'Acme',
-              roleTitle: 'Operator',
-              bullets: [{ text: 'Improved service reliability.' }],
-            },
-          ],
+          experience: [],
         },
       },
     };
@@ -5073,7 +5067,7 @@ describe('ResumeService contract', () => {
             baselineId: 'baseline-1',
             sectionType: BaselineSectionType.EXPERIENCE,
             title: 'Experience',
-            content: '- Improved service reliability.',
+            content: '',
             includePolicy: BaselineIncludePolicy.ALWAYS,
             order: 0,
             createdAt: new Date(),
@@ -5086,7 +5080,7 @@ describe('ResumeService contract', () => {
             baselineId: 'baseline-1',
             sectionType: BaselineSectionType.EXPERIENCE,
             title: 'Experience',
-            content: '- Improved service reliability.',
+            content: '',
             includePolicy: BaselineIncludePolicy.ALWAYS,
             order: 0,
             createdAt: new Date(),
@@ -5095,7 +5089,7 @@ describe('ResumeService contract', () => {
         ],
         promotedExperienceLikeSectionsCount: 1,
       }),
-    ).toThrowError(
+    ).toThrow(
       expect.objectContaining({
         response: expect.objectContaining({
           error: expect.objectContaining({
@@ -5107,6 +5101,52 @@ describe('ResumeService contract', () => {
         }),
       }),
     );
+  });
+
+  it('does not fail the canonical persistence guard when internal trace evidence is missing but resume input evidence exists', () => {
+    const { service } = buildService();
+    const guard = (service as any).assertResumeEvidenceBeforePersistence.bind(service);
+    const responseBody = {
+      internalTrace: { usedEvidenceIds: [] },
+      preview: {
+        resume: {
+          heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+          summary: 'Supported summary.',
+          experience: [
+            {
+              company: 'Acme',
+              roleTitle: 'Operator',
+              bullets: [{ text: 'Improved service reliability.' }],
+            },
+          ],
+        },
+      },
+    };
+    const resumeInputSections = [
+      {
+        id: 'section-experience',
+        baselineId: 'baseline-1',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: [
+          'Acme | Operator | 2020 - 2022',
+          '- Improved service reliability.',
+        ].join('\n'),
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any,
+    ];
+
+    expect(() =>
+      guard({
+        responseBody,
+        resumeInputSections,
+        allowedSections: resumeInputSections,
+        promotedExperienceLikeSectionsCount: 1,
+      }),
+    ).not.toThrow();
   });
 
   it('paired high-fit contract: generates both resume and cover letter from verified baseline evidence when Resume V2 is missing, omitting unsupported requirements and persisting both artifacts under the same context', async () => {

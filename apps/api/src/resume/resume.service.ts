@@ -1802,9 +1802,12 @@ export class ResumeService {
       return ResumeDraftBullets.extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits);
     }).length;
 
-    const totalResumeUsedEvidenceIdsCount = Array.isArray((input.responseBody as any)?.internalTrace?.usedEvidenceIds)
-      ? (input.responseBody as any).internalTrace.usedEvidenceIds.filter(Boolean).length
-      : 0;
+    const internalTraceUsedEvidenceIds = Array.isArray((input.responseBody as any)?.internalTrace?.usedEvidenceIds)
+      ? (input.responseBody as any).internalTrace.usedEvidenceIds.filter(Boolean)
+      : [];
+    const totalResumeUsedEvidenceIdsCount = internalTraceUsedEvidenceIds.length > 0
+      ? internalTraceUsedEvidenceIds.length
+      : resumeInputEvidenceUnitCount;
 
     const counts = {
       experienceCount: experience.length,

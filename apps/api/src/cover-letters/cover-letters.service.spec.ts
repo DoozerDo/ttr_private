@@ -870,6 +870,10 @@ describe('CoverLettersService contract', () => {
       jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
       closingTemplateKey: 'default',
       generationInputsHash: 'hash',
+      generationAuthority: 'baseline_file',
+      baselineVerified: true,
+      baselineFileUsable: true,
+      baselineFileVersionHash: 'hash-1',
       generation: {
         document: {
           senderHeading: { name: 'Jordan Lee' },
@@ -1899,6 +1903,22 @@ describe('CoverLettersService contract', () => {
       ];
       assessment.overallScore = originalScore;
     }
+  });
+
+  it('does not flag keyword stuffing for a substantive support-heavy paragraph that still contains diverse evidence', () => {
+    const { service } = buildService();
+    const detector = (service as any).detectKeywordStuffing.bind(service);
+
+    expect(
+      detector([
+        'As a Program Manager at Example Co, I support support support support support support support support support support customer experience, service delivery, escalation handling, team coaching, and operational governance across the organization.',
+      ]),
+    ).toBe(false);
+    expect(
+      detector([
+        'support support support support support support support support support support support support support support support support support support support support support support support support',
+      ]),
+    ).toBe(true);
   });
 
   it('forces structured template regeneration and overwrites an existing legacy artifact when score >= 80', async () => {
