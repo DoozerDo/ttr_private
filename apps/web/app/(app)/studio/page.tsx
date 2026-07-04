@@ -12591,17 +12591,14 @@ export default function StudioPage() {
     if (effectiveGenerationState === "generated_unusable") {
       const retryCount = retryCountRef.current[signature] ?? 0;
       if (retryCount >= MAX_AUTO_RETRIES) {
-        contractShouldStart = false;
-
         if (process.env.NODE_ENV !== "production") {
           console.warn("[studio][retry_cap_reached]", {
             contractSignature: signature,
             retryCount,
           });
         }
-      } else {
-        contractShouldStart = hasRequiredIdsNow;
       }
+      contractShouldStart = hasRequiredIdsNow;
     }
     const ready = contractShouldStart;
 

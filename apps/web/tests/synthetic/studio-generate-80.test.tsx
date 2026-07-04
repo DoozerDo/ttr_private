@@ -271,6 +271,10 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
   }, 120_000);
 
   it("shell_auto regenerates once when persisted artifacts are failed/unusable", async () => {
+    window.localStorage?.setItem?.(
+      "ttr:studio:auto-generate:retry-count:autoGen:v1:base-version-1:job-80:analysis-80",
+      "1",
+    );
     persisted.resume = {
       responseBody: {
         status: "failed",
