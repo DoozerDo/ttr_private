@@ -5676,6 +5676,13 @@ export default function StudioPage() {
     requestedAnalysisId,
   ]);
 
+  const studioBuildMarker =
+    process.env.NEXT_PUBLIC_APP_VERSION ??
+    process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ??
+    process.env.NEXT_PUBLIC_GIT_SHA ??
+    process.env.NEXT_PUBLIC_COMMIT_SHA ??
+    null;
+
   const orchestrationDebugSnapshot = useMemo(() => {
     const contractShouldStart = Boolean(needsAutoGeneration);
     const orchestrationDecision = (() => {
@@ -5752,10 +5759,11 @@ export default function StudioPage() {
       },
     };
 
-	    return {
-	      qualifiedForGeneration,
-	      qualifiedForStudioOrchestration,
-	      activeGenerationReadiness,
+    return {
+      webBuildMarker: studioBuildMarker,
+      qualifiedForGeneration,
+      qualifiedForStudioOrchestration,
+      activeGenerationReadiness,
       resumeV2FallbackAttemptable,
       resolvedReadinessCodesForFallbackEligibility: resumeV2FallbackEvaluation.codes,
       studioReadinessBlocksGeneration,
@@ -11745,12 +11753,6 @@ export default function StudioPage() {
     }
   }, []);
 
-  const studioBuildMarker =
-    process.env.NEXT_PUBLIC_APP_VERSION ??
-    process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ??
-    process.env.NEXT_PUBLIC_GIT_SHA ??
-    process.env.NEXT_PUBLIC_COMMIT_SHA ??
-    null;
   const studioBuildLoggedRef = useRef(false);
   useEffect(() => {
     if (studioBuildLoggedRef.current) return;

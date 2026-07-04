@@ -2063,6 +2063,8 @@ describe("Studio auto-generation", () => {
       baselineId: "base-1",
       baselineVersionId: "base-version-1",
     });
+    const previousWebBuildMarker = process.env.NEXT_PUBLIC_APP_VERSION;
+    process.env.NEXT_PUBLIC_APP_VERSION = "web-test-build-123";
     const staleResumeScopeKey = "v1|resume|base-1|base-version-1|job-1|analysis-1";
     const staleCoverScopeKey = "v1|cover_letter|base-1|base-version-1|job-1|analysis-1";
     try {
@@ -2205,6 +2207,7 @@ describe("Studio auto-generation", () => {
       expect(snapshot.orchestrationDecision).toBe("should_auto_generate");
       expect(snapshot.orchestrationDecision).not.toBe("passive_empty_state");
       expect(snapshot.studioReadinessBlocksGeneration).toBe(false);
+      expect(snapshot.webBuildMarker).toBe("web-test-build-123");
     }, { timeout: 15000 });
 
     await waitFor(() => {
@@ -2223,8 +2226,18 @@ describe("Studio auto-generation", () => {
     expect(coverBodies[0]).toMatchObject({ forceRegenerate: true, regenerationSource: "shell_auto" });
 
     await waitFor(() => {
+      const snapshot = readOrchestrationDebugSnapshot();
+      expect(snapshot.webBuildMarker).toBe("web-test-build-123");
+    }, { timeout: 15000 });
+
+    await waitFor(() => {
       expect(screen.getByText(/COMPATIBILITY:.*88/i)).toBeInTheDocument();
     }, { timeout: 15000 });
+    if (previousWebBuildMarker === undefined) {
+      delete process.env.NEXT_PUBLIC_APP_VERSION;
+    } else {
+      process.env.NEXT_PUBLIC_APP_VERSION = previousWebBuildMarker;
+    }
   }, 15000);
 
   it("Scenario A: both previews renderable => no failure banner and no 'not generated yet' placeholders", async () => {
