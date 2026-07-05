@@ -412,6 +412,22 @@ export class CoverLettersService {
     return null;
   }
 
+  private hasUsableResumeV2Experience(candidate: unknown): candidate is Record<string, unknown> {
+    if (!candidate || typeof candidate !== 'object') return false;
+    const normalized = normalizeNormalizedResumeDocument(candidate as any);
+    const validation = validateNormalizedResumeDocument(normalized as any);
+    if (!validation.valid) return false;
+    const experience = Array.isArray((normalized as any)?.experience) ? ((normalized as any).experience as any[]) : [];
+    return experience.some((entry) => {
+      const company = String(entry?.company ?? '').trim();
+      const roleTitle = String(entry?.roleTitle ?? '').trim();
+      const bullets = Array.isArray(entry?.bullets)
+        ? entry.bullets.filter((bullet: unknown) => String(bullet ?? '').trim())
+        : [];
+      return Boolean(company && roleTitle && bullets.length > 0);
+    });
+  }
+
   private throwGenerationBlockedError(blockers: Array<{ code: string; message: string }>): never {
     throw new UnprocessableEntityException(buildArtifactFailurePayload({
       code: 'generation_blocked',
@@ -1064,44 +1080,42 @@ export class CoverLettersService {
       // eslint-disable-next-line no-console
       console.log('[COVER_LETTER_GENERATE_PERSISTED]', { artifactId });
 
-      if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
-        // Prompt 8: temporary production validation fields (diagnostics-only, no raw text).
-        // Removal plan: delete `productionValidation` once Studio high-fit flow is stable in production.
-        try {
-          const evidence = resolveGenerationEvidence({
-            baseline: draft.baseline as any,
-            baselineVersionId: draft.baselineVersion.id,
-          });
-          const eligibility = decideGenerationEligibility({
-            baseline: draft.baseline as any,
-            baselineVersion: draft.baselineVersion as any,
-            job: draft.job as any,
-            readinessScore: null,
-            assessment: draft.analysisAssessment as any,
-            complianceBlocked: false,
-            evidence,
-            targetRequirements: ((input as any)?.excludedRequirements ?? []) as any,
-          });
-          (response as any).internal = {
-            ...((response as any).internal ?? {}),
-            productionValidation: {
-              evidenceSourceUsed: evidence.primarySource,
-              generationEligibilityDecision: {
-                eligible: eligibility.eligible,
-                hardBlockerCode: eligibility.hardBlocker?.code ?? null,
-              },
-              fallbackWarnings: (evidence.warnings ?? []).map((w) => w.code),
-              omittedUnsupportedRequirements: eligibility.omittedUnsupportedRequirements ?? [],
-              artifactPersistenceStatus: { status: 'persisted', artifactId },
-              finalDocumentStatus: {
-                exportReady: Boolean((response as any)?.exportReady),
-                qualityGateStatus: String((response as any)?.quality?.status ?? ''),
-              },
+      // Prompt 8: production validation fields (diagnostics-only, no raw text).
+      // Keep this payload available in production so Studio can explain the evidence source used.
+      try {
+        const evidence = resolveGenerationEvidence({
+          baseline: draft.baseline as any,
+          baselineVersionId: draft.baselineVersion.id,
+        });
+        const eligibility = decideGenerationEligibility({
+          baseline: draft.baseline as any,
+          baselineVersion: draft.baselineVersion as any,
+          job: draft.job as any,
+          readinessScore: null,
+          assessment: draft.analysisAssessment as any,
+          complianceBlocked: false,
+          evidence,
+          targetRequirements: ((input as any)?.excludedRequirements ?? []) as any,
+        });
+        (response as any).internal = {
+          ...((response as any).internal ?? {}),
+          productionValidation: {
+            evidenceSourceUsed: evidence.primarySource,
+            generationEligibilityDecision: {
+              eligible: eligibility.eligible,
+              hardBlockerCode: eligibility.hardBlocker?.code ?? null,
             },
-          };
-        } catch {
-          // ignore diagnostics failures
-        }
+            fallbackWarnings: (evidence.warnings ?? []).map((w) => w.code),
+            omittedUnsupportedRequirements: eligibility.omittedUnsupportedRequirements ?? [],
+            artifactPersistenceStatus: { status: 'persisted', artifactId },
+            finalDocumentStatus: {
+              exportReady: Boolean((response as any)?.exportReady),
+              qualityGateStatus: String((response as any)?.quality?.status ?? ''),
+            },
+          },
+        };
+      } catch {
+        // ignore diagnostics failures
       }
       try {
         await this.applicationsService.upsertApplicationForPair({
@@ -1616,18 +1630,7 @@ export class CoverLettersService {
     let persistedResumeV2 = (() => {
       try {
         const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) as any;
-        if (!persisted || typeof persisted !== 'object') return null;
-        const hasUsableExperience = Array.isArray(persisted.experience)
-          ? persisted.experience.some((entry: any) => {
-              const company = String(entry?.company ?? '').trim();
-              const roleTitle = String(entry?.roleTitle ?? '').trim();
-              const bullets = Array.isArray(entry?.bullets)
-                ? entry.bullets.filter((bullet: unknown) => String(bullet ?? '').trim())
-                : [];
-              return Boolean(company && roleTitle && bullets.length > 0);
-            })
-          : false;
-        if (!hasUsableExperience) return null;
+        if (!this.hasUsableResumeV2Experience(persisted)) return null;
         return persisted;
       } catch {
         return null;
@@ -1636,7 +1639,7 @@ export class CoverLettersService {
     if (!persistedResumeV2 && this.baselineResumeV2BackfillService) {
       const backfilled = await this.baselineResumeV2BackfillService.backfillLatestIfMissing({ baselineId: baseline.id });
       const backfilledResumeV2 = backfilled?.resumeV2Json;
-      if (backfilledResumeV2 && typeof backfilledResumeV2 === 'object') {
+      if (this.hasUsableResumeV2Experience(backfilledResumeV2)) {
         const parsedRecords = Array.isArray(baseline.parsedRecords) ? baseline.parsedRecords : [];
         if (parsedRecords.length > 0) {
           baseline.parsedRecords = parsedRecords.map((record: any, index: number) =>
@@ -1648,7 +1651,7 @@ export class CoverLettersService {
         persistedResumeV2 = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) as any;
       }
     }
-    if (!persistedResumeV2 && analysisId) {
+    if ((!persistedResumeV2 || !this.hasUsableResumeV2Experience(persistedResumeV2)) && analysisId) {
       try {
         const studioArtifactsState = await this.studioArtifactsService.readState({
           userId,
@@ -1660,7 +1663,7 @@ export class CoverLettersService {
         const studioResumeV2 = this.extractPersistedResumeV2FromStudioArtifactsState(
           studioArtifactsState,
         );
-        if (studioResumeV2) {
+        if (this.hasUsableResumeV2Experience(studioResumeV2)) {
           persistedResumeV2 = studioResumeV2;
           resumeV2PlainText = buildResumePlainText(studioResumeV2 as any);
           const parsedRecords = Array.isArray(baseline.parsedRecords) ? [...baseline.parsedRecords] : [];

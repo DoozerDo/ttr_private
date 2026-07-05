@@ -246,6 +246,24 @@ describe('CoverLettersService contract', () => {
     process.env.DOCGEN_DIAGNOSTICS = 'true';
     // Force backfill to fail so ResumeV2 is missing.
     (service as any).baselineResumeV2BackfillService.backfillLatestIfMissing = jest.fn().mockResolvedValue(null);
+    (baseline as any).parsedRecords = [
+      {
+        createdAt: new Date('2026-05-01T00:00:00.000Z'),
+        resumeV2Json: {
+          heading: { name: 'Jordan Lee', contactLine: 'jordan.lee@example.com | Seattle, WA' },
+          summary: 'Sparse persisted Resume V2 that should not outrank the stored artifact.',
+          competencies: ['Support Operations'],
+          experience: [
+            {
+              company: 'Biblioso',
+              roleTitle: 'Director, Customer Experience',
+              bullets: [],
+            },
+          ],
+        },
+        parsedJson: { identity: { full_name: 'Jordan Lee' } },
+      } as any,
+    ];
     (service as any).studioArtifactsService.readState.mockResolvedValueOnce({
       resumeResult: {
         preview: {
