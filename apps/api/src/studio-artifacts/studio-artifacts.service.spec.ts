@@ -2185,6 +2185,199 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
     });
   });
 
+  it('hydrates the canonical persisted cover letter artifact as current and export-ready after a successful write', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'artifact-cover-current',
+        createdAt: new Date('2026-06-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        resumeInputsHash: 'resume-hash',
+        resumeResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          qualityGate: { status: 'pass', reasons: [] },
+          preview: {
+            resume: {
+              heading: { name: 'Persisted Resume' },
+              summary: 'Resume',
+              experience: [{ company: 'Co', roleTitle: 'Role', bullets: ['Did work.'] }],
+            },
+          },
+        },
+        resumeContent: 'Resume',
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeFailedAt: null,
+        resumeMetadata: { analysisId: 'analysis-1' },
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterInputsHash: 'cover-hash',
+        coverLetterResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          qualityGate: { status: 'pass', reasons: [] },
+          quality: { status: 'pass', reasons: [] },
+          preview: {
+            coverLetter: { paragraphs: ['Persisted cover letter'] },
+          },
+        },
+        coverLetterContent: 'Persisted cover letter',
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: new Date('2026-06-03T00:01:00.000Z'),
+        coverLetterFailedAt: null,
+        coverLetterMetadata: { analysisId: 'analysis-1' },
+      }),
+    } as any;
+    const baselineRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          {
+            baseline_id: 'b-1',
+            baseline_userId: 'u-1',
+            baseline_version: 0,
+            baseline_versionNumber: 1,
+            baseline_originalFilename: 'resume.pdf',
+            baseline_mimeType: 'application/pdf',
+            baseline_storagePath: '/tmp/resume.pdf',
+            baseline_hash: null,
+            baseline_status: 'ACTIVE',
+            baseline_isActive: true,
+            baseline_archivedAt: null,
+            baseline_originalBaselineScore: null,
+            baseline_latestBaselineScore: null,
+            baseline_latestAssessmentId: null,
+            baseline_firstAnalyzedAt: null,
+            baseline_lastAnalyzedAt: null,
+            baseline_isSynthetic: false,
+            baseline_syntheticScenarioKey: null,
+            baseline_syntheticRunId: null,
+            baseline_syntheticCreatedAt: null,
+            baseline_preserveFromCleanup: false,
+            sections_id: 'section-summary',
+            sections_baselineId: 'b-1',
+            sections_sectionType: 'SUMMARY',
+            sections_title: 'Summary',
+            sections_content: 'Persisted baseline summary.',
+            sections_includePolicy: 'OPTIONAL',
+            sections_order: 0,
+            sections_createdAt: new Date(),
+            sections_updatedAt: new Date(),
+            parsedRecords_id: 'parsed-1',
+            parsedRecords_baselineId: 'b-1',
+            parsedRecords_sourceFileId: 'source-1',
+            parsedRecords_schemaVersion: 'schema-1',
+            parsedRecords_sourceFormat: 'docx',
+            parsedRecords_ingestedAt: new Date(),
+            parsedRecords_parsedJson: {
+              experience: [
+                {
+                  company: 'Parsed Co',
+                  role_title: 'Director of Support Operations',
+                  start_date: 'Jan 2021',
+                  end_date: 'Present',
+                  details_text: 'Led support operations and executive updates.',
+                },
+              ],
+            },
+            parsedRecords_resumeV2Json: {
+              heading: { name: 'Persisted Resume' },
+              summary: 'Resume',
+              experience: [
+                {
+                  company: 'Parsed Co',
+                  roleTitle: 'Director of Support Operations',
+                  bullets: ['Led support operations and executive updates.'],
+                },
+              ],
+            },
+            parsedRecords_flagsJson: null,
+            parsedRecords_createdAt: new Date(),
+          },
+        ]),
+        getOne: jest.fn().mockResolvedValue({ overallScore: 88, inputsHash: 'inputs-1' }),
+      }),
+    } as any;
+    const baselineVersionRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'b-1', hash: 'hash-v1' }) } as any;
+    const jobRepository = { findOne: jest.fn().mockResolvedValue({ id: 'j-1', title: 'Director of Global Support', company: 'Co' }) } as any;
+    const fitAssessmentRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          {
+            baseline_id: 'b-1',
+            baseline_userId: 'u-1',
+            baseline_version: 0,
+            baseline_versionNumber: 1,
+            baseline_originalFilename: 'resume.pdf',
+            baseline_mimeType: 'application/pdf',
+            baseline_storagePath: '/tmp/resume.pdf',
+            baseline_hash: null,
+            baseline_status: 'ACTIVE',
+            baseline_isActive: true,
+            baseline_archivedAt: null,
+            baseline_originalBaselineScore: null,
+            baseline_latestBaselineScore: null,
+            baseline_latestAssessmentId: null,
+            baseline_firstAnalyzedAt: null,
+            baseline_lastAnalyzedAt: null,
+            baseline_isSynthetic: false,
+            baseline_syntheticScenarioKey: null,
+            baseline_syntheticRunId: null,
+            baseline_syntheticCreatedAt: null,
+            baseline_preserveFromCleanup: false,
+          },
+        ]),
+        getOne: jest.fn().mockResolvedValue({ overallScore: 88, inputsHash: 'inputs-1' }),
+      }),
+    } as any;
+    const baselineResumeV2BackfillService = { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any;
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('resume-hash');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('cover-hash');
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'b-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'j-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    expect(state.coverLetter?.status).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+    expect(state.coverLetter?.usableCurrent).toBe(true);
+    expect(state.coverLetterResult?.generationState).toBe('generated_usable');
+    expect(state.coverLetterResult?.exportReady).toBe(true);
+    expect(state.coverLetterResult?.qualityStatus).toBe('pass');
+    expect(state.coverLetterResult?.preview).toEqual(
+      expect.objectContaining({ paragraphs: ['Persisted cover letter'] }),
+    );
+  });
+
   it('accepts cover letter evidence when canonical internalTrace and paragraphEvidence are present', async () => {
     const insertExecute = jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-cover-2' }] });
     const createQueryBuilder = jest.fn(() => ({

@@ -4122,15 +4122,12 @@ export default function StudioPage() {
   const artifactContract = useMemo(
     () =>
       buildStudioArtifactContract({
-        resumeResponse: bridgeHydratedResumeResponse(
-          resumeState.response,
-          studioArtifactsPayload?.resumeResult ?? null,
-        ),
-        coverLetterResponse: (() => {
-          if (coverState.response) return coverState.response;
-          if (!studioArtifactsPayload) return null;
-          return extractCoverLetterResponseFromStudioArtifacts(studioArtifactsPayload);
-        })(),
+        resumeResponse: studioArtifactsPayload
+          ? extractResumeResponseFromStudioArtifacts(studioArtifactsPayload)
+          : bridgeHydratedResumeResponse(resumeState.response, null),
+        coverLetterResponse: studioArtifactsPayload
+          ? extractCoverLetterResponseFromStudioArtifacts(studioArtifactsPayload)
+          : coverState.response,
         canExportDocuments,
         isPro,
         persistedPipelineVersion: studioArtifactsPayload?.generationContractVersion ?? null,

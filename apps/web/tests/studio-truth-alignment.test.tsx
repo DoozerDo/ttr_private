@@ -546,12 +546,17 @@ describe("Studio truth alignment", () => {
       const raw = debug.querySelector("pre")?.textContent ?? "";
       expect(raw).toContain("\"studioArtifactPairStatus\": \"completed\"");
       expect(raw).toContain("\"hasCoverLetterArtifactPersisted\": true");
+      expect(raw).toContain("\"hasResumeArtifactPersisted\": true");
       expect(raw).toContain("\"hasAnyArtifactPersisted\": true");
       expect(raw).not.toContain("\"studioArtifactPairStatus\": \"failed\"");
     }, { timeout: 15000 });
 
+    expect(screen.getByTestId("studio-resume-ready-panel")).toBeInTheDocument();
     expect(screen.getByTestId("studio-cover-ready-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-resume-generated-unusable")).toBeNull();
+    expect(screen.queryByTestId("studio-cover-generated-unusable")).toBeNull();
     expect(screen.queryByTestId("studio-cover-correction-panel")).toBeNull();
+    expect(screen.queryByText(/Resume draft needs edits/i)).toBeNull();
     expect(screen.queryByText(/Cover letter generated successfully/i)).toBeInTheDocument();
   }, 15000);
 });
