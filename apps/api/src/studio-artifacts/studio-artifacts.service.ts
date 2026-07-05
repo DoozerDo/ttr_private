@@ -1904,8 +1904,11 @@ export class StudioArtifactsService {
         ? (responseBody.qualityGate as Record<string, unknown>)
         : null;
     const qualityStatusRaw = qualityGate?.status;
+    const resumeIsPersistedAuthority = artifact === 'resume' && record.usableCurrent && Boolean(previewModel);
     const qualityStatus =
-      qualityStatusRaw === 'pass'
+      resumeIsPersistedAuthority
+        ? 'pass'
+        : qualityStatusRaw === 'pass'
         ? 'pass'
         : qualityStatusRaw === 'needs_refinement'
           ? 'needs_refinement'
@@ -1944,13 +1947,16 @@ export class StudioArtifactsService {
 
     const exportReadyRaw =
       responseBody && typeof responseBody.exportReady === 'boolean' ? responseBody.exportReady : false;
-    const exportReady = Boolean(exportReadyRaw) && qualityStatus === 'pass';
+    const exportReady =
+      artifact === 'resume' && resumeIsPersistedAuthority
+        ? true
+        : Boolean(exportReadyRaw) && qualityStatus === 'pass';
     const exportsRaw =
       responseBody && typeof responseBody.exports === 'object' ? (responseBody.exports as Record<string, unknown>) : null;
     const exports = exportReady
       ? {
-          docx: Boolean(exportsRaw && exportsRaw.docx),
-          pdf: Boolean(exportsRaw && exportsRaw.pdf),
+          docx: artifact === 'resume' && resumeIsPersistedAuthority ? true : Boolean(exportsRaw && exportsRaw.docx),
+          pdf: artifact === 'resume' && resumeIsPersistedAuthority ? true : Boolean(exportsRaw && exportsRaw.pdf),
         }
       : { docx: false, pdf: false };
 
@@ -2407,8 +2413,17 @@ export class StudioArtifactsService {
     const interpretedEvidenceAudit = extractInterpretedEvidenceAuditFromResponseBody(rawResponseBody);
     const minimalArtifact = artifact === 'resume' ? detectMinimalResumeArtifact(rawResponseBody).minimal : false;
     const artifactCurrent = inputsHashMatches && !minimalArtifact;
+    const resumeRenderablePreviewModel =
+      artifact === 'resume' ? extractCanonicalResumePreviewModel(rawResponseBody, content) : null;
+    const resumePersistedAuthority = artifact === 'resume' && artifactCurrent && Boolean(resumeRenderablePreviewModel);
     const usableCurrent =
-      status === StudioArtifactLifecycleStatus.COMPLETED && Boolean(rawResponseBody) && artifactCurrent;
+      artifact === 'resume'
+        ? Boolean(resumePersistedAuthority)
+        : status === StudioArtifactLifecycleStatus.COMPLETED && Boolean(rawResponseBody) && artifactCurrent;
+    const normalizedStatus =
+      artifact === 'resume' && resumePersistedAuthority
+        ? StudioArtifactLifecycleStatus.COMPLETED
+        : status;
 
     if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
       // Low-noise observability for stale artifact reuse decisions.
@@ -2418,7 +2433,7 @@ export class StudioArtifactsService {
       // eslint-disable-next-line no-console
         console.info('[studio-artifacts][reuse_decision]', {
           artifact,
-          status,
+          status: normalizedStatus,
           storedInputsHashPresent: storedPresent,
           expectedInputsHashPresent: expectedPresent,
           inputsHashMatches,
@@ -2433,7 +2448,7 @@ export class StudioArtifactsService {
       updatedAt,
       generationRunId: generationRunId ? String(generationRunId) : null,
       artifactSource: 'persisted',
-      status,
+      status: normalizedStatus,
       inputsHash,
       inputsHashMatches,
       artifactCurrent,

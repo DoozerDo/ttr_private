@@ -40,6 +40,45 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     expect(result.exports).toEqual({ docx: true, pdf: true });
   });
 
+  it('promotes a failed resume artifact with a renderable persisted preview to usable current authority', () => {
+    const result = buildResult({
+      status: StudioArtifactLifecycleStatus.FAILED,
+      responseBody: {
+        status: 'failed',
+        error: { code: 'resume_v2_failed' },
+        preview: {
+          resume: {
+            heading: { name: 'Persisted Candidate', contactLine: 'persisted@example.com' },
+            summary: 'Persisted resume preview wins over stale failure state.',
+            experience: [
+              {
+                company: 'Parsed Co',
+                roleTitle: 'Director of Support Operations',
+                bullets: ['Led support operations and executive updates.'],
+              },
+            ],
+          },
+        },
+      },
+      content: 'persisted resume preview',
+      artifactCurrent: true,
+      usableCurrent: true,
+      failureCode: 'resume_v2_failed',
+      failureMessage: 'Internal Server Error Exception',
+    });
+
+    expect(result.artifactType).toBe('resume');
+    expect(result.generationState).toBe('generated_usable');
+    expect(result.qualityStatus).toBe('pass');
+    expect(result.preview).toEqual(
+      expect.objectContaining({
+        heading: expect.objectContaining({ name: 'Persisted Candidate' }),
+      }),
+    );
+    expect(result.exportReady).toBe(true);
+    expect(result.exports).toEqual({ docx: true, pdf: true });
+  });
+
   it('keeps a renderable resume preview visible when export is ineligible and qualityGate is absent', async () => {
     const studioArtifactRepository = {
       findOne: jest.fn().mockResolvedValue({
@@ -607,6 +646,100 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     expect(result.generationState).toBe('generated_unusable');
     expect(result.qualityStatus).toBe('pass');
     expect(result.preview).toBe(null);
+  });
+
+  it('promotes a persisted failed resume artifact to current success state during readState when the stored preview is renderable', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'artifact-1',
+        createdAt: new Date('2026-06-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.FAILED,
+        resumeInputsHash: 'resume-hash',
+        resumeResponseBody: {
+          status: 'failed',
+          error: { code: 'resume_v2_failed' },
+          preview: {
+            resume: {
+              heading: { name: 'Persisted Resume' },
+              summary: 'This persisted preview should override stale failure state.',
+              experience: [{ company: 'Parsed Co', roleTitle: 'Director of Support Operations', bullets: ['Led support operations.'] }],
+            },
+          },
+        },
+        resumeContent: 'persisted resume content',
+        resumeFailureCode: 'resume_v2_failed',
+        resumeFailureMessage: 'Internal Server Error Exception',
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeFailedAt: new Date('2026-06-03T00:00:30.000Z'),
+        resumeMetadata: { analysisId: 'analysis-1' },
+        coverLetterStatus: StudioArtifactLifecycleStatus.MISSING,
+        coverLetterInputsHash: null,
+        coverLetterResponseBody: null,
+        coverLetterContent: null,
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: null,
+        coverLetterFailedAt: null,
+        coverLetterMetadata: {},
+      } as any),
+    } as any;
+    const baselineRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
+    } as any;
+    const baselineVersionRepository = { findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }) } as any;
+    const jobRepository = { findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }) } as any;
+    const fitAssessmentRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
+        getOne: jest.fn().mockResolvedValue({ overallScore: 90, inputsHash: 'inputs-1' }),
+      }),
+    } as any;
+    const baselineResumeV2BackfillService = { backfillLatestIfMissing: jest.fn().mockResolvedValue(null) } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('resume-hash');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('cover-hash');
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    } as any);
+
+    expect(state.resume?.status).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+    expect(state.resume?.usableCurrent).toBe(true);
+    expect(state.resumeResult?.generationState).toBe('generated_usable');
+    expect(state.resumeResult?.qualityStatus).toBe('pass');
+    expect(state.resumeFailureDiagnostics).toBeUndefined();
+    expect(state.coverLetter).toBeNull();
   });
 
   it('reloads resume state from the persisted studio_artifacts resume field', async () => {
