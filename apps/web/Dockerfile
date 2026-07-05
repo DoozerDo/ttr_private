@@ -24,7 +24,6 @@ COPY --from=deps /usr/src/app/apps/api/package*.json ./apps/api/
 COPY --from=deps /usr/src/app/apps/web/package*.json ./apps/web/
 COPY --from=deps /usr/src/app/packages ./packages
 COPY . .
-RUN test -n "$GIT_SHA" && [ "$GIT_SHA" != "unknown" ] && printf 'GIT_SHA=%s\n' "$GIT_SHA" > BUILD_SHA
 RUN npm run build
 
 FROM node:20.19.5-slim AS runtime
