@@ -51,6 +51,8 @@ jobs:
             exit 1
           fi
           echo "Deploy preflight:"
+          echo "  - workflow file: .github/workflows/build-dev-images.yml"
+          echo "  - matrix image/name: ${{ matrix.name }}"
           echo "  - canonical build entrypoint: docker/build-push-action@v5"
           echo "  - Dockerfile path: ${{ matrix.dockerfile }}"
           echo "  - GIT_SHA present: yes"
@@ -72,7 +74,7 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           build-args: |
-            GIT_SHA=${{ env.GIT_SHA }}
+            GIT_SHA=${{ github.sha }}
           push: true
           tags: |
             ghcr.io/doozerdo/ttr_private-${{ matrix.name }}:dev
