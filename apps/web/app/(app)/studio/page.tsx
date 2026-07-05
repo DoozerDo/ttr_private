@@ -3062,6 +3062,10 @@ export default function StudioPage() {
           }),
         ];
         generationReadyAutoStartRef.current = null;
+        activeGenerationRequestKeysRef.current.clear();
+        activeResumeGenerationRef.current = null;
+        activeCoverGenerationRef.current = null;
+        activeAutoGenerationRef.current = null;
         hydrationScopeKeys.forEach((key) => {
           generationScopeGuardRef.current.delete(key);
           getStudioAutoGenerationLatchStore().delete(key);
