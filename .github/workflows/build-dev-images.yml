@@ -15,6 +15,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      GIT_SHA: ${{ github.sha }}
     strategy:
       matrix:
         include:
@@ -40,6 +42,20 @@ jobs:
       - name: Run synthetic generation gate
         run: npm run validate:synthetic
 
+      - name: Preflight web build identity
+        if: matrix.name == 'web'
+        run: |
+          set -euo pipefail
+          if [ -z "${GIT_SHA:-}" ] || [ "${GIT_SHA}" = "unknown" ]; then
+            echo "ERROR: production build identity unavailable. The deployed web bundle must provide a real commit SHA." >&2
+            exit 1
+          fi
+          echo "Deploy preflight:"
+          echo "  - canonical build entrypoint: docker/build-push-action@v5"
+          echo "  - Dockerfile path: ${{ matrix.dockerfile }}"
+          echo "  - GIT_SHA present: yes"
+          echo "  - build arg GIT_SHA=${GIT_SHA}"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -56,7 +72,7 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           build-args: |
-            GIT_SHA=${{ github.sha }}
+            GIT_SHA=${{ env.GIT_SHA }}
           push: true
           tags: |
             ghcr.io/doozerdo/ttr_private-${{ matrix.name }}:dev
