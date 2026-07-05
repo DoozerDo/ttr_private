@@ -14,6 +14,7 @@ jobs:
     name: Landing synthetic transaction suite
     runs-on: ubuntu-latest
     env:
+      GIT_SHA: ${{ github.sha }}
       SYNTHETIC_INGEST_TOKEN: synthetic-ingest-local
     steps:
       - name: Checkout repository
@@ -32,6 +33,20 @@ jobs:
 
       - name: Build web app
         run: npm -w apps/web run build
+
+      - name: Preflight web build identity
+        run: |
+          set -euo pipefail
+          if [ -z "${GIT_SHA:-}" ] || [ "${GIT_SHA}" = "unknown" ]; then
+            echo "ERROR: production build identity unavailable. The deployed web bundle must provide a real commit SHA." >&2
+            exit 1
+          fi
+          echo "Deploy preflight:"
+          echo "  - canonical build entrypoint: docker compose -f infra/docker/docker-compose.dev.yml up --build -d"
+          echo "  - compose file path: infra/docker/docker-compose.dev.yml"
+          echo "  - env file path: apps/api/.env.development.local"
+          echo "  - GIT_SHA present: yes"
+          echo "  - build arg GIT_SHA=${GIT_SHA}"
 
       - name: Start Docker dev stack
         run: docker compose -f infra/docker/docker-compose.dev.yml up --build -d
