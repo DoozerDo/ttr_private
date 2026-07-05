@@ -36,7 +36,7 @@ afterEach(() => {
 });
 
 describe("AppShell production build marker diagnostic", () => {
-  it("renders the explicit production build-identity diagnostic instead of crashing when the marker is missing", async () => {
+  it("keeps rendering the app shell without surfacing a customer-facing build identity banner when the marker is missing", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("NEXT_PUBLIC_GIT_SHA", "");
     vi.stubEnv("NEXT_PUBLIC_RAILWAY_GIT_COMMIT_SHA", "");
@@ -53,9 +53,7 @@ describe("AppShell production build marker diagnostic", () => {
       </AppShell>,
     );
 
-    expect(screen.getByTestId("web-build-marker-diagnostic")).toHaveTextContent(
-      /Production build identity unavailable/i,
-    );
+    expect(screen.queryByTestId("web-build-marker-diagnostic")).toBeNull();
     expect(screen.getByTestId("baseline-route-root")).toBeInTheDocument();
   });
 });
