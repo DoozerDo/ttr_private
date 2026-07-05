@@ -13,7 +13,7 @@ const normalizeBuildMarker = (value: string | undefined | null): string | null =
 };
 
 export function resolveWebBuildMarker(): WebBuildMarkerResolution {
-  const candidates: Array<{ source: string; value: string | null }> = [
+  const candidates: Array<{ source: string; value: string | null; unavailable?: boolean }> = [
     { source: "NEXT_PUBLIC_GIT_SHA", value: normalizeBuildMarker(process.env.NEXT_PUBLIC_GIT_SHA) },
     {
       source: "NEXT_PUBLIC_RAILWAY_GIT_COMMIT_SHA",
@@ -28,15 +28,16 @@ export function resolveWebBuildMarker(): WebBuildMarkerResolution {
 
   const resolved = candidates.find((candidate) => Boolean(candidate.value));
   if (resolved?.value) {
+    const missing = resolved.value.toLowerCase() === "unavailable";
     return {
       marker: resolved.value,
       source: resolved.source,
-      missing: false,
+      missing,
     };
   }
 
   return {
-    marker: "unknown",
+    marker: "unavailable",
     source: null,
     missing: process.env.NODE_ENV === "production",
   };

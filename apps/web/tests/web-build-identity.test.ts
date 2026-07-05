@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -30,6 +31,23 @@ describe("resolveBuildSha", () => {
       sha: "commit-from-git",
       source: "git rev-parse HEAD",
       resolvedFrom: "git",
+    });
+  });
+
+  it("uses BUILD_SHA when present and env/git metadata are unavailable", async () => {
+    vi.spyOn(fs, "readFileSync").mockReturnValue("GIT_SHA=unavailable\n" as never);
+
+    const { resolveBuildSha } = await import("../scripts/build-identity.cjs");
+    expect(
+      resolveBuildSha(
+        vi.fn(() => {
+          throw new Error("git unavailable");
+        }) as unknown as typeof import("node:child_process").execSync,
+      ),
+    ).toEqual({
+      sha: "unavailable",
+      source: "BUILD_SHA",
+      resolvedFrom: "file",
     });
   });
 

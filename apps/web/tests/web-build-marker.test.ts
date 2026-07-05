@@ -38,8 +38,21 @@ describe("resolveWebBuildMarker", () => {
     const { resolveWebBuildMarker } = await import("../lib/webBuildMarker");
 
     expect(resolveWebBuildMarker()).toEqual({
-      marker: "unknown",
+      marker: "unavailable",
       source: null,
+      missing: true,
+    });
+  });
+
+  it("treats the explicit unavailable marker as missing in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PUBLIC_GIT_SHA", "unavailable");
+
+    const { resolveWebBuildMarker } = await import("../lib/webBuildMarker");
+
+    expect(resolveWebBuildMarker()).toEqual({
+      marker: "unavailable",
+      source: "NEXT_PUBLIC_GIT_SHA",
       missing: true,
     });
   });

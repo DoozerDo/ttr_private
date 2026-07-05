@@ -1,4 +1,5 @@
 const { execSync } = require("node:child_process");
+const fs = require("node:fs");
 
 function normalizeBuildSha(value) {
   const trimmed = typeof value === "string" ? value.trim() : "";
@@ -35,6 +36,16 @@ function resolveBuildSha(execFn = execSync) {
   const fromEnv = envCandidates.find((candidate) => candidate.value);
   if (fromEnv?.value) {
     return { sha: fromEnv.value, source: fromEnv.source, resolvedFrom: "env" };
+  }
+
+  try {
+    const buildSha = fs.readFileSync("BUILD_SHA", "utf8").trim();
+    const normalizedBuildSha = normalizeBuildSha(buildSha.replace(/^GIT_SHA=/i, ""));
+    if (normalizedBuildSha) {
+      return { sha: normalizedBuildSha, source: "BUILD_SHA", resolvedFrom: "file" };
+    }
+  } catch {
+    // Fall through to git checkout detection.
   }
 
   try {

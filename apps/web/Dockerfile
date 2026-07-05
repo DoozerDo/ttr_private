@@ -13,11 +13,11 @@ ARG GIT_SHA
 WORKDIR /usr/src/app
 ENV GIT_SHA=${GIT_SHA}
 ENV NEXT_PUBLIC_GIT_SHA=${GIT_SHA}
-RUN echo "DOCKERFILE_MARKER=apps/web/Dockerfile" \
-  && echo "GIT_SHA_PRESENT=$([ -n \"$GIT_SHA\" ] && echo yes || echo no)" \
-  && echo "NEXT_PUBLIC_GIT_SHA_PRESENT=$([ -n \"$NEXT_PUBLIC_GIT_SHA\" ] && echo yes || echo no)" \
-  && echo "GIT_SHA_VALUE=${GIT_SHA}" \
-  && echo "NEXT_PUBLIC_GIT_SHA_VALUE=${NEXT_PUBLIC_GIT_SHA}"
+RUN if [ -n "$GIT_SHA" ] && [ "$GIT_SHA" != "unknown" ]; then \
+      printf 'GIT_SHA=%s\n' "$GIT_SHA" > BUILD_SHA; \
+    else \
+      printf 'GIT_SHA=unavailable\n' > BUILD_SHA; \
+    fi
 COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY --from=deps /usr/src/app/package*.json ./
 COPY --from=deps /usr/src/app/apps/api/package*.json ./apps/api/
