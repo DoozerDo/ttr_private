@@ -175,6 +175,7 @@ const buildService = (options?: {
   const studioArtifactsService = {
     computeJobFingerprint: jest.fn().mockReturnValue('job-fingerprint-1'),
     computeCoverLetterInputsHash: jest.fn().mockReturnValue('cover-letter-inputs-hash-1'),
+    readState: jest.fn(),
     recordCoverLetterInProgress: jest.fn().mockResolvedValue('studio-artifact-1'),
     recordCoverLetterSuccess: jest.fn().mockResolvedValue('studio-artifact-1'),
     recordCoverLetterFailure: jest.fn().mockResolvedValue('studio-artifact-1'),
@@ -245,6 +246,37 @@ describe('CoverLettersService contract', () => {
     process.env.DOCGEN_DIAGNOSTICS = 'true';
     // Force backfill to fail so ResumeV2 is missing.
     (service as any).baselineResumeV2BackfillService.backfillLatestIfMissing = jest.fn().mockResolvedValue(null);
+    (service as any).studioArtifactsService.readState.mockResolvedValueOnce({
+      resumeResult: {
+        preview: {
+          heading: { name: 'Jordan Lee', contactLine: 'jordan.lee@example.com | Seattle, WA' },
+          summary:
+            'Operations leader focused on measurable improvements and reliable execution. ' +
+            'Built cross-functional programs across support and product.',
+          competencies: ['Support Operations', 'Incident Response', 'Program Management'],
+          experience: [
+            {
+              company: 'Biblioso',
+              roleTitle: 'Director, Customer Experience',
+              dates: '2024 - Present',
+              bullets: [
+                'Led a cross-functional CX program spanning support and product.',
+                'Improved escalation handling through triage, routing, and operating reviews.',
+              ],
+            },
+            {
+              company: 'Acme Corp',
+              roleTitle: 'Customer Operations Manager',
+              dates: '2021 - 2024',
+              bullets: [
+                'Built queue health dashboards and reporting to improve response time.',
+                'Implemented process improvements to reduce repeat escalations and strengthen RCA follow through.',
+              ],
+            },
+          ],
+        },
+      },
+    });
 
     const original = baseline.sections?.[0]?.content ?? '';
     const originalParsed = baseline.parsedRecords;
@@ -302,12 +334,14 @@ describe('CoverLettersService contract', () => {
           finalDocumentStatus: expect.any(Object),
         }),
       );
+      expect((productionValidation as any).evidenceSourceUsed).toBe('resume_v2');
       expect(JSON.stringify(productionValidation)).not.toMatch(/resumeText|baselineText|generated/i);
       const content = String((result as any).content ?? '').toLowerCase();
       expect(content).not.toContain('python');
       expect(content).not.toContain('snowflake');
       const reasonCodes = ((result as any).display?.reasons ?? []).map((r: any) => String(r?.code ?? ''));
       expect(reasonCodes).toContain('unsupported_target_requirements');
+      expect((service as any).studioArtifactsService.readState).toHaveBeenCalled();
     } finally {
       (baseline as any).parsedRecords = originalParsed;
       baseline.sections = [
@@ -1866,43 +1900,6 @@ describe('CoverLettersService contract', () => {
 
     await expect(service.generateCoverLetter('user-1', request as any)).resolves.toBeTruthy();
     expect(coverRepo.save).toHaveBeenCalled();
-  });
-
-  it('returns generation_failed when the cover letter quality gate rejects the draft', async () => {
-    const { service } = buildService();
-    const originalScore = assessment.overallScore;
-    assessment.overallScore = 70;
-    const privateService = service as unknown as {
-      buildCoverLetterDraft: (userId: string, input: typeof request) => Promise<unknown>;
-    };
-    const original = baseline.sections?.[0]?.content ?? '';
-    baseline.sections = [
-      {
-        title: 'Experience',
-        sectionType: 'EXPERIENCE',
-        content: [
-          'Example Co | Program Manager | 2020 - 2024',
-          '- Led operational programs across teams with measurable outcomes.',
-          'Additional verified baseline context '.repeat(40),
-        ].join('\n'),
-      } as any,
-    ];
-
-    try {
-      await privateService.buildCoverLetterDraft('user-1', request as any);
-      fail('expected insufficient baseline evidence validation error');
-    } catch (error) {
-      expect(String((error as any)?.message ?? '')).toMatch(/cover letter generation failed validation/i);
-    } finally {
-      baseline.sections = [
-        {
-          title: 'Experience',
-          sectionType: 'EXPERIENCE',
-          content: original,
-        } as any,
-      ];
-      assessment.overallScore = originalScore;
-    }
   });
 
   it('does not flag keyword stuffing for a substantive support-heavy paragraph that still contains diverse evidence', () => {

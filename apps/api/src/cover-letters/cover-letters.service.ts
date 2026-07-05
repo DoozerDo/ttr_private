@@ -390,6 +390,28 @@ export class CoverLettersService {
     return (candidates[candidates.length - 1] as any).resumeV2Json ?? null;
   }
 
+  private extractPersistedResumeV2FromStudioArtifactsState(state: unknown): Record<string, unknown> | null {
+    if (!state || typeof state !== 'object') return null;
+    const record = state as Record<string, unknown>;
+    const candidateSources = [
+      (record as any)?.resumeResult?.preview?.resume,
+      (record as any)?.resumeResult?.preview,
+      (record as any)?.resume?.responseBody?.preview?.resume,
+      (record as any)?.resume?.responseBody?.preview,
+    ];
+
+    for (const candidate of candidateSources) {
+      if (!candidate || typeof candidate !== 'object') continue;
+      const normalized = normalizeNormalizedResumeDocument(candidate as any);
+      const validation = validateNormalizedResumeDocument(normalized as any);
+      if (validation.valid) {
+        return normalized as any;
+      }
+    }
+
+    return null;
+  }
+
   private throwGenerationBlockedError(blockers: Array<{ code: string; message: string }>): never {
     throw new UnprocessableEntityException(buildArtifactFailurePayload({
       code: 'generation_blocked',
@@ -1583,7 +1605,7 @@ export class CoverLettersService {
 
     // Resume V2 is preferred evidence, not the only permissible evidence source.
     // Fall back to verified baseline sections / raw extraction when Resume V2 is missing or invalid.
-    const resumeV2PlainText = evidenceBundle.resumePlainText;
+    let resumeV2PlainText = evidenceBundle.resumePlainText;
 
     const closingTemplateKey = await this.resolveClosingTemplateKey(
       userId,
@@ -1624,6 +1646,51 @@ export class CoverLettersService {
           baseline.parsedRecords = [backfilled as any];
         }
         persistedResumeV2 = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) as any;
+      }
+    }
+    if (!persistedResumeV2 && analysisId) {
+      try {
+        const studioArtifactsState = await this.studioArtifactsService.readState({
+          userId,
+          baselineId: baseline.id,
+          jobId: job.id,
+          baselineVersionId: baselineVersion.id,
+          analysisId,
+        });
+        const studioResumeV2 = this.extractPersistedResumeV2FromStudioArtifactsState(
+          studioArtifactsState,
+        );
+        if (studioResumeV2) {
+          persistedResumeV2 = studioResumeV2;
+          resumeV2PlainText = buildResumePlainText(studioResumeV2 as any);
+          const parsedRecords = Array.isArray(baseline.parsedRecords) ? [...baseline.parsedRecords] : [];
+          if (parsedRecords.length > 0) {
+            let latestIndex = 0;
+            let latestTime = -Infinity;
+            parsedRecords.forEach((record: any, index: number) => {
+              const currentTime = record?.createdAt ? new Date(record.createdAt).getTime() : 0;
+              if (currentTime >= latestTime) {
+                latestTime = currentTime;
+                latestIndex = index;
+              }
+            });
+            parsedRecords[latestIndex] = {
+              ...(parsedRecords[latestIndex] as any),
+              resumeV2Json: studioResumeV2,
+            };
+            baseline.parsedRecords = parsedRecords as any;
+          } else {
+            baseline.parsedRecords = [
+              {
+                createdAt: new Date(),
+                parsedJson: {},
+                resumeV2Json: studioResumeV2,
+              } as any,
+            ];
+          }
+        }
+      } catch {
+        // If Studio artifact state cannot be read, continue with baseline-backed evidence only.
       }
     }
     let baselineFileUsable = Boolean(persistedResumeV2) || Boolean(evidenceBundle.usableWorkHistoryEvidence);
@@ -3175,6 +3242,9 @@ export class CoverLettersService {
   }
 
   private throwCoverLetterQualityError(flags: string[], stage: string): never {
+    this.logger.warn(
+      `[cover_letter][validation_failed] stage=${stage} flags=${Array.from(new Set(flags)).slice(0, 8).join(",")}`,
+    );
     throw new UnprocessableEntityException({
       code: 'generation_failed',
       message: 'Cover letter generation failed validation.',
@@ -3334,7 +3404,9 @@ export class CoverLettersService {
       for (const token of tokens) {
         tokenCounts.set(token, (tokenCounts.get(token) ?? 0) + 1);
       }
-      if ([...tokenCounts.values()].some((count) => count >= 10 && count / tokens.length >= 0.45)) {
+      // Catch true stuffing only when a single token dominates a paragraph heavily.
+      // Natural support-heavy prose often reuses one or two role nouns, which should not fail.
+      if ([...tokenCounts.values()].some((count) => count >= 12 && count / tokens.length >= 0.55)) {
         return true;
       }
     }
