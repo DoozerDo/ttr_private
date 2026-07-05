@@ -309,12 +309,32 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
     };
 
     const StudioPage = (await import("@/app/(app)/studio/page")).default;
-    render(<StudioPage />);
+    const rendered = render(<StudioPage />);
 
     await waitFor(() => {
       expect(resumePosts).toBe(1);
       expect(coverPosts).toBe(1);
     }, { timeout: 120_000 });
+
+    const debugBefore = JSON.parse(
+      screen.getByTestId("studio-orchestration-debug").querySelector("pre")?.textContent ?? "{}",
+    ) as Record<string, any>;
+    expect(Array.isArray(debugBefore.generationClaims?.activeGenerationRequestKeys)).toBe(true);
+    expect((debugBefore.generationClaims?.activeGenerationRequestKeys ?? []).length).toBeGreaterThan(0);
+    expect(debugBefore.generationClaims?.activeResumeRequest).toEqual(
+      expect.objectContaining({
+        requestId: expect.any(String),
+        requestKey: expect.stringContaining("resume"),
+      }),
+    );
+
+    rendered.rerender(<StudioPage />);
+
+    const debugAfter = JSON.parse(
+      screen.getByTestId("studio-orchestration-debug").querySelector("pre")?.textContent ?? "{}",
+    ) as Record<string, any>;
+    expect(Array.isArray(debugAfter.generationClaims?.activeGenerationRequestKeys)).toBe(true);
+    expect(debugAfter.generationClaims?.activeResumeRequest).toBeTruthy();
 
     await expect(screen.findByTestId("studio-resume-ready-panel")).resolves.toBeTruthy();
     await expect(screen.findByTestId("studio-cover-ready-panel")).resolves.toBeTruthy();

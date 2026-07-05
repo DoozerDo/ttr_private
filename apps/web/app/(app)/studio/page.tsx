@@ -1772,6 +1772,22 @@ export default function StudioPage() {
   });
   const generationScopeGuardRef = useRef(getStudioGenerationScopeGuardStore());
 
+  const getGenerationClaimDebugSnapshot = useCallback(() => {
+    const activeGenerationRequestKeys = Array.from(activeGenerationRequestKeysRef.current.values());
+    const activeResumeRequest = activeResumeGenerationRef.current;
+    const activeCoverRequest = activeCoverGenerationRef.current;
+    const activeAutoRequest = activeAutoGenerationRef.current;
+    return {
+      generationScopeGuardKeys: Array.from(generationScopeGuardRef.current.keys()),
+      activeGenerationRequestKeys,
+      activeGenerationRequestCount: activeGenerationRequestKeys.length,
+      activeResumeRequest,
+      activeCoverRequest,
+      activeAutoRequest,
+      suppressAutoGeneration: Boolean(suppressAutoGenerationRef.current),
+    };
+  }, []);
+
   const buildGenerationScopeKey = useCallback(
     (input: {
       baselineId: string | null;
@@ -3042,6 +3058,7 @@ export default function StudioPage() {
       ) {
         return;
       }
+      const beforeCleanupClaims = getGenerationClaimDebugSnapshot();
       try {
         const hydrationStorage = typeof window !== "undefined" ? window.localStorage : null;
         const hydrationSessionStorage = typeof window !== "undefined" ? window.sessionStorage : null;
@@ -3082,6 +3099,20 @@ export default function StudioPage() {
         }
       } catch {
         // ignore
+      }
+      if (process.env.NODE_ENV !== "production" || debugAutoGenerationEnabled) {
+        console.info("[studio][artifact_hydration_recovery][generation_claims_cleared]", {
+          area: "studio",
+          operation: "artifact_hydration_recovery",
+          status: "info",
+          code: "generation_claims_cleared",
+          analysisId: requestedAnalysisId ?? null,
+          jobId: effectiveJobId ?? null,
+          baselineId: effectiveBaselineId ?? null,
+          baselineVersionId: effectiveBaselineVersionId ?? null,
+          before: beforeCleanupClaims,
+          after: getGenerationClaimDebugSnapshot(),
+        });
       }
     };
     if (studioArtifactHydrationKeyRef.current === studioArtifactHydrationSignature) {
@@ -5797,7 +5828,7 @@ export default function StudioPage() {
         } catch {
           latch = null;
         }
-    const shouldBlockFromLatch =
+        const shouldBlockFromLatch =
       latch === "succeeded" &&
       artifactContract.hasUsableArtifacts &&
       !missingResumeOutput &&
@@ -5811,6 +5842,7 @@ export default function StudioPage() {
           artifactsExist,
           generatingNow,
           shouldBlockFromLatch,
+          generationClaims: getGenerationClaimDebugSnapshot(),
         };
 	      })(),
 	      canProceedWithStudioDrafts,
@@ -5818,13 +5850,14 @@ export default function StudioPage() {
 	      autoGenerationInFlight,
 	      resumeGenerating,
 	      coverGenerating,
-	      // Debug payload: use the same persisted authority source as the rest of Studio orchestration.
-	      hasResumeArtifact,
-	      hasCoverLetterArtifact: hasRenderableCoverLetterContent,
-	      hasResumeArtifactPersisted,
-	      hasCoverLetterArtifactPersisted,
-	      hasAnyArtifactPersisted,
-	      studioArtifactPairStatus,
+      // Debug payload: use the same persisted authority source as the rest of Studio orchestration.
+      hasResumeArtifact,
+      hasCoverLetterArtifact: hasRenderableCoverLetterContent,
+      hasResumeArtifactPersisted,
+      hasCoverLetterArtifactPersisted,
+      hasAnyArtifactPersisted,
+      studioArtifactPairStatus,
+      generationClaims: getGenerationClaimDebugSnapshot(),
       effectiveBaselineId,
       effectiveBaselineVersionId,
       effectiveJobId,
