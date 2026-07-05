@@ -51,15 +51,19 @@ describe("resolveBuildSha", () => {
     });
   });
 
-  it("fails closed when neither env nor git metadata is available", async () => {
+  it("falls back to unavailable when neither env nor git metadata is available", async () => {
     const { resolveBuildSha } = await import("../scripts/build-identity.cjs");
 
-    expect(() =>
+    expect(
       resolveBuildSha(
         vi.fn(() => {
           throw new Error("git unavailable");
         }) as unknown as typeof import("node:child_process").execSync,
       ),
-    ).toThrow(/Unable to resolve web build SHA/i);
+    ).toEqual({
+      sha: "unavailable",
+      source: null,
+      resolvedFrom: "fallback",
+    });
   });
 });

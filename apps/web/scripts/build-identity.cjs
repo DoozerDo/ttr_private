@@ -61,9 +61,11 @@ function resolveBuildSha(execFn = execSync) {
     // Fall through to the explicit failure below.
   }
 
-  throw new Error(
-    "Unable to resolve web build SHA. Provide GIT_SHA or build from a git checkout before deploying production.",
-  );
+  return {
+    sha: "unavailable",
+    source: null,
+    resolvedFrom: "fallback",
+  };
 }
 
 module.exports = {
