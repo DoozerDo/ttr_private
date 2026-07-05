@@ -1902,6 +1902,8 @@ export class StudioArtifactsService {
     const qualityGate =
       responseBody && typeof responseBody.qualityGate === 'object'
         ? (responseBody.qualityGate as Record<string, unknown>)
+        : responseBody && typeof (responseBody as any).quality === 'object'
+          ? ((responseBody as any).quality as Record<string, unknown>)
         : null;
     const qualityStatusRaw = qualityGate?.status;
     const resumeIsPersistedAuthority = artifact === 'resume' && record.usableCurrent && Boolean(previewModel);

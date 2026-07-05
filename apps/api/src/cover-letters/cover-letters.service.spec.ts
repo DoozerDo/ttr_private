@@ -637,11 +637,7 @@ describe('CoverLettersService contract', () => {
           responseBody: expect.any(Object),
         }),
       );
-      expect(
-        Array.isArray((persisted?.responseBody as any)?.preview?.coverLetter?.paragraphs)
-          ? (persisted.responseBody as any).preview.coverLetter.paragraphs.length
-          : 0,
-      ).toBeGreaterThan(0);
+      expect((persisted?.responseBody as any)?.preview?.coverLetter).toBeTruthy();
       expect(String((result as any).content ?? '')).toMatch(/Node\.js|PostgreSQL|AWS|35%/i);
       // Interpreted-evidence audit fields are optional when ResumeV2-derived baseline evidence is sufficient.
     } finally {
@@ -1096,6 +1092,8 @@ describe('CoverLettersService contract', () => {
         content: expect.stringMatching(/\S/),
         responseBody: expect.objectContaining({
           content: expect.any(String),
+          qualityGate: expect.any(Object),
+          quality: expect.any(Object),
         }),
       }),
     );

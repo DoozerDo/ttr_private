@@ -906,17 +906,13 @@ export class CoverLettersService {
       const exports: DocumentGenerationExports = exportReady
         ? { docx: true, pdf: true }
         : { docx: false, pdf: false };
+      const canonicalQualityGate =
+        draft.qualityGate ?? { status: 'pass', reasons: [] as string[] };
       const response = {
         status: 'success',
         generationStatus: 'success',
-        ...(draft.qualityGate
-          ? {
-              quality:
-                draft.qualityGate.status === 'pass'
-                  ? { status: 'pass', reasons: [] }
-                  : draft.qualityGate,
-            }
-          : {}),
+        quality: canonicalQualityGate.status === 'pass' ? { status: 'pass', reasons: [] } : canonicalQualityGate,
+        qualityGate: canonicalQualityGate,
         ...savedCoverLetter,
       baselineVersionId: draft.baselineVersion.id,
       exportReady,
