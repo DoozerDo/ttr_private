@@ -7928,7 +7928,7 @@ export default function StudioPage() {
         ? window.setTimeout(() => controller.abort(), timeoutMs)
         : null;
     try {
-      const response = await fetch("/api/resume", {
+      const response = await fetch("/api/resume/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payloadWithRequestId),
@@ -8114,7 +8114,7 @@ export default function StudioPage() {
           : await generateWithRetry({
               generate: async (strictMode) => {
                 if (!strictMode) return responsePayload;
-                const retryResponse = await fetch("/api/resume", {
+                const retryResponse = await fetch("/api/resume/generate", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ 
@@ -8856,7 +8856,7 @@ export default function StudioPage() {
         ? window.setTimeout(() => controller.abort(), timeoutMs)
         : null;
     try {
-      const response = await fetch("/api/cover-letters", {
+      const response = await fetch("/api/cover-letters/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payloadWithRequestId),
@@ -9020,7 +9020,7 @@ export default function StudioPage() {
           : await generateWithRetry({
               generate: async (strictMode) => {
                 if (!strictMode) return responsePayload;
-                const retryResponse = await fetch("/api/cover-letters", {
+                const retryResponse = await fetch("/api/cover-letters/generate", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ 

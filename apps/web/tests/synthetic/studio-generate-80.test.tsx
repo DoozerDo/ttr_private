@@ -176,13 +176,13 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
         if (url === "/api/cover-letters/readiness" && method === "POST") return jsonResponse(baselineUsableReadinessPayload);
 
         // Generation: must succeed exactly once each and must persist artifacts (Studio reload reads them back).
-        if ((url === "/api/resume" || url === "/api/resume/generate") && method === "POST") {
+        if (url === "/api/resume/generate" && method === "POST") {
           resumePosts += 1;
           // Persist into the same store returned by /api/studio/artifacts.
           persisted.resume = { responseBody: renderableResume };
           return jsonResponse(renderableResume);
         }
-        if ((url === "/api/cover-letters" || url === "/api/cover-letters/generate") && method === "POST") {
+        if (url === "/api/cover-letters/generate" && method === "POST") {
           coverPosts += 1;
           persisted.coverLetter = { responseBody: renderableCover };
           return jsonResponse(renderableCover);
@@ -376,6 +376,12 @@ describe("Beta loop: Studio score>=80 generates + persists + reload renders", ()
         coverPosts += 1;
         persisted.coverLetter = { responseBody: renderableCover };
         return jsonResponse(renderableCover);
+      }
+      if (url === "/api/resume" && method === "POST") {
+        return new Response("Unexpected legacy resume route", { status: 500 });
+      }
+      if (url === "/api/cover-letters" && method === "POST") {
+        return new Response("Unexpected legacy cover route", { status: 500 });
       }
       if (url.startsWith("/api/baselines")) return jsonResponse([{ id: "base-80", status: "ACTIVE" }]);
       if (url.startsWith("/api/jobs")) return jsonResponse([{ id: "job-80", title: "Local scoring validation role", company: "TargetThisRole" }]);
