@@ -31,18 +31,18 @@ mv "${REMOTE_ENV_FILE}.tmp" "${REMOTE_ENV_FILE}"
 printf 'GIT_SHA=%s\n' "${GIT_SHA}" >> "${REMOTE_ENV_FILE}"
 
 echo "Deploy preflight:"
-echo "  - compose file: ${DEPLOY_PATH}/docker-compose.dev.yml"
+echo "  - canonical deploy script path: ${DEPLOY_PATH}/up.sh"
+echo "  - compose file: ${DEPLOY_PATH}/docker-compose.yml"
 echo "  - env file: ${DEPLOY_PATH}/.env"
 echo "  - GIT_SHA present: yes"
 echo "  - build arg GIT_SHA=${GIT_SHA}"
 
 ssh "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p ${DEPLOY_PATH}"
 
-scp infra/docker/docker-compose.dev.yml "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/docker-compose.dev.yml"
+scp infra/docker/docker-compose.prod.yml "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/docker-compose.yml"
 scp infra/docker/Caddyfile "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/Caddyfile"
 scp "${REMOTE_ENV_FILE}" "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/.env"
 
 ssh "${DEPLOY_USER}@${DEPLOY_HOST}" "\
   echo '${GHCR_TOKEN}' | sudo docker login ghcr.io -u '${GHCR_USERNAME}' --password-stdin && \
-  sudo env GIT_SHA='${GIT_SHA}' docker compose --env-file ${DEPLOY_PATH}/.env -f ${DEPLOY_PATH}/docker-compose.dev.yml pull && \
-  sudo env GIT_SHA='${GIT_SHA}' docker compose --env-file ${DEPLOY_PATH}/.env -f ${DEPLOY_PATH}/docker-compose.dev.yml up -d"
+  sudo env GIT_SHA='${GIT_SHA}' ${DEPLOY_PATH}/up.sh"

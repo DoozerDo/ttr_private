@@ -72,6 +72,11 @@ describe('AnalysisService - fit scores contract', () => {
   let fitScoringServiceMock: { score: jest.Mock };
   let resumeServiceMock: { generateResume: jest.Mock };
   let coverLettersServiceMock: { generateCoverLetter: jest.Mock };
+  let workflowIdempotencyServiceMock: {
+    reserve: jest.Mock;
+    complete: jest.Mock;
+    markFailure: jest.Mock;
+  };
 
   const baselineVersion: Partial<BaselineVersion> = {
     id: 'bv-1',
@@ -543,6 +548,15 @@ const sampleScoringV2: CxFitV2Result = {
     coverLettersServiceMock = {
       generateCoverLetter: jest.fn().mockResolvedValue({ status: 'success' }),
     };
+    workflowIdempotencyServiceMock = {
+      reserve: jest.fn().mockResolvedValue({
+        status: 'accepted_new',
+        runId: 'run-1',
+        responseBody: null,
+      }),
+      complete: jest.fn().mockResolvedValue({ status: 'completed' }),
+      markFailure: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module = await Test.createTestingModule({
       providers: [
@@ -589,15 +603,7 @@ const sampleScoringV2: CxFitV2Result = {
         },
         {
           provide: WorkflowIdempotencyService,
-          useValue: {
-            reserve: jest.fn().mockResolvedValue({
-              status: 'accepted_new',
-              runId: 'run-1',
-              responseBody: null,
-            }),
-            complete: jest.fn().mockResolvedValue({ status: 'completed' }),
-            markFailure: jest.fn().mockResolvedValue(undefined),
-          },
+          useValue: workflowIdempotencyServiceMock,
         },
         {
           provide: ResumeService,
@@ -1691,6 +1697,178 @@ const sampleScoringV2: CxFitV2Result = {
     );
 
     expect(readResult.assessmentId).toBe(existingAssessment.id);
+    expect(readResult.overallScore).toBe(sampleScoringV2.score);
+    expect(readResult.scoring_v2?.score).toBe(sampleScoringV2.score);
+  });
+
+  it('refreshes the persisted latest assessment row when idempotency reuses a canonical completed response', async () => {
+    const assessmentId = 'fit-cached-88';
+    const jobForRefresh: Job = {
+      id: 'job-1',
+      userId: 'user-1',
+      rawDescription: '  Lead enterprise programs with narrative clarity.  ',
+      normalizedResponsibilities: [],
+      normalizedRequirements: [],
+      title: 'Strategic Lead',
+      company: 'ExampleCo',
+      sourceUrl: 'https://example.com/jobs/leadership',
+      jdIngestionMethod: JobIngestionMethod.PASTE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as Job;
+    const expectedHash = await service['computeExpectedInputsHashForJobBaseline'](
+      'user-1',
+      jobForRefresh,
+      baseline,
+    );
+    const staleAssessment: FitAssessment = {
+      id: assessmentId,
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: baseline.version,
+      overallScore: 71,
+      verdict: FitAssessmentVerdict.CONSIDER,
+      dimensionScores: {
+        experienceAlignment: 21,
+        leadershipLevel: 14,
+        technicalPlatformFit: 13,
+        industryContext: 11,
+        strategicTacticalFit: 11,
+      },
+      strengths: ['stale strength'],
+      gaps: ['stale gap'],
+      complianceFlags: [],
+      scoringV2: {
+        ...sampleScoringV2,
+        score: 71,
+      },
+      inputsHash: expectedHash,
+      createdAt: new Date('2026-06-26T15:30:51.386Z'),
+      updatedAt: new Date('2026-06-26T15:30:51.386Z'),
+    };
+
+    const canonicalCachedResponse = {
+      status: 'ok',
+      assessmentId,
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: baseline.version,
+      createdAt: staleAssessment.createdAt,
+      score: sampleScoringV2.score,
+      overallScore: sampleScoringV2.score,
+      overall_score: sampleScoringV2.score,
+      fit_score: sampleScoringV2.score,
+      verdict: 'Apply',
+      breakdown: {
+        experience_alignment: 27,
+        leadership_level: 18,
+        technical_platform_fit: 14,
+        industry_context: 14,
+        strategic_vs_tactical: 15,
+      },
+      strengths: ['fresh strength'],
+      gaps: ['fresh gap'],
+      criticalGaps: [],
+      recommendedActions: [],
+      compliance_flags: [],
+      complianceFlags: [],
+      confidenceScore: 100,
+      confidenceReasons: [],
+      scoringReliability: 'ok',
+      scoreConfidence: 'high',
+      scoreConfidenceReasons: ['fresh canonical response'],
+      scoreSanityFlags: [],
+      likelyUnderestimatedFit: false,
+      scorePresentationMode: 'normal',
+      scoring_v2: {
+        ...sampleScoringV2,
+      },
+      fitScore: {
+        score: sampleScoringV2.score,
+        verdict: 'apply',
+        matchedSignals: ['fresh strength'],
+        gapSignals: ['fresh gap'],
+        sourceEvidence: ['fresh strength', 'fresh gap'],
+      },
+      idempotency: {
+        status: 'existing_completed',
+        runId: 'run-1',
+        dedupeKey: 'dedupe-key',
+        reused: true,
+      },
+    } as any;
+
+    baselineRepository.createQueryBuilder.mockReturnValue({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue({
+        ...baseline,
+        latestAssessmentId: assessmentId,
+        sections: baselineSections,
+        parsedRecords: baseline.parsedRecords,
+      }),
+    });
+
+    workflowIdempotencyServiceMock.reserve.mockResolvedValueOnce({
+      status: 'existing_completed',
+      runId: 'run-1',
+      responseBody: canonicalCachedResponse,
+    });
+
+    fitAssessmentRepository.findOne.mockImplementation(({ where }) => {
+      if (where?.id === assessmentId) {
+        return Promise.resolve(staleAssessment);
+      }
+      return Promise.resolve(null);
+    });
+
+    let savedAssessment: FitAssessment | null = null;
+    fitAssessmentRepository.save.mockImplementation(async (payload) => {
+      savedAssessment = {
+        ...(payload as FitAssessment),
+        id: assessmentId,
+        createdAt: staleAssessment.createdAt,
+        updatedAt: new Date(),
+      } as FitAssessment;
+      return savedAssessment;
+    });
+
+    fitAssessmentQueryBuilder.getOne.mockImplementation(() =>
+      Promise.resolve(
+        savedAssessment ?? {
+          ...staleAssessment,
+          overallScore: sampleScoringV2.score,
+          scoringV2: {
+            ...sampleScoringV2,
+          },
+        },
+      ),
+    );
+
+    const runResult = await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+      baselineVersion: baseline.version,
+    });
+
+    expect(runResult.idempotency?.status).toBe('existing_completed');
+    expect(runResult.idempotency?.reused).toBe(true);
+    expect(runResult.overallScore).toBe(sampleScoringV2.score);
+    expect(savedAssessment?.overallScore).toBe(sampleScoringV2.score);
+    expect(savedAssessment?.scoringV2?.score).toBe(sampleScoringV2.score);
+    expect(baselineRepository.update).toHaveBeenCalledWith(
+      { id: 'b-1', userId: 'user-1' },
+      expect.objectContaining({
+        latestAssessmentId: assessmentId,
+        latestBaselineScore: sampleScoringV2.score,
+      }),
+    );
+
+    const readResult = await service.getFitAssessmentById('user-1', assessmentId);
     expect(readResult.overallScore).toBe(sampleScoringV2.score);
     expect(readResult.scoring_v2?.score).toBe(sampleScoringV2.score);
   });

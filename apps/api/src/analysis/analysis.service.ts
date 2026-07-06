@@ -3671,6 +3671,13 @@ export class AnalysisService {
             `[fit-score] duplicate_request_reused operation=analysis.run runId=${reservation.runId} dedupeKey=${analysisDedupeKey} assessmentId=${(reservation.responseBody as { assessmentId?: string }).assessmentId ?? 'missing'}`,
           );
         }
+        await this.refreshPersistedAssessmentFromCachedRunResult(
+          userId,
+          baseline.id,
+          resolvedJobId,
+          inputsHash,
+          reservation.responseBody as RunFitAssessmentOkResponse,
+        );
         return {
           ...(reservation.responseBody as RunAssessmentResult),
           idempotency: {
@@ -4894,6 +4901,101 @@ export class AnalysisService {
       score_breakdown: scoreBreakdown,
       narrative,
     };
+  }
+
+  private async refreshPersistedAssessmentFromCachedRunResult(
+    userId: string,
+    baselineId: string,
+    jobId: string,
+    inputsHash: string,
+    cachedResponse: RunFitAssessmentOkResponse,
+  ) {
+    const assessmentId = cachedResponse.assessmentId?.trim();
+    if (!assessmentId) {
+      return;
+    }
+
+    const overallScore =
+      typeof cachedResponse.overallScore === 'number'
+        ? cachedResponse.overallScore
+        : typeof cachedResponse.overall_score === 'number'
+          ? cachedResponse.overall_score
+          : typeof cachedResponse.score === 'number'
+            ? cachedResponse.score
+            : null;
+    if (overallScore === null) {
+      return;
+    }
+
+    const existingAssessment = await this.fitAssessmentRepository.findOne({
+      where: {
+        id: assessmentId,
+        userId,
+        jobId,
+        baselineId,
+      },
+    });
+
+    const persistedAssessment = existingAssessment
+      ? {
+          ...existingAssessment,
+          overallScore,
+          verdict: this.deriveFitAssessmentVerdictFromScore(overallScore),
+          dimensionScores:
+            cachedResponse.dimensionScores ?? existingAssessment.dimensionScores,
+          strengths: cachedResponse.strengths ?? existingAssessment.strengths,
+          gaps: cachedResponse.gaps ?? existingAssessment.gaps,
+          complianceFlags:
+            cachedResponse.complianceFlags ?? existingAssessment.complianceFlags,
+          confidenceScore:
+            cachedResponse.confidenceScore ?? existingAssessment.confidenceScore,
+          confidenceReasons:
+            cachedResponse.confidenceReasons ?? existingAssessment.confidenceReasons,
+          scoringReliability:
+            cachedResponse.scoringReliability ?? existingAssessment.scoringReliability,
+          scoringReliabilityReason:
+            cachedResponse.scoringReliabilityReason ??
+            existingAssessment.scoringReliabilityReason,
+          scoringV2:
+            cachedResponse.scoring_v2 ?? existingAssessment.scoringV2 ?? null,
+          inputsHash,
+        }
+      : this.fitAssessmentRepository.create({
+          id: assessmentId,
+          userId,
+          jobId,
+          baselineId,
+          baselineVersion: cachedResponse.baselineVersion ?? null,
+          overallScore,
+          verdict: this.deriveFitAssessmentVerdictFromScore(overallScore),
+          dimensionScores: cachedResponse.dimensionScores ?? {
+            experienceAlignment: 0,
+            leadershipLevel: 0,
+            technicalPlatformFit: 0,
+            industryContext: 0,
+            strategicTacticalFit: 0,
+          },
+          strengths: cachedResponse.strengths ?? [],
+          gaps: cachedResponse.gaps ?? [],
+          complianceFlags: cachedResponse.complianceFlags ?? [],
+          confidenceScore: cachedResponse.confidenceScore ?? null,
+          confidenceReasons: cachedResponse.confidenceReasons ?? [],
+          scoringReliability: cachedResponse.scoringReliability ?? 'ok',
+          scoringReliabilityReason: cachedResponse.scoringReliabilityReason ?? null,
+          scoringV2: cachedResponse.scoring_v2 ?? null,
+          inputsHash,
+        });
+
+    await this.fitAssessmentRepository.save(persistedAssessment as FitAssessment);
+
+    await this.baselineRepository.update(
+      { id: baselineId, userId },
+      {
+        latestAssessmentId: assessmentId,
+        latestBaselineScore: overallScore,
+        lastAnalyzedAt: new Date(),
+      },
+    );
   }
 
   private shouldRecomputeLatestAssessment(

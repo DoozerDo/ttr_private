@@ -1,7 +1,5 @@
 # docker-compose.prod.yml: “server runtime for production environment”
 
-version: "3.9"
-
 services:
   db:
     image: postgres:16
@@ -13,11 +11,9 @@ services:
       - db_data:/var/lib/postgresql/data
 
   api:
-    build:
-      context: ../..
-      dockerfile: infra/docker/api.Dockerfile
+    image: ghcr.io/doozerdo/ttr_private-api:${GIT_SHA:?Set GIT_SHA before deploying the production API image}
     env_file:
-      - ../../.env.dreamhost
+      - .env
     environment:
       NODE_ENV: production
       DATABASE_URL: postgres://postgres:postgres@db:5432/targetthisrole
@@ -31,11 +27,7 @@ services:
     # rely on the Dockerfile's CMD, e.g. `npm run start:prod`
 
   web:
-    build:
-      context: ../..
-      dockerfile: apps/web/Dockerfile
-      args:
-        GIT_SHA: ${GIT_SHA:?Set GIT_SHA before building the production web image}
+    image: ghcr.io/doozerdo/ttr_private-web:${GIT_SHA:?Set GIT_SHA before deploying the production web image}
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_BASE_URL: http://localhost:3001
