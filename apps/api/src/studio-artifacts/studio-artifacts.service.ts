@@ -370,25 +370,8 @@ function sanitizeResumeResponseBodyForEvidenceContract(
   const resume = normalizeRecord(preview?.resume);
   if (!preview || !resume) return normalized;
 
-  const internal = normalizeRecord((normalized as any).internal);
-  const canonicalResumeV2 =
-    safeText(internal?.generationPipeline) === 'v2' ||
-    safeText(internal?.generationMode) === 'structured_baseline_template';
-  const structuredExperiencePresent = Array.isArray((resume as any).experience)
-    ? (resume as any).experience.some((employer: any) => {
-        const employerRecord = normalizeRecord(employer);
-        if (!employerRecord) return false;
-        const company = safeText((employerRecord as any).company);
-        const roleTitle = safeText((employerRecord as any).roleTitle);
-        const bullets = Array.isArray((employerRecord as any).bullets) ? (employerRecord as any).bullets : [];
-        return Boolean(company && roleTitle && bullets.length > 0);
-      })
-    : false;
-  const allowCanonicalResumeV2WithoutBulletEvidence = canonicalResumeV2 && structuredExperiencePresent;
-
   const experience = Array.isArray((resume as any).experience) ? (resume as any).experience : [];
   const nextExperience: unknown[] = [];
-  const usedEvidenceIds = new Set<string>();
 
   for (const employer of experience) {
     const employerRecord = normalizeRecord(employer);
@@ -400,25 +383,14 @@ function sanitizeResumeResponseBodyForEvidenceContract(
       const bulletRecord = normalizeRecord(bullet) ?? (typeof bullet === 'string' ? { text: bullet } : null);
       if (!bulletRecord) continue;
       const text = safeText((bulletRecord as any).text ?? bullet);
-      const sourceEvidenceIds = Array.isArray((bulletRecord as any).sourceEvidenceIds)
-        ? (bulletRecord as any).sourceEvidenceIds.filter(Boolean)
-        : Array.isArray((bulletRecord as any)?.source?.sourceEvidenceIds)
-          ? (bulletRecord as any).source.sourceEvidenceIds.filter(Boolean)
-          : [];
-
-      if (!text || looksLikeGenericResumeFiller(text) || (sourceEvidenceIds.length === 0 && !allowCanonicalResumeV2WithoutBulletEvidence)) {
+      if (!text || looksLikeGenericResumeFiller(text)) {
         continue;
       }
 
-      sourceEvidenceIds.forEach((id) => usedEvidenceIds.add(String(id)));
       nextBullets.push({
         ...bulletRecord,
         text,
-        sourceEvidenceIds,
-        source: {
-          ...normalizeRecord((bulletRecord as any).source),
-          sourceEvidenceIds,
-        },
+        ...(normalizeRecord((bulletRecord as any).source) ? { source: normalizeRecord((bulletRecord as any).source) } : {}),
       });
     }
 
@@ -440,10 +412,7 @@ function sanitizeResumeResponseBodyForEvidenceContract(
       ...preview,
       resume: nextResume,
     },
-    internalTrace: {
-      ...normalizeRecord((normalized as any).internalTrace),
-      usedEvidenceIds: Array.from(usedEvidenceIds),
-    },
+    internalTrace: normalizeRecord((normalized as any).internalTrace) ?? {},
   };
 }
 
@@ -564,14 +533,7 @@ export class StudioArtifactsService {
       const preview = normalizeRecord((responseBody as any)?.preview)?.resume ?? null;
       const summary = this.cleanEvidenceText((preview as any)?.summary);
       const experiences = Array.isArray((preview as any)?.experience) ? (preview as any).experience : [];
-      const hasStructuredExperience = experiences.some((entry) => {
-        const company = this.cleanEvidenceText((entry as any)?.company);
-        const roleTitle = this.cleanEvidenceText((entry as any)?.roleTitle);
-        const bullets = Array.isArray((entry as any)?.bullets) ? (entry as any).bullets : [];
-        return Boolean(company && roleTitle && bullets.length > 0);
-      });
       const seenBullets = new Map<string, string>();
-      let hasEvidence = usedEvidenceIds.length > 0 || hasStructuredExperience;
 
       if (!summary || this.detectGenericFiller(summary)) {
         blockers.push({
@@ -593,7 +555,6 @@ export class StudioArtifactsService {
             });
             continue;
           }
-          hasEvidence = true;
           const previousEmployer = seenBullets.get(bulletText.toLowerCase());
           if (previousEmployer && previousEmployer !== employerName) {
             blockers.push({
@@ -605,13 +566,6 @@ export class StudioArtifactsService {
             seenBullets.set(bulletText.toLowerCase(), employerName || '');
           }
         }
-      }
-
-      if (!hasEvidence) {
-        blockers.push({
-          code: 'resume_missing_evidence',
-          message: 'Resume has no usable structured experience to mark current.',
-        });
       }
     } else {
       const preview = normalizeRecord((responseBody as any)?.preview)?.coverLetter ?? null;

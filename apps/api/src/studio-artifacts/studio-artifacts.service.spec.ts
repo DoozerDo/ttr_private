@@ -2616,7 +2616,6 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
         error: {
           blockers: expect.arrayContaining([
             expect.objectContaining({ code: 'resume_summary_unverified' }),
-            expect.objectContaining({ code: 'resume_missing_evidence' }),
           ]),
         },
       },
