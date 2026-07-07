@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import StudioPage, { buildManualResumeRetryGenerationOptions } from "@/app/(app)/studio/page";
+import StudioPage, {
+  buildManualResumeRetryGenerationOptions,
+  buildResumeGenerationRequestEnvelope,
+} from "@/app/(app)/studio/page";
 import { ResumePreview } from "@/app/(app)/studio/ResumePreview";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
 import {
@@ -4045,6 +4048,40 @@ describe("Studio artifact authority boundary", () => {
 
   it("resume failure Retry uses the canonical manual-retry resume contract", () => {
     expect(buildManualResumeRetryGenerationOptions()).toEqual({
+      bypassReadinessGate: true,
+      forceRegenerate: true,
+      regenerationSource: "manual_retry",
+    });
+  });
+
+  it("resume failure Retry uses the canonical manual-retry resume request envelope", () => {
+    expect(
+      buildResumeGenerationRequestEnvelope(
+        {
+          documentType: "resume",
+          oneTap: false,
+          jobId: "job-1",
+          baselineId: "base-1",
+          baselineVersionId: "base-version-1",
+          analysisId: "analysis-1",
+        },
+        {
+          requestId: "request-1",
+          sessionKey: "session-1",
+          bypassReadinessGate: true,
+          forceRegenerate: true,
+          regenerationSource: "manual_retry",
+        },
+      ),
+    ).toEqual({
+      documentType: "resume",
+      oneTap: false,
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+      analysisId: "analysis-1",
+      requestId: "request-1",
+      sessionKey: "session-1",
       bypassReadinessGate: true,
       forceRegenerate: true,
       regenerationSource: "manual_retry",

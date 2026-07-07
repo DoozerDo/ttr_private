@@ -142,29 +142,6 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
   baselineSections: BaselineSection[];
   structuredExperience: Array<{ company: string; roleTitle: string; dates?: string; bullets: string[] }>;
 }): string {
-  const sourceExperience = (params.structuredExperience ?? [])
-    .map((entry) => ({
-      company: String(entry?.company ?? '').trim(),
-      roleTitle: String(entry?.roleTitle ?? '').trim(),
-      dates: String(entry?.dates ?? '').trim(),
-      bullets: Array.isArray(entry?.bullets)
-        ? (entry.bullets as unknown[]).map((bullet) => String(bullet ?? '').trim()).filter(Boolean)
-        : [],
-    }))
-    .filter((entry) => entry.company && entry.roleTitle);
-
-  if (sourceExperience.length === 0) return '';
-
-  return sourceExperience
-    .map((entry) => {
-      const headerLine = [entry.company, entry.roleTitle, entry.dates].filter(Boolean).join(' | ');
-      const bullets = entry.bullets.map((bullet) => `- ${bullet.replace(/^[-*â€¢]\s+/, '').trim()}`).filter(Boolean);
-      return [headerLine, ...bullets].filter(Boolean).join('\n').trim();
-    })
-    .filter(Boolean)
-    .join('\n\n')
-    .trim();
-
   const experienceSections = (params.baselineSections ?? []).filter(
     (s: any) => String(s?.sectionType ?? s?.type ?? '').toUpperCase() === 'EXPERIENCE',
   );
@@ -258,7 +235,7 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
     if (parts.length >= 3) {
       const [a, b] = parts;
       const dateCandidate = parts[parts.length - 1] ?? '';
-      const dates = looksLikeDatesLine(dateCandidate) ? dateCandidate : undefined;
+      const dates = dateCandidate || undefined;
       return { company: a, roleTitle: b, ...(dates ? { dates } : {}) };
     }
     const [a, b] = parts;
@@ -358,10 +335,8 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
               : '';
           const { dates: adjacentDates, datesIndex } = readAdjacentDates(i);
           const dates = inlineDates || adjacentDates;
-          // Require a credible date range near the header so tool/section fragments cannot be promoted.
-          if (!dates) continue;
-          if (!inlineDates && (datesIndex < 0 || datesIndex - i > 3)) continue;
-          headers.push({ startIndex: i, ...parsed, dates });
+          if (!inlineDates && datesIndex >= 0 && datesIndex - i > 3) continue;
+          headers.push({ startIndex: i, ...parsed, ...(dates ? { dates } : {}) });
           continue;
         }
       }
@@ -383,9 +358,8 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
       const company = lineLooksRole ? next : line;
       // Dates can appear on the next one or two lines (blank spacers are already removed).
       const { dates, datesIndex } = readAdjacentDates(i + 1);
-      // Require a date range adjacent to the company/title pair.
-      if (!dates || datesIndex < 0 || datesIndex - i > 3) continue;
-      headers.push({ startIndex: i, company, roleTitle, dates });
+      if (datesIndex >= 0 && datesIndex - i > 3) continue;
+      headers.push({ startIndex: i, company, roleTitle, ...(dates ? { dates } : {}) });
     }
     // Deduplicate by startIndex (keep first) and by normalized company+roleTitle.
     const seenKeys = new Set<string>();
@@ -473,59 +447,23 @@ export function buildFailSafeExperienceContentFromStructuredAndBaseline(params: 
     return [];
   };
 
-  const structuredHasUsableBullets =
-    params.structuredExperience?.some(
-      (entry) =>
-        String(entry?.company ?? '').trim().length > 0 &&
-        String(entry?.roleTitle ?? '').trim().length > 0 &&
-        Array.isArray(entry?.bullets) &&
-        entry.bullets.length > 0,
-    ) ?? false;
+  const discovered = discoverHeadersFromLines();
+  const blocks = discovered.map((header, idx) => {
+    const nextHeader = discovered[idx + 1] ?? null;
+    const startIndex = header.startIndex;
+    const endIndex = nextHeader ? nextHeader.startIndex : lines.length;
+    let bullets = collectRoleLinesAsBullets(startIndex + 1, endIndex);
+    if (!bullets.length) bullets = collectFallbackBulletFromHeaderWindow(startIndex, endIndex);
 
-  const discovered = structuredHasUsableBullets ? [] : discoverHeadersFromLines();
-  const experienceEntries: Array<{ company: string; roleTitle: string; dates?: string; bullets: string[] }> =
-    structuredHasUsableBullets
-      ? (params.structuredExperience as any)
-      : discovered.length
-        ? discovered.map((h) => ({ company: h.company, roleTitle: h.roleTitle, dates: h.dates, bullets: [] }))
-        : (params.structuredExperience as any);
+    const headerLine = [header.company, header.roleTitle, header.dates].filter(Boolean).join(' | ').trim();
+    if (!headerLine) return '';
 
-  const discoveredIndices = discovered.length
-    ? discovered.map((h) => ({ idx: h.startIndex, entry: h })).sort((a, b) => a.idx - b.idx)
-    : null;
-
-  const blocks = experienceEntries.map((entry: any, idx: number) => {
-    const company = String(entry?.company ?? '').trim();
-    const roleTitle = String(entry?.roleTitle ?? '').trim();
-    const dates = typeof entry?.dates === 'string' ? String(entry.dates).trim() : '';
-    const header = [company, roleTitle, dates].filter(Boolean).join(' | ').trim();
-    if (!header) return '';
-
-    let bullets: string[] = Array.isArray(entry?.bullets) ? entry.bullets.slice() : [];
-    if (discoveredIndices) {
-      const start = discoveredIndices[idx]?.idx ?? -1;
-      const end = idx + 1 < discoveredIndices.length ? discoveredIndices[idx + 1]!.idx : lines.length;
-      if (start >= 0) {
-        bullets = collectRoleLinesAsBullets(start + 1, end);
-        if (!bullets.length) bullets = collectFallbackBulletFromHeaderWindow(start, end);
-      }
-    } else {
-      const headerPos = headerIndices.findIndex((h) => h.entry === entry);
-      if (headerPos >= 0) {
-        const start = headerIndices[headerPos]!.idx;
-        const end = headerPos + 1 < headerIndices.length ? headerIndices[headerPos + 1]!.idx : lines.length;
-        const collected = collectRoleLinesAsBullets(start + 1, end);
-        if (collected.length) bullets = collected;
-        if (!bullets.length) bullets = collectFallbackBulletFromHeaderWindow(start, end);
-      }
-    }
-
-    const bulletLines = (bullets ?? [])
+    const bulletLines = bullets
       .map((b) => String(b ?? '').trim())
       .filter(Boolean)
-      .map((b) => `- ${b.replace(/^[-•*]\s+/, '')}`);
+      .map((b) => `- ${b.replace(/^[-*\u2022]\s+/, '')}`);
 
-    return [header, ...bulletLines].filter(Boolean).join('\n').trim();
+    return [headerLine, ...bulletLines].filter(Boolean).join('\n').trim();
   });
 
   return blocks.filter(Boolean).join('\n\n').trim();
@@ -1802,12 +1740,25 @@ export class ResumeService {
       return ResumeDraftBullets.extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits);
     }).length;
 
+    const responsePreviewEvidenceUnitCount = (() => {
+      const preview = (input.responseBody as any)?.preview;
+      const resume = preview && typeof preview === 'object' ? (preview as any).resume : null;
+      const experience = Array.isArray((resume as any)?.experience) ? ((resume as any).experience as any[]) : [];
+      return experience.reduce((sum, role) => {
+        const company = String((role as any)?.company ?? '').trim();
+        const roleTitle = String((role as any)?.roleTitle ?? '').trim();
+        const bullets = Array.isArray((role as any)?.bullets) ? (role as any).bullets : [];
+        if (!company || !roleTitle || bullets.length === 0) return sum;
+        return sum + bullets.filter((bullet: any) => String((bullet as any)?.text ?? bullet ?? '').trim().length > 0).length;
+      }, 0);
+    })();
+
     const internalTraceUsedEvidenceIds = Array.isArray((input.responseBody as any)?.internalTrace?.usedEvidenceIds)
       ? (input.responseBody as any).internalTrace.usedEvidenceIds.filter(Boolean)
       : [];
     const totalResumeUsedEvidenceIdsCount = internalTraceUsedEvidenceIds.length > 0
       ? internalTraceUsedEvidenceIds.length
-      : resumeInputEvidenceUnitCount;
+      : Math.max(resumeInputEvidenceUnitCount, responsePreviewEvidenceUnitCount);
 
     const counts = {
       experienceCount: experience.length,
@@ -1816,6 +1767,7 @@ export class ResumeService {
       totalResumeUsedEvidenceIdsCount,
       resumeInputSectionsCount: input.resumeInputSections.length,
       resumeInputEvidenceUnitCount,
+      responsePreviewEvidenceUnitCount,
       allowedSectionsCount: input.allowedSections.length,
       promotedExperienceLikeSectionsCount: input.promotedExperienceLikeSectionsCount,
     };

@@ -5149,6 +5149,36 @@ describe('ResumeService contract', () => {
     ).not.toThrow();
   });
 
+  it('does not fail the canonical persistence guard when the generated ResumeV2 preview is structured but internal trace evidence is absent', () => {
+    const { service } = buildService();
+    const guard = (service as any).assertResumeEvidenceBeforePersistence.bind(service);
+    const responseBody = {
+      internalTrace: { usedEvidenceIds: [] },
+      preview: {
+        resume: {
+          heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+          summary: 'Customer operations leader with evidence-backed execution.',
+          experience: [
+            {
+              company: 'Acme',
+              roleTitle: 'Operator',
+              bullets: [{ text: 'Improved service reliability.' }],
+            },
+          ],
+        },
+      },
+    };
+
+    expect(() =>
+      guard({
+        responseBody,
+        resumeInputSections: [],
+        allowedSections: [],
+        promotedExperienceLikeSectionsCount: 0,
+      }),
+    ).not.toThrow();
+  });
+
   it('paired high-fit contract: generates both resume and cover letter from verified baseline evidence when Resume V2 is missing, omitting unsupported requirements and persisting both artifacts under the same context', async () => {
     const originalSections = baseline.sections;
     const originalParsed = baseline.parsedRecords;

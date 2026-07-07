@@ -171,6 +171,26 @@ export function buildManualResumeRetryGenerationOptions() {
   };
 }
 
+export function buildResumeGenerationRequestEnvelope(
+  payload: Record<string, unknown>,
+  opts?: {
+    requestId?: string | null;
+    sessionKey?: string | null;
+    bypassReadinessGate?: boolean;
+    forceRegenerate?: boolean;
+    regenerationSource?: "manual_retry" | "shell" | "shell_auto" | "post_unlock";
+  },
+) {
+  return {
+    ...payload,
+    ...(opts?.requestId ? { requestId: opts.requestId } : {}),
+    ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
+    ...(opts?.bypassReadinessGate ? { bypassReadinessGate: true } : {}),
+    ...(opts?.regenerationSource ? { regenerationSource: opts.regenerationSource } : {}),
+    ...(opts?.forceRegenerate ? { forceRegenerate: true } : {}),
+  };
+}
+
 function getStudioAutoGenerationLatchStore() {
   const root = (typeof window !== "undefined" ? window : globalThis) as typeof globalThis & {
     [STUDIO_AUTO_GENERATION_LATCH_STORE_KEY]?: Map<string, StudioAutoGenerationLatchStatus>;
@@ -7919,13 +7939,13 @@ export default function StudioPage() {
     setResumeAuditId(undefined);
     const verifiedOnly = Boolean(opts?.verifiedOnly);
     const payload = normalizeGenerationPayload(buildResumePayload(verifiedOnly), "resume"); 
-    const payloadWithRequestId = {
-      ...payload,
-      ...(request.requestId ? { requestId: request.requestId } : {}),
-      ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
-      ...(opts?.regenerationSource ? { regenerationSource: opts.regenerationSource } : {}),
-      ...(opts?.forceRegenerate ? { forceRegenerate: true } : {}),
-    };
+    const payloadWithRequestId = buildResumeGenerationRequestEnvelope(payload, {
+      requestId: request.requestId,
+      sessionKey: opts?.sessionKey,
+      bypassReadinessGate: opts?.bypassReadinessGate,
+      regenerationSource: opts?.regenerationSource,
+      forceRegenerate: opts?.forceRegenerate,
+    });
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timeoutMs = 2 * 60_000;
     const timeoutId =
@@ -10998,7 +11018,7 @@ export default function StudioPage() {
                           variant="secondary"
                           onClick={() => {
                             scrollToStudioTop("smooth");
-                            void handleResumeDraft();
+                            void handleRetryResumeGeneration();
                           }}
                           disabled={resumeGenerating}
                           data-testid="studio-resume-preview-unavailable-regenerate"
@@ -13999,21 +14019,13 @@ export default function StudioPage() {
                     const resumeFailed = Boolean(resumeState.error || resumeState.artifactFailure);
                     const coverFailed = Boolean(coverState.error || coverState.artifactFailure);
                     if (resumeFailed) {
-                      void handleResumeDraft({
-                        bypassReadinessGate: true,
-                        forceRegenerate: true,
-                        regenerationSource: "manual_retry",
-                      });
+                      void handleRetryResumeGeneration();
                     }
                     if (coverFailed) {
                       void handleCoverDraft();
                     }
                     if (!resumeFailed && !coverFailed) {
-                      void handleResumeDraft({
-                        bypassReadinessGate: true,
-                        forceRegenerate: true,
-                        regenerationSource: "manual_retry",
-                      });
+                      void handleRetryResumeGeneration();
                     }
                   }}
                   disabled={resumeGenerating || coverGenerating}
@@ -14661,7 +14673,7 @@ export default function StudioPage() {
                 variant="secondary"
                 onClick={() => {
                   scrollToStudioTop("smooth");
-                  void handleResumeDraft();
+                  void handleRetryResumeGeneration();
                 }}
                 disabled={resumeGenerating}
                 data-testid="studio-resume-regenerate-cta"
@@ -14773,11 +14785,7 @@ export default function StudioPage() {
                     variant="secondary"
                     onClick={() => {
                       scrollToStudioTop("smooth");
-                      void handleResumeDraft({
-                        bypassReadinessGate: true,
-                        forceRegenerate: true,
-                        regenerationSource: "manual_retry",
-                      });
+                      void handleRetryResumeGeneration();
                     }}
                     disabled={resumeGenerating}
                     data-testid="studio-resume-regenerate-cta"

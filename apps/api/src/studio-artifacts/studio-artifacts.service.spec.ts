@@ -2035,7 +2035,20 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       analysisId: 'analysis-1',
       responseBody: {
         internalTrace: { usedEvidenceIds: ['e-1'] },
-        preview: { resume: { heading: {}, summary: 'Supported summary from evidence.', summaryEvidenceIds: ['e-1'] } },
+        preview: {
+          resume: {
+            heading: {},
+            summary: 'Supported summary from evidence.',
+            summaryEvidenceIds: ['e-1'],
+            experience: [
+              {
+                company: 'Acme',
+                roleTitle: 'Operator',
+                bullets: [{ text: 'Improved service reliability.', sourceEvidenceIds: ['e-1'] }],
+              },
+            ],
+          },
+        },
       },
       content: 'resume-content',
       metadata: { auditId: 'audit-1' },
@@ -2474,7 +2487,20 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       analysisId: 'analysis-1',
       responseBody: {
         internalTrace: { usedEvidenceIds: ['e-1'] },
-        preview: { resume: { heading: {}, summary: 'Supported summary from evidence.', summaryEvidenceIds: ['e-1'] } },
+        preview: {
+          resume: {
+            heading: {},
+            summary: 'Supported summary from evidence.',
+            summaryEvidenceIds: ['e-1'],
+            experience: [
+              {
+                company: 'Acme',
+                roleTitle: 'Operator',
+                bullets: [{ text: 'Improved service reliability.', sourceEvidenceIds: ['e-1'] }],
+              },
+            ],
+          },
+        },
       },
       content: 'resume-content',
       metadata: {},
