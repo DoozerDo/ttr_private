@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import StudioPage from "@/app/(app)/studio/page";
+import StudioPage, { buildManualResumeRetryGenerationOptions } from "@/app/(app)/studio/page";
 import { ResumePreview } from "@/app/(app)/studio/ResumePreview";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
 import {
@@ -4041,6 +4041,14 @@ describe("Studio artifact authority boundary", () => {
     if (enterWorkspace) fireEvent.click(enterWorkspace);
 
     await screen.findByTestId("studio-resume-artifact-issue");
+  });
+
+  it("resume failure Retry uses the canonical manual-retry resume contract", () => {
+    expect(buildManualResumeRetryGenerationOptions()).toEqual({
+      bypassReadinessGate: true,
+      forceRegenerate: true,
+      regenerationSource: "manual_retry",
+    });
   });
 });
 

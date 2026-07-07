@@ -163,6 +163,14 @@ type StudioAutoGenerationLatchStatus = "started" | "succeeded" | "failed";
 const STUDIO_AUTO_GENERATION_LATCH_STORE_KEY = "__ttrStudioAutoGenerationLatchStore";
 const STUDIO_GENERATION_SCOPE_GUARD_STORE_KEY = "__ttrStudioGenerationScopeGuardStore";
 
+export function buildManualResumeRetryGenerationOptions() {
+  return {
+    bypassReadinessGate: true,
+    forceRegenerate: true,
+    regenerationSource: "manual_retry" as const,
+  };
+}
+
 function getStudioAutoGenerationLatchStore() {
   const root = (typeof window !== "undefined" ? window : globalThis) as typeof globalThis & {
     [STUDIO_AUTO_GENERATION_LATCH_STORE_KEY]?: Map<string, StudioAutoGenerationLatchStatus>;
@@ -9555,7 +9563,11 @@ export default function StudioPage() {
       artifactType: "resume",
       failureCategory: resumeState.artifactFailure?.category ?? resumePresenter.failure?.category ?? null,
     });
-    void handleResumeDraft();
+    void handleResumeDraft({
+      bypassReadinessGate: true,
+      forceRegenerate: true,
+      regenerationSource: "manual_retry",
+    });
   }, [
     analysisScore,
     effectiveBaselineId,
@@ -13987,13 +13999,21 @@ export default function StudioPage() {
                     const resumeFailed = Boolean(resumeState.error || resumeState.artifactFailure);
                     const coverFailed = Boolean(coverState.error || coverState.artifactFailure);
                     if (resumeFailed) {
-                      void handleResumeDraft();
+                      void handleResumeDraft({
+                        bypassReadinessGate: true,
+                        forceRegenerate: true,
+                        regenerationSource: "manual_retry",
+                      });
                     }
                     if (coverFailed) {
                       void handleCoverDraft();
                     }
                     if (!resumeFailed && !coverFailed) {
-                      void handleResumeDraft();
+                      void handleResumeDraft({
+                        bypassReadinessGate: true,
+                        forceRegenerate: true,
+                        regenerationSource: "manual_retry",
+                      });
                     }
                   }}
                   disabled={resumeGenerating || coverGenerating}
@@ -14753,7 +14773,11 @@ export default function StudioPage() {
                     variant="secondary"
                     onClick={() => {
                       scrollToStudioTop("smooth");
-                      void handleResumeDraft();
+                      void handleResumeDraft({
+                        bypassReadinessGate: true,
+                        forceRegenerate: true,
+                        regenerationSource: "manual_retry",
+                      });
                     }}
                     disabled={resumeGenerating}
                     data-testid="studio-resume-regenerate-cta"
