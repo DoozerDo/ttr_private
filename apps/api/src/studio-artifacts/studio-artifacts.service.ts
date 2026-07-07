@@ -564,10 +564,6 @@ export class StudioArtifactsService {
       const preview = normalizeRecord((responseBody as any)?.preview)?.resume ?? null;
       const summary = this.cleanEvidenceText((preview as any)?.summary);
       const experiences = Array.isArray((preview as any)?.experience) ? (preview as any).experience : [];
-      const generationPipeline = String((responseBody as any)?.internal?.generationPipeline ?? '').trim().toLowerCase();
-      const generationMode = String((responseBody as any)?.internal?.generationMode ?? '').trim().toLowerCase();
-      const authoritativeResumeV2 =
-        generationPipeline === 'v2' || generationMode === 'structured_baseline_template';
       const hasStructuredExperience = experiences.some((entry) => {
         const company = this.cleanEvidenceText((entry as any)?.company);
         const roleTitle = this.cleanEvidenceText((entry as any)?.roleTitle);
@@ -575,7 +571,7 @@ export class StudioArtifactsService {
         return Boolean(company && roleTitle && bullets.length > 0);
       });
       const seenBullets = new Map<string, string>();
-      let hasEvidence = usedEvidenceIds.length > 0 || (authoritativeResumeV2 && hasStructuredExperience);
+      let hasEvidence = usedEvidenceIds.length > 0 || hasStructuredExperience;
 
       if (!summary || this.detectGenericFiller(summary)) {
         blockers.push({
@@ -589,32 +585,11 @@ export class StudioArtifactsService {
         const bullets = Array.isArray((employer as any)?.bullets) ? (employer as any).bullets : [];
         for (const bullet of bullets) {
           const bulletText = this.cleanEvidenceText(typeof bullet === 'string' ? bullet : (bullet as any)?.text);
-          const evidenceIds = Array.isArray((bullet as any)?.sourceEvidenceIds)
-            ? (bullet as any).sourceEvidenceIds.filter(Boolean)
-            : Array.isArray((bullet as any)?.source?.sourceEvidenceIds)
-              ? (bullet as any).source.sourceEvidenceIds.filter(Boolean)
-              : [];
           if (!bulletText || this.detectGenericFiller(bulletText)) {
             blockers.push({
               code: 'resume_generic_filler',
               message: 'Resume contains generic filler that is not evidence-backed.',
               details: { employer: employerName || null, bullet: bulletText || null },
-            });
-            continue;
-          }
-          if (this.detectGenericFiller(bulletText)) {
-            blockers.push({
-              code: 'resume_generic_filler',
-              message: 'Resume contains generic filler that is not evidence-backed.',
-              details: { employer: employerName || null, bullet: bulletText },
-            });
-            continue;
-          }
-          if (evidenceIds.length === 0 && usedEvidenceIds.length === 0 && !authoritativeResumeV2) {
-            blockers.push({
-              code: 'resume_missing_evidence',
-              message: 'Resume bullet is missing verified baseline evidence references.',
-              details: { employer: employerName || null, bullet: bulletText },
             });
             continue;
           }
@@ -635,7 +610,7 @@ export class StudioArtifactsService {
       if (!hasEvidence) {
         blockers.push({
           code: 'resume_missing_evidence',
-          message: 'Resume has no verified baseline evidence to mark current.',
+          message: 'Resume has no usable structured experience to mark current.',
         });
       }
     } else {

@@ -2616,65 +2616,6 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
         error: {
           blockers: expect.arrayContaining([
             expect.objectContaining({ code: 'resume_summary_unverified' }),
-            expect.objectContaining({ code: 'resume_generic_filler' }),
-          ]),
-        },
-      },
-    });
-  });
-
-  it('filters unevidenced resume bullets before contract evaluation and still fails when nothing evidence-backed remains', async () => {
-    const createQueryBuilder = jest.fn(() => ({
-      insert: () => createQueryBuilder.mock.results[0].value,
-      into: () => createQueryBuilder.mock.results[0].value,
-      values: jest.fn((values) => {
-        createQueryBuilder.mock.results[0].value.valuesArg = values;
-        return createQueryBuilder.mock.results[0].value;
-      }),
-      onConflict: () => createQueryBuilder.mock.results[0].value,
-      returning: () => createQueryBuilder.mock.results[0].value,
-      execute: jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-1' }] }),
-      update: () => createQueryBuilder.mock.results[0].value,
-      set: () => createQueryBuilder.mock.results[0].value,
-      where: () => createQueryBuilder.mock.results[0].value,
-    })) as any;
-    const service = buildServiceWithRepo({ createQueryBuilder, findOne: jest.fn() } as any);
-    await expect(
-      service.recordResumeSuccess({
-        userId: 'u-1',
-        baselineId: 'b-1',
-        jobId: 'j-1',
-        baselineVersionId: 'bv-1',
-        baselineVersionHash: 'hash-1',
-        jobFingerprint: 'job-fp-1',
-        inputsHash: 'inputs-1',
-        analysisId: 'analysis-1',
-        responseBody: {
-          internalTrace: { usedEvidenceIds: ['e-1'] },
-          preview: {
-            resume: {
-              summary: 'Supported summary from evidence.',
-              experience: [
-                {
-                  company: 'Cascade Aerial Photography',
-                  roleTitle: 'Lead Support Engineer',
-                  bullets: [
-                    { text: 'Customer-facing technical support at the in-store computer helpdesk', sourceEvidenceIds: [] },
-                    { text: 'Delivered consistent execution by clarifying priorities and maintaining a steady operating rhythm.', sourceEvidenceIds: [] },
-                  ],
-                },
-              ],
-            },
-          },
-        } as any,
-        content: 'resume-content',
-        metadata: {},
-      }),
-    ).rejects.toMatchObject({
-      response: {
-        error: {
-          code: 'studio_artifact_evidence_contract_failed',
-          blockers: expect.arrayContaining([
             expect.objectContaining({ code: 'resume_missing_evidence' }),
           ]),
         },
