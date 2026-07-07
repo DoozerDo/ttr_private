@@ -1,4 +1,8 @@
 type StudioArtifactsRecordLike = {
+  status?: unknown;
+  generationState?: unknown;
+  generationStatus?: unknown;
+  exportReady?: unknown;
   responseBody?: unknown;
   content?: string | null;
   artifactId?: unknown;
@@ -34,66 +38,33 @@ function hasNonEmptyText(value: unknown): boolean {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function hasNonEmptyPayload(value: unknown): boolean {
-  if (value == null) return false;
-  if (typeof value !== "object") return true;
-  if (Array.isArray(value)) return value.length > 0;
-  return Object.keys(value as Record<string, unknown>).length > 0;
-}
-
-function isTruthyFlag(value: unknown): boolean {
-  return value === true || String(value ?? "").toLowerCase() === "true";
-}
-
-function hasHydratedResumeArtifact(normalizedArtifacts: StudioArtifactsPayloadLike): boolean {
-  const resumeArtifactId = normalizedArtifacts?.resumeArtifactHydration?.resumeArtifactId;
-  const resumeRecordArtifactId = normalizedArtifacts?.resume?.artifactId;
-  return (
-    (typeof resumeArtifactId === "string" && resumeArtifactId.trim().length > 0) ||
-    (typeof resumeRecordArtifactId === "string" && resumeRecordArtifactId.trim().length > 0)
-  );
-}
-
-function isMinimalResumeArtifact(resume: StudioArtifactsRecordLike): boolean {
-  const responseBody = toRecord(resume?.responseBody);
-  if (!responseBody) return false;
-
-  const internal = toRecord(responseBody.internal);
-  const auditId = String(responseBody.auditId ?? responseBody.audit_id ?? "").trim();
-  const internalAuditId = String(internal?.auditId ?? internal?.audit_id ?? "").trim();
-  const generationMode = String(internal?.resumeGenerationMode ?? "").trim();
-
-  return (
-    auditId.startsWith("minimal:") ||
-    internalAuditId.startsWith("minimal:") ||
-    generationMode === "top_level_fail_safe_minimal" ||
-    isTruthyFlag(internal?.minimalFallback) ||
-    isTruthyFlag(internal?.resumeFailSafeMinimalUsed)
-  );
-}
-
-function isSuccessfulHydratedResumeArtifact(resume: StudioArtifactsRecordLike): boolean {
+function isSuccessfulResumeArtifact(resume: StudioArtifactsRecordLike): boolean {
   const responseBody = toRecord(resume?.responseBody);
   if (!responseBody) return false;
 
   const status = String(responseBody.status ?? "").trim().toLowerCase();
   const generationStatus = String(responseBody.generationStatus ?? "").trim().toLowerCase();
+  const generationState = String(responseBody.generationState ?? "").trim().toLowerCase();
   const exportReady = responseBody.exportReady === true;
+  const preview = toRecord(responseBody.preview)?.resume;
 
-  return status === "success" && generationStatus === "success" && exportReady;
+  return (
+    status === "success" &&
+    generationStatus === "success" &&
+    (generationState === "" || generationState === "generated_usable") &&
+    exportReady &&
+    Boolean(preview) &&
+    (hasNonEmptyText((resume as any)?.content) || hasNonEmptyText(responseBody.content))
+  );
 }
 
 export function getArtifactExistence(normalizedArtifacts: StudioArtifactsPayloadLike): PersistedArtifactExistence {
   const resume = normalizedArtifacts?.resume ?? null;
   const coverLetter = normalizedArtifacts?.coverLetter ?? null;
 
-  const hasRenderableResumeArtifact =
-    (!isMinimalResumeArtifact(resume) || isSuccessfulHydratedResumeArtifact(resume)) &&
-    (hasNonEmptyPayload(resume?.responseBody) || hasNonEmptyText(resume?.content) || hasHydratedResumeArtifact(normalizedArtifacts));
-  const hasResumeArtifactPersisted =
-    hasRenderableResumeArtifact;
+  const hasResumeArtifactPersisted = isSuccessfulResumeArtifact(resume);
   const hasCoverLetterArtifactPersisted =
-    hasNonEmptyPayload(coverLetter?.responseBody) || hasNonEmptyText(coverLetter?.content);
+    Boolean(coverLetter?.responseBody) || hasNonEmptyText(coverLetter?.content);
 
   return { hasResumeArtifactPersisted, hasCoverLetterArtifactPersisted };
 }

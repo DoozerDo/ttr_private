@@ -242,4 +242,29 @@ describe("Studio artifact contract resume source", () => {
     expect(hydratedSuccessExistence.hasResumeArtifactPersisted).toBe(true);
     expect(hydratedSuccessExistence.hasCoverLetterArtifactPersisted).toBe(true);
   });
+
+  it("does not treat a failed unusable resume as persisted", () => {
+    const failedExistence = getArtifactExistence({
+      resume: {
+        status: "FAILED",
+        artifactId: "resume-failed-1",
+        responseBody: null,
+        content: null,
+      },
+      coverLetter: {
+        status: "COMPLETED",
+        artifactId: "cover-4",
+        responseBody: {
+          status: "success",
+          generationStatus: "success",
+          exportReady: true,
+          preview: { coverLetter: { paragraphs: ["Hello"] } },
+        },
+        content: "Hello",
+      },
+    });
+
+    expect(failedExistence.hasResumeArtifactPersisted).toBe(false);
+    expect(failedExistence.hasCoverLetterArtifactPersisted).toBe(true);
+  });
 });

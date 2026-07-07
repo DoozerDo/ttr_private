@@ -1415,6 +1415,67 @@ describe("Studio auto-generation", () => {
     expect(screen.queryByText("Something went wrong")).toBeNull();
   }, 15000);
 
+  it("treats a failed unusable resume artifact as missing output and auto-generates canonically", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const fetchMock = installStrongFitFetches({
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "completed",
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        assessmentScore: 84,
+        generationContractVersion: "studio-artifacts-v1",
+        resume: {
+          status: "FAILED",
+          artifactId: "resume-failed-1",
+          usableCurrent: false,
+          inputsHash: true,
+          responseBody: null,
+          content: null,
+          confidence: "LOW",
+          failure: { code: "resume_v2_failed", message: "Resume generation failed." },
+        },
+        coverLetter: {
+          status: "COMPLETED",
+          artifactId: "cover-hydrated-1",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          },
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+      },
+    });
+
+    setFetchImplementation(fetchMock as any);
+    renderStudio();
+
+    await waitFor(() => {
+      const snapshot = readOrchestrationDebugSnapshot();
+      expect(snapshot.hasResumeArtifactPersisted).toBe(false);
+      expect(snapshot.hasCoverLetterArtifactPersisted).toBe(true);
+      expect(snapshot.hasAnyArtifactPersisted).toBe(true);
+      expect(snapshot.needsAutoGeneration).toBe(true);
+      expect(snapshot.blockerEvaluationTrace?.usedForNeedsAutoGeneration?.inputs?.missingResumeOutput).toBe(true);
+      expect(snapshot.orchestrationDecision).toBe("should_auto_generate");
+      expect(snapshot.orchestrationDecision).not.toBe("hydrate_existing_artifacts");
+    }, { timeout: 15000 });
+  }, 15000);
+
   it("treats a hydrated success resume as persisted even when a stale minimal audit id remains", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",
