@@ -12707,7 +12707,7 @@ export default function StudioPage() {
 
     // Single source of truth: the contract (READY) + required IDs.
     // Latches are used only to prevent duplicate runs after a confirmed success for the same signature.
-    let contractShouldStart = Boolean(contract.generation.auto.shouldStart) && hasRequiredIdsNow;
+    let contractShouldStart = Boolean(needsAutoGeneration) && hasRequiredIdsNow;
     if (effectiveGenerationState === "generated_unusable") {
       const retryCount = retryCountRef.current[signature] ?? 0;
       if (retryCount >= MAX_AUTO_RETRIES) {
@@ -12875,12 +12875,11 @@ export default function StudioPage() {
 
     const shouldBlockFromLatch =
       latch === "succeeded" && artifactContract.hasUsableArtifacts && Boolean(hasUsableResume && hasUsableCoverLetter);
-    const skipReason =
-      contract.generation.auto.shouldStart === true
-        ? null
-        : "skipReason" in contract.generation.auto
-          ? contract.generation.auto.skipReason
-          : "unknown";
+    const skipReason = needsAutoGeneration
+      ? null
+      : "skipReason" in contract.generation.auto
+        ? contract.generation.auto.skipReason
+        : "unknown";
     const decision = {
       contractGenerationState: effectiveGenerationState,
       contractShouldStart,
@@ -13050,7 +13049,6 @@ export default function StudioPage() {
     autoGenerationSignature,
     generationWorkflowScope,
     workflowOrchestratorCore.contract?.generation.state,
-    workflowOrchestratorCore.contract?.generation.auto.shouldStart,
     workflowOrchestratorCore.contract?.generation.auto.signature,
     effectiveBaselineVersionId,
     effectiveJobId,
