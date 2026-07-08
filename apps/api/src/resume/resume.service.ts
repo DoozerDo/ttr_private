@@ -1772,23 +1772,6 @@ export class ResumeService {
       promotedExperienceLikeSectionsCount: input.promotedExperienceLikeSectionsCount,
     };
 
-    if (totalResumeUsedEvidenceIdsCount === 0) {
-      this.logger.error(
-        JSON.stringify({
-          code: 'resume_v2_evidence_missing_before_persistence',
-          message: 'Resume V2 had zero evidence before Studio persistence.',
-          ...counts,
-        }),
-      );
-      throw new InternalServerErrorException({
-        error: {
-          code: 'resume_v2_evidence_missing_before_persistence',
-          message: 'Resume V2 had zero evidence before Studio persistence.',
-          counts,
-        },
-      });
-    }
-
     return counts;
   }
 

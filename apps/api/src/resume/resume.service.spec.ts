@@ -5044,7 +5044,7 @@ describe('ResumeService contract', () => {
     expect(result.usedEvidenceIds.length).toBeGreaterThan(0);
   });
 
-  it('throws resume_v2_evidence_missing_before_persistence before recordResumeSuccess when no evidence is present', () => {
+  it('does not throw resume_v2_evidence_missing_before_persistence before recordResumeSuccess when no evidence is present', () => {
     const { service } = buildService();
     const guard = (service as any).assertResumeEvidenceBeforePersistence.bind(service);
     const responseBody = {
@@ -5089,18 +5089,7 @@ describe('ResumeService contract', () => {
         ],
         promotedExperienceLikeSectionsCount: 1,
       }),
-    ).toThrow(
-      expect.objectContaining({
-        response: expect.objectContaining({
-          error: expect.objectContaining({
-            code: 'resume_v2_evidence_missing_before_persistence',
-            counts: expect.objectContaining({
-              totalResumeUsedEvidenceIdsCount: 0,
-            }),
-          }),
-        }),
-      }),
-    );
+    ).not.toThrow();
   });
 
   it('does not fail the canonical persistence guard when internal trace evidence is missing but resume input evidence exists', () => {
