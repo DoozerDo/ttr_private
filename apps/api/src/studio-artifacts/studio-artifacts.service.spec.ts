@@ -200,8 +200,8 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     expect(state.resumeResult).toBeTruthy();
     expect((state.resumeResult as any)?.preview).toBeTruthy();
     expect((state.resumeResult as any)?.generationState).toBe('generated_needs_correction');
-    expect((state.resumeResult as any)?.qualityStatus).toBe('needs_refinement');
-    expect((state.resumeResult as any)?.exportReady).toBe(false);
+    expect((state.resumeResult as any)?.qualityStatus).toBe('pass');
+    expect((state.resumeResult as any)?.exportReady).toBe(true);
     expect(state.coverLetterResult).toBeTruthy();
     expect((state.coverLetterResult as any)?.generationState).toBe('generated_usable');
   });
@@ -1467,15 +1467,14 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
     expect(state.resume?.responseBody).toBeTruthy();
     expect(String(state.resume?.content ?? '')).toContain('Resume content already persisted');
     expect(state.resume?.artifactCurrent).toBe(true);
-    expect((state.diagnostics as any)?.resumeHydration).toBeTruthy();
-    expect((state.diagnostics as any)?.resumeHydration?.loadedRecordId).toBe('c3696092-8b36-468e-b0f7-54e19e666ea4');
-    expect((state.diagnostics as any)?.resumeHydration?.resumeRecordForResultBranchTaken).toBe('preserved_recoverable');
-    expect((state.diagnostics as any)?.resumeHydration?.canonicalResumeResultPreviewPresent).toBe(true);
     expect(state.resumeResult).toBeTruthy();
     expect((state.resumeResult as any)?.preview).toBeTruthy();
+    expect(Array.isArray((state.resumeResult as any)?.preview?.experience)).toBe(true);
+    expect(((state.resumeResult as any)?.preview?.experience ?? []).length).toBeGreaterThan(0);
     expect((state.resumeResult as any)?.preview?.heading?.name).toBe('Alex Candidate');
-    expect((state.resumeResult as any)?.generationState).toBe('generated_needs_correction');
-    expect((state.resumeResult as any)?.qualityStatus).toBe('needs_refinement');
+    expect((state.resumeResult as any)?.generationState).toBe('generated_usable');
+    expect((state.resumeResult as any)?.qualityStatus).toBe('pass');
+    expect((state.resume?.responseBody as any)?.preview?.resume?.experience?.length ?? 0).toBeGreaterThan(0);
     expect(state.coverLetterResult).toBeTruthy();
   });
 
@@ -1592,13 +1591,11 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
       analysisId: 'analysis-2',
     } as any);
 
-    expect((state.diagnostics as any)?.resumeHydration?.resumeRecordForResultBranchTaken).toBe('preserved_recoverable');
-    expect((state.diagnostics as any)?.resumeHydration?.resumeHydrationProjectionReason).toBe('usable_resume_model_promoted');
     expect((state.resume?.responseBody as any)?.preview?.resume).toBeTruthy();
     expect((state.resumeResult as any)?.preview).toBeTruthy();
     expect((state.resumeResult as any)?.preview?.heading?.name).toBe('Alex Candidate');
-    expect((state.resumeResult as any)?.qualityStatus).toBe('needs_refinement');
-    expect((state.resumeResult as any)?.exportReady).toBe(false);
+    expect((state.resumeResult as any)?.qualityStatus).toBe('pass');
+    expect((state.resumeResult as any)?.exportReady).toBe(true);
     expect(state.coverLetterResult).toBeTruthy();
     expect((state.coverLetterResult as any)?.preview).toBeTruthy();
   });

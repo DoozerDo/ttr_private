@@ -236,6 +236,35 @@ function isCanonicalResumeShape(candidate: Record<string, unknown>): boolean {
   );
 }
 
+function extractCanonicalResumePreviewModelFromSections(record: Record<string, unknown>): Record<string, unknown> | null {
+  const sections = Array.isArray((record as any).sections) ? ((record as any).sections as unknown[]) : [];
+  if (!sections.length) return null;
+
+  try {
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    const experience = Array.isArray(structured?.experience) ? structured.experience : [];
+    if (!experience.length) return null;
+
+    return {
+      summary: structured.summary ?? '',
+      experience: experience.map((entry) => ({
+        company: String(entry?.company ?? ''),
+        roleTitle: String(entry?.roleTitle ?? ''),
+        ...(String(entry?.dates ?? '').trim() ? { dateRange: String(entry.dates).trim() } : {}),
+        bullets: Array.isArray(entry?.bullets) ? entry.bullets.map((bullet) => String(bullet ?? '')) : [],
+      })),
+      ...(Array.isArray(structured.education) && structured.education.length
+        ? { education: structured.education.map((institution) => ({ institution: String(institution ?? '') })) }
+        : {}),
+      ...(Array.isArray(structured.skills) && structured.skills.length
+        ? { competencies: structured.skills.map((skill) => String(skill ?? '')).filter(Boolean) }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function extractCanonicalResumePreviewModel(
   responseBody: unknown,
   content?: unknown,
@@ -243,6 +272,9 @@ function extractCanonicalResumePreviewModel(
   const inspect = (value: unknown): Record<string, unknown> | null => {
     const record = parseStructuredRecord(value);
     if (!record) return null;
+
+    const canonicalSectionPreview = extractCanonicalResumePreviewModelFromSections(record);
+    if (canonicalSectionPreview) return canonicalSectionPreview;
 
     const preview = parseStructuredRecord((record as any).preview);
     const previewResume = parseStructuredRecord(preview?.resume);
@@ -1828,11 +1860,24 @@ export class StudioArtifactsService {
       artifact === 'resume'
         ? extractCanonicalResumePreviewModel(responseBody, record.content) ?? preview?.resume ?? null
         : preview?.coverLetter ?? null;
+    const canonicalResponseBody =
+      artifact === 'resume' && previewModel && responseBody && typeof responseBody === 'object'
+        ? {
+            ...(responseBody as Record<string, unknown>),
+            preview: {
+              ...(preview ?? {}),
+              resume: previewModel,
+            },
+          }
+        : responseBody;
+    if (canonicalResponseBody !== responseBody) {
+      record.responseBody = canonicalResponseBody as Record<string, unknown> | null;
+    }
     const qualityGate =
-      responseBody && typeof responseBody.qualityGate === 'object'
-        ? (responseBody.qualityGate as Record<string, unknown>)
-        : responseBody && typeof (responseBody as any).quality === 'object'
-          ? ((responseBody as any).quality as Record<string, unknown>)
+      canonicalResponseBody && typeof canonicalResponseBody.qualityGate === 'object'
+        ? (canonicalResponseBody.qualityGate as Record<string, unknown>)
+        : canonicalResponseBody && typeof (canonicalResponseBody as any).quality === 'object'
+          ? ((canonicalResponseBody as any).quality as Record<string, unknown>)
         : null;
     const qualityStatusRaw = qualityGate?.status;
     const resumeIsPersistedAuthority = artifact === 'resume' && record.usableCurrent && Boolean(previewModel);
@@ -1877,13 +1922,17 @@ export class StudioArtifactsService {
       : correctionReasons;
 
     const exportReadyRaw =
-      responseBody && typeof responseBody.exportReady === 'boolean' ? responseBody.exportReady : false;
+      canonicalResponseBody && typeof canonicalResponseBody.exportReady === 'boolean'
+        ? canonicalResponseBody.exportReady
+        : false;
     const exportReady =
       artifact === 'resume' && resumeIsPersistedAuthority
         ? true
         : Boolean(exportReadyRaw) && qualityStatus === 'pass';
     const exportsRaw =
-      responseBody && typeof responseBody.exports === 'object' ? (responseBody.exports as Record<string, unknown>) : null;
+      canonicalResponseBody && typeof canonicalResponseBody.exports === 'object'
+        ? (canonicalResponseBody.exports as Record<string, unknown>)
+        : null;
     const exports = exportReady
       ? {
           docx: artifact === 'resume' && resumeIsPersistedAuthority ? true : Boolean(exportsRaw && exportsRaw.docx),

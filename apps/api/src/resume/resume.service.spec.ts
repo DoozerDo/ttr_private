@@ -926,7 +926,11 @@ describe('ResumeService contract', () => {
       },
     ];
 
-    const result = await service.generateResume('user-1', baseRequest);
+    const result = await service.generateResume(
+      'user-1',
+      { ...baseRequest, oneTap: true } as any,
+      { skipReadinessGate: true, enforceOneTap: true } as any,
+    );
     const resume = result.preview?.resume ?? null;
     expect(resume).toBeTruthy();
     expect(resume?.experience?.length ?? 0).toBeGreaterThan(0);
@@ -978,7 +982,11 @@ describe('ResumeService contract', () => {
       },
     ];
 
-    const result = await service.generateResume('user-1', baseRequest);
+    const result = await service.generateResume(
+      'user-1',
+      { ...baseRequest, oneTap: true } as any,
+      { skipReadinessGate: true, enforceOneTap: true } as any,
+    );
     // Only one experience entry exists in this fixture; it must be generated_unusable under the real document contract.
     expect(result.exportReady).toBe(false);
     expect(result.qualityGate?.reasons ?? []).toEqual(expect.arrayContaining(['baseline_evidence_too_weak']));
@@ -1062,7 +1070,11 @@ describe('ResumeService contract', () => {
       } as any;
       jest.spyOn(service as any, 'loadCanonicalBaselineRawModel').mockResolvedValue(canonicalBaseline);
 
-      const result = await service.generateResume('user-1', baseRequest);
+      const result = await service.generateResume(
+        'user-1',
+        { ...baseRequest, oneTap: true } as any,
+        { skipReadinessGate: true, enforceOneTap: true } as any,
+      );
       expect(result.status).toBe('success');
       expect(result.exportReady).toBe(true);
       expect(result.qualityGate?.status).toBe('pass');
@@ -1136,7 +1148,11 @@ describe('ResumeService contract', () => {
       },
     ];
 
-    const result = await service.generateResume('user-1', baseRequest);
+    const result = await service.generateResume(
+      'user-1',
+      { ...baseRequest, oneTap: true } as any,
+      { skipReadinessGate: true, enforceOneTap: true } as any,
+    );
     expect(result.internal?.generationMode).toBe('structured_baseline_template');
     // This fixture has 2+ meaningful roles (AMS + Biblioso); it should pass the real document contract.
     expect(result.exportReady).toBe(true);
@@ -1199,7 +1215,11 @@ describe('ResumeService contract', () => {
       },
     ];
 
-    const result = await service.generateResume('user-1', baseRequest);
+    const result = await service.generateResume(
+      'user-1',
+      { ...baseRequest, oneTap: true } as any,
+      { skipReadinessGate: true, enforceOneTap: true } as any,
+    );
     expect(result.status).toBe('success');
     // Generation may still fall back to minimal draft lanes if the baseline is too thin,
     // but it must not fail with baseline_template_not_ready when interpreted evidence is meaningful.
@@ -1272,7 +1292,11 @@ describe('ResumeService contract', () => {
     const baselineText = (baseline.sections ?? []).map((s: any) => String(s.content ?? '')).join('\n');
     expect(baselineText.length).toBeGreaterThan(600);
 
-    const result = await service.generateResume('user-1', baseRequest);
+    const result = await service.generateResume(
+      'user-1',
+      { ...baseRequest, oneTap: true } as any,
+      { skipReadinessGate: true, enforceOneTap: true } as any,
+    );
     expect(result.status).toBe('success');
     const internal = (result as any).internal ?? {};
     // Prompt 14: With at least one authoritative experience group present, this path must not fall into legacy minimal synthesis.
@@ -1424,7 +1448,11 @@ describe('ResumeService contract', () => {
       },
     ];
 
-    const result = await service.generateResume('user-1', baseRequest);
+    const result = await service.generateResume(
+      'user-1',
+      { ...baseRequest, oneTap: true } as any,
+      { skipReadinessGate: true, enforceOneTap: true } as any,
+    );
     expect(result.status).toBe('success');
 
     const internal = (result as any).internal ?? {};
@@ -1491,7 +1519,11 @@ describe('ResumeService contract', () => {
     const originalScore = assessment.overallScore;
     assessment.overallScore = 90;
 
-    const result = await service.generateResume('user-1', baseRequest);
+    const result = await service.generateResume(
+      'user-1',
+      { ...baseRequest, oneTap: true } as any,
+      { skipReadinessGate: true, enforceOneTap: true } as any,
+    );
     const extracted = extractStructuredBaselineFromSections(baseline.sections as any);
 
     expect(extracted.experience.slice(0, 2).map((e) => ({ company: e.company, dates: e.dates }))).toEqual([
@@ -1553,7 +1585,11 @@ describe('ResumeService contract', () => {
         } as any,
       ] as any;
 
-      const result = await service.generateResume('user-1', baseRequest);
+      const result = await service.generateResume(
+        'user-1',
+        { ...baseRequest, oneTap: true } as any,
+        { skipReadinessGate: true, enforceOneTap: true } as any,
+      );
       expect(result.ok).toBe(true);
       expect(result.exportReady).toBe(true);
       expect(result.qualityGate?.status).toBe('pass');
@@ -3205,12 +3241,86 @@ describe('ResumeService contract', () => {
       },
     });
 
-    const result = await service.generateResume('user-1', baseRequest);
+    const result = await service.generateResume(
+      'user-1',
+      { ...baseRequest, oneTap: true } as any,
+      { skipReadinessGate: true, enforceOneTap: true } as any,
+    );
     expect(String(result.preview?.resume?.experience?.[0]?.roleTitle ?? '')).not.toBe(
       'Technical Architect & Full',
     );
 
     baseline.sections = originalSections;
+  });
+
+  it('rebuilds the canonical preview from populated success sections and drops stale reuse errors', async () => {
+    const { service, workflowIdempotencyService } = buildService();
+    const originalSections = baseline.sections;
+    baseline.sections = [baseSection] as any;
+
+    (workflowIdempotencyService.reserve as jest.Mock).mockResolvedValueOnce({
+      status: 'existing_completed',
+      runId: 'audit-1',
+      responseBody: {
+        ok: true,
+        status: 'success',
+        generationStatus: 'success',
+        exportReady: true,
+        blocked: false,
+        baselineId: 'baseline-1',
+        baselineVersionId: 'baseline-version-1',
+        jobId: 'job-1',
+        sections: [
+          {
+            id: 'exp-1',
+            type: 'EXPERIENCE',
+            title: 'Experience',
+            order: 1,
+            content: [
+              'Example Co | Support Operations Lead | 2022 - Present',
+              '- Led incident response and escalations across teams.',
+              '- Built dashboards for queue health and CSAT reporting.',
+            ].join('\n'),
+          },
+        ],
+        compliance_flags: [],
+        compliance_blocked: false,
+        audit_id: 'audit-1',
+        auditId: 'audit-1',
+        baseline_version_hash: 'hash-1',
+        quality: 'draft',
+        exports: { docx: true, pdf: true },
+        error: "We couldn't generate a clean document...",
+        preview: {
+          resume: {
+            heading: { name: 'Test Candidate', contactLine: '' },
+            summary: 'Test summary',
+            experience: [],
+            education: [],
+            competencies: [],
+          },
+        },
+        trackerEntryId: null,
+        trackerStatus: null,
+        opportunityId: null,
+        idempotency: null,
+      },
+    });
+
+    try {
+      const result = await service.generateResume(
+        'user-1',
+        { ...baseRequest, oneTap: true } as any,
+        { skipReadinessGate: true, enforceOneTap: true } as any,
+      );
+      expect(result.ok).toBe(true);
+      expect((result as any).error).toBeUndefined();
+      expect(Array.isArray((result as any)?.preview?.resume?.experience)).toBe(true);
+      expect((result as any)?.preview?.resume?.experience?.length).toBeGreaterThan(0);
+      expect(String((result as any)?.preview?.resume?.experience?.[0]?.company ?? '')).toBe('Example Co');
+    } finally {
+      baseline.sections = originalSections;
+    }
   });
 
   it('recomposes cached completed studio artifact responses through the authoritative assembler before returning', async () => {

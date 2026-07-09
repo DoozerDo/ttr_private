@@ -5284,17 +5284,51 @@ export class ResumeService {
           const idempotencyCareerIdentity = structuredBaselineForIdentity
             ? deriveCareerIdentityFromStructuredBaseline(structuredBaselineForIdentity as any)
             : null;
+          const responseSections = Array.isArray((response as any)?.sections)
+            ? ((response as any).sections as ResumeExportSection[])
+            : [];
+          const canonicalResponsePreview = (() => {
+            if (!responseSections.length) return null;
+            try {
+              const identity = resolveBaselineIdentity(baseline);
+              const identityRecord =
+                identity && typeof identity === 'object'
+                  ? (identity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
+                  : {};
+              const rebuilt = buildNormalizedResumeDocument(
+                responseSections as any,
+                {
+                  name: identityRecord.fullName,
+                  contactLine: identityRecord.contactLine,
+                  links: identityRecord.links,
+                },
+                { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
+              );
+              return sanitizeResumePreviewForStudio(rebuilt);
+            } catch {
+              return null;
+            }
+          })();
           const positioning = this.positioningResolver.resolve({
             job: jobForPositioning,
-            // Use the persisted baseline ResumeV2 model when available; otherwise fall back to the response preview.
-            resumeV2: (persistedResumeV2 as any) ?? (response?.preview?.resume as any) ?? {},
+            // Use the persisted canonical ResumeV2 model when available; otherwise rebuild from the
+            // authoritative response sections instead of reusing the legacy response.preview.resume model.
+            resumeV2:
+              (persistedResumeV2 as any) ??
+              canonicalResponsePreview ??
+              (response?.preview?.resume as any) ??
+              {},
             careerIdentity: idempotencyCareerIdentity,
           });
           const plan = (() => {
             try {
               return this.positioningPlanService.buildPlan({
                 job: jobForPositioning,
-                resumeV2: (persistedResumeV2 as any) ?? (response?.preview?.resume as any) ?? {},
+                resumeV2:
+                  (persistedResumeV2 as any) ??
+                  canonicalResponsePreview ??
+                  (response?.preview?.resume as any) ??
+                  {},
                 careerIdentity: idempotencyCareerIdentity,
               });
             } catch {
@@ -5307,7 +5341,11 @@ export class ResumeService {
               ? (baselineIdentity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
               : {};
           const authoritative = buildAuthoritativeResumeDraftFromResumeV2({
-            resumeV2: (persistedResumeV2 as any) ?? (response?.preview?.resume as any) ?? {},
+            resumeV2:
+              (persistedResumeV2 as any) ??
+              canonicalResponsePreview ??
+              (response?.preview?.resume as any) ??
+              {},
             identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
             renderPlan: buildAuthoritativeRenderPlan({
               positioningPlan: plan,
@@ -5328,6 +5366,8 @@ export class ResumeService {
           if (!response.preview) (response as any).preview = {};
           (response.preview as any).resume = authoritativePreview;
           (response as any).content = authoritativeContent;
+          delete (response as any).error;
+          delete (response as any).resumeState;
 
           // eslint-disable-next-line no-console
           console.log('[RESUME_IDEMPOTENCY_RECOMPOSED]', {
@@ -5346,6 +5386,8 @@ export class ResumeService {
           if (response?.preview?.resume) {
             response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
           }
+          delete (response as any).error;
+          delete (response as any).resumeState;
         }
 
         const cachedResponseUsesCanonicalAuthority =
