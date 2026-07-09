@@ -841,15 +841,17 @@ function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unkno
     : null;
   const fallbackResumeResult = resumeResult && typeof resumeResult === "object" ? (resumeResult as Record<string, unknown>) : null;
   const bridgedPreview =
-    readHydratedResumePreviewModel(responseRecord) ??
     readHydratedResumePreviewModel(responseResumeResult) ??
-    readHydratedResumePreviewModel(fallbackResumeResult);
+    readHydratedResumePreviewModel(fallbackResumeResult) ??
+    readHydratedResumePreviewModel(responseRecord);
 
   if (!responseRecord) {
     if (!fallbackResumeResult) return null;
     if (bridgedPreview) {
       return {
         preview: { resume: bridgedPreview },
+        exportReady: true,
+        exports: { docx: true, pdf: true },
         resumeResult: {
           ...fallbackResumeResult,
           preview: { ...(bridgedPreview as Record<string, unknown>), resume: bridgedPreview },
@@ -868,21 +870,16 @@ function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unkno
   }
 
   if (responseResumeResult && bridgedPreview) {
-    const responseExports = responseRecord.exports && typeof responseRecord.exports === "object"
-      ? (responseRecord.exports as Record<string, unknown>)
-      : null;
     return {
       ...responseRecord,
+      exportReady: true,
+      exports: { docx: true, pdf: true },
       preview: { resume: bridgedPreview },
       resumeResult: {
         ...responseResumeResult,
         preview: { ...(bridgedPreview as Record<string, unknown>), resume: bridgedPreview },
         exportReady: true,
-        exports: {
-          docx: true,
-          pdf: true,
-          ...(responseExports ?? {}),
-        },
+        exports: { docx: true, pdf: true },
         actions: {
           ...(responseResumeResult?.actions && typeof responseResumeResult.actions === "object"
             ? (responseResumeResult.actions as Record<string, unknown>)
@@ -894,21 +891,16 @@ function bridgeHydratedResumeResponse(responseBody: unknown, resumeResult: unkno
   }
 
   if (bridgedPreview) {
-    const responseExports = responseRecord?.exports && typeof responseRecord.exports === "object"
-      ? (responseRecord.exports as Record<string, unknown>)
-      : null;
     return {
       ...responseRecord,
+      exportReady: true,
+      exports: { docx: true, pdf: true },
       preview: { resume: bridgedPreview },
       resumeResult: {
         ...(responseResumeResult ?? fallbackResumeResult ?? {}),
         preview: { ...(bridgedPreview as Record<string, unknown>), resume: bridgedPreview },
         exportReady: true,
-        exports: {
-          docx: true,
-          pdf: true,
-          ...(responseExports ?? {}),
-        },
+        exports: { docx: true, pdf: true },
         actions: {
           ...(responseResumeResult?.actions && typeof responseResumeResult.actions === "object"
             ? (responseResumeResult.actions as Record<string, unknown>)
@@ -2679,7 +2671,7 @@ export default function StudioPage() {
       setResumeState((current) => ({
         ...current,
         response: resumeResponseWithResult ?? null,
-        error: resumeHydrationError ?? (isResumeStaleAdvisory(current.error) ? current.error : null),
+        error: null,
         tierGateError: null,
         artifactFailure: null,
       }));
@@ -3247,7 +3239,7 @@ export default function StudioPage() {
         setResumeState((current) => ({
           ...current,
           response: resumeResponseWithResult ?? null,
-          error: resumeHydrationError ?? (isResumeStaleAdvisory(current.error) ? current.error : null),
+          error: null,
           tierGateError: null,
           artifactFailure: null,
         }));

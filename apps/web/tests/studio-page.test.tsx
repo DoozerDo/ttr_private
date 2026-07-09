@@ -2489,6 +2489,136 @@ describe("Studio page UX", () => {
     });
     expect(screen.queryByTestId("studio-invalid-state-fallback")).toBeNull();
   });
+
+  it("hydrates a usable resumeResult over a stale persisted responseBody", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(createResponse(createFitAssessment(84)));
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return Promise.resolve(
+          createResponse({
+            status: "COMPLETED",
+            baselineId: "base-1",
+            jobId: "job-1",
+            baselineVersionId: "base-version-1",
+            baselineVersionHash: "hash-1",
+            jobFingerprint: "job-fingerprint-1",
+            generationContractVersion: "studio-artifacts-v1",
+            resume: {
+              status: "COMPLETED",
+              inputsHash: "resume-hash",
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: false, pdf: false },
+                preview: {
+                  resume: {
+                    heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                    summary: "Support leader focused on scalable operations.",
+                    experience: [],
+                  },
+                },
+              },
+              content: "resume-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+            resumeResult: {
+              artifactType: "resume",
+              generationState: "generated_usable",
+              qualityStatus: "pass",
+              qualityGate: { status: "pass", reasons: [] },
+              preview: {
+                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                summary: "Support leader focused on scalable operations.",
+                experience: [
+                  {
+                    company: "Cat Daddy Games",
+                    roleTitle: "Senior Producer",
+                    location: "Los Angeles, CA",
+                    dateRange: "2020 - Present",
+                    bullets: ["Led support operations programs."],
+                  },
+                ],
+                sections: [],
+              },
+              correctionReasons: [],
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+            },
+            coverLetter: {
+              status: "COMPLETED",
+              inputsHash: "cover-hash",
+              responseBody: {
+                status: "success",
+                generationStatus: "success",
+                exportReady: true,
+                exports: { docx: true, pdf: true },
+                preview: {
+                  coverLetter: {
+                    paragraphs: ["Dear Hiring Team,", "I bring verified leadership and operational experience aligned to this role."],
+                  },
+                },
+              },
+              content: "cover-content",
+              failureCode: null,
+              failureMessage: null,
+              startedAt: null,
+              completedAt: new Date().toISOString(),
+              failedAt: null,
+              metadata: { auditId: "audit-1" },
+            },
+            coverLetterResult: {
+              artifactType: "cover_letter",
+              generationState: "generated_usable",
+              qualityStatus: "pass",
+              qualityGate: { status: "pass", reasons: [] },
+              preview: {
+                coverLetter: {
+                  paragraphs: ["Dear Hiring Team,", "I bring verified leadership and operational experience aligned to this role."],
+                },
+              },
+              correctionReasons: [],
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+            },
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock as unknown as typeof fetch);
+
+    renderStudio();
+
+    await waitFor(() => {
+      const debug = screen.getByTestId("studio-orchestration-debug");
+      const raw = debug.querySelector("pre")?.textContent ?? "";
+      expect(raw).toContain("\"generationState\": \"generated_usable\"");
+      expect(raw).toContain("\"exportReady\": true");
+      expect(raw).toContain("\"error\": null");
+      expect(raw).toContain("Led support operations programs.");
+      expect(screen.getByTestId("studio-resume-export")).toBeEnabled();
+      expect(screen.queryByText(/could not hydrate a usable resume preview/i)).toBeNull();
+      expect(screen.queryByText(/out of date due to recent generator improvements/i)).toBeNull();
+    }, { timeout: 15000 });
+  }, 15000);
+
   it("fails cleanly when the requested baseline is archived", async () => {
     overrideSearchParams({
       analysisId: "analysis-archived",
