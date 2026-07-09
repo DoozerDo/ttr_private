@@ -2117,6 +2117,88 @@ describe("Studio auto-generation", () => {
     }, { timeout: 15000 });
   }, 15000);
 
+  it("ignores stale completed scope guards and still auto-starts resume generation", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const completedResumeScopeKey = "v1|resume|base-1|base-version-1|job-1|analysis-1";
+    const completedCoverScopeKey = "v1|cover_letter|base-1|base-version-1|job-1|analysis-1";
+    try {
+      (window as any).__ttrStudioGenerationScopeGuardStore = new Map([
+        [completedResumeScopeKey, { status: "completed", startedAt: Date.now() - 60_000 }],
+        [completedCoverScopeKey, { status: "completed", startedAt: Date.now() - 60_000 }],
+      ]);
+    } catch {
+      // ignore
+    }
+
+    const fetchMock = installStrongFitFetches({
+      readinessStatus: "ready",
+      studioArtifactsPayload: {
+        status: "persisted_only_assessment_backed",
+        assessmentScore: null,
+        baselineId: "base-1",
+        jobId: "job-1",
+        baselineVersionId: "base-version-1",
+        generationContractVersion: "studio-artifacts-v1",
+        artifact: {
+          hasResume: true,
+          hasCoverLetter: false,
+          pairStatus: "failed",
+          generating: false,
+          failure: null,
+        },
+        resume: {
+          status: "failed",
+          usableCurrent: false,
+          inputsHash: true,
+          failureCode: "resume_v2_failed",
+          failureMessage: "Internal Server Error Exception",
+          responseBody: null,
+          content: null,
+          confidence: "LOW",
+          failure: {
+            code: "resume_v2_failed",
+            message: "Internal Server Error Exception",
+          },
+        },
+        coverLetter: {
+          status: "completed",
+          usableCurrent: true,
+          inputsHash: true,
+          responseBody: {
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: { coverLetter: { paragraphs: ["Hello"] } },
+          },
+          content: "Hello",
+          confidence: "HIGH",
+          failure: null,
+        },
+      },
+    });
+    setFetchImplementation(fetchMock as any);
+    renderStudio();
+
+    await waitFor(() => {
+      const snapshot = readOrchestrationDebugSnapshot();
+      expect(snapshot.needsAutoGeneration).toBe(true);
+      expect(snapshot.orchestrationDecision).toBe("should_auto_generate");
+      expect(snapshot.generationClaims?.generationScopeGuardKeys ?? []).not.toContain(completedResumeScopeKey);
+      expect(snapshot.generationClaims?.generationScopeGuardKeys ?? []).not.toContain(completedCoverScopeKey);
+    }, { timeout: 15000 });
+
+    await waitFor(() => {
+      expect(countPostCalls(fetchMock, "/api/resume/generate")).toBeGreaterThan(0);
+    }, { timeout: 15000 });
+  }, 15000);
+
   it("starts canonical generation when qualifiedForGeneration is true and persisted resume/cover artifacts are missing or failed", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",

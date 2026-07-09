@@ -1850,8 +1850,11 @@ export default function StudioPage() {
         generationScopeGuardRef.current.delete(key);
       }
       const existing = generationScopeGuardRef.current.get(key);
-      if (existing) {
+      if (existing?.status === "started") {
         return { started: false as const, key, existing };
+      }
+      if (existing?.status === "completed") {
+        generationScopeGuardRef.current.delete(key);
       }
       generationScopeGuardRef.current.set(key, { status: "started", startedAt: Date.now() });
       return { started: true as const, key, existing: null };
@@ -12112,7 +12115,7 @@ export default function StudioPage() {
           expectedCover: input.coverLetter,
         });
         setStudioArtifactsRefreshNonce((current) => current + 1);
-        scopeGuards.forEach((item) => markGenerationScopeCompleted(item.key));
+        scopeGuards.forEach((item) => releaseGenerationScope(item.key));
       }
     },
     [
@@ -12123,7 +12126,6 @@ export default function StudioPage() {
       effectiveBaselineVersionId,
       effectiveJobId,
       effectiveUnsupportedRequirementsForGeneration,
-      markGenerationScopeCompleted,
       refreshStudioArtifactsAfterGenerate,
       releaseGenerationScope,
       requestedAnalysisId,
