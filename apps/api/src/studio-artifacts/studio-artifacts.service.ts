@@ -25,6 +25,7 @@ import { resolveEvidenceReadinessFromSummary } from '../evidence/readiness-thres
 import { resolveDocumentReadinessState } from '@shared/documentReadinessState';
 import {
   buildResumePlainText,
+  buildNormalizedResumeDocument,
   normalizeNormalizedResumeDocument,
   validateNormalizedResumeDocument,
 } from '../resume/resume-normalization';
@@ -241,25 +242,8 @@ function extractCanonicalResumePreviewModelFromSections(record: Record<string, u
   if (!sections.length) return null;
 
   try {
-    const structured = extractStructuredBaselineFromSections(sections as any);
-    const experience = Array.isArray(structured?.experience) ? structured.experience : [];
-    if (!experience.length) return null;
-
-    return {
-      summary: structured.summary ?? '',
-      experience: experience.map((entry) => ({
-        company: String(entry?.company ?? ''),
-        roleTitle: String(entry?.roleTitle ?? ''),
-        ...(String(entry?.dates ?? '').trim() ? { dateRange: String(entry.dates).trim() } : {}),
-        bullets: Array.isArray(entry?.bullets) ? entry.bullets.map((bullet) => String(bullet ?? '')) : [],
-      })),
-      ...(Array.isArray(structured.education) && structured.education.length
-        ? { education: structured.education.map((institution) => ({ institution: String(institution ?? '') })) }
-        : {}),
-      ...(Array.isArray(structured.skills) && structured.skills.length
-        ? { competencies: structured.skills.map((skill) => String(skill ?? '')).filter(Boolean) }
-        : {}),
-    };
+    const normalized = buildNormalizedResumeDocument(sections as any);
+    return sanitizeResumePreviewForStudio(normalizeNormalizedResumeDocument(normalized));
   } catch {
     return null;
   }
@@ -275,6 +259,25 @@ function extractCanonicalResumePreviewModel(
 
     const canonicalSectionPreview = extractCanonicalResumePreviewModelFromSections(record);
     if (canonicalSectionPreview) return canonicalSectionPreview;
+
+    const previewSections =
+      Array.isArray((record as any)?.preview?.resume?.sections)
+        ? ((record as any).preview.resume.sections as unknown[])
+        : Array.isArray((record as any)?.resumeResult?.preview?.resume?.sections)
+          ? ((record as any).resumeResult.preview.resume.sections as unknown[])
+          : Array.isArray((record as any)?.resumeResult?.preview?.sections)
+            ? ((record as any).resumeResult.preview.sections as unknown[])
+            : [];
+    if (previewSections.length) {
+      try {
+        const normalized = buildNormalizedResumeDocument(previewSections as any);
+        if (Array.isArray(normalized.experience) && normalized.experience.length > 0) {
+          return sanitizeResumePreviewForStudio(normalizeNormalizedResumeDocument(normalized));
+        }
+      } catch {
+        return null;
+      }
+    }
 
     const preview = parseStructuredRecord((record as any).preview);
     const previewResume = parseStructuredRecord(preview?.resume);
