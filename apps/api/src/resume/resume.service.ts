@@ -5295,12 +5295,13 @@ export class ResumeService {
                 identity && typeof identity === 'object'
                   ? (identity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
                   : {};
+              const contactLine =
+                typeof identityRecord.contactLine === 'string' ? identityRecord.contactLine : null;
               const rebuilt = buildNormalizedResumeDocument(
                 responseSections as any,
                 {
-                  name: identityRecord.fullName,
-                  contactLine: identityRecord.contactLine,
-                  links: identityRecord.links,
+                  fullName: typeof identityRecord.fullName === 'string' ? identityRecord.fullName : null,
+                  contactLine,
                 },
                 { documentStrategyPlan: request.documentStrategyPlan ?? undefined },
               );
