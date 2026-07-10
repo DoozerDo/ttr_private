@@ -38,23 +38,47 @@ function hasNonEmptyText(value: unknown): boolean {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function isMinimalResumeArtifact(resume: StudioArtifactsRecordLike, responseBody: Record<string, unknown>): boolean {
+  const resumeRecord = toRecord(resume);
+  const responseInternal = responseBody.internal && typeof responseBody.internal === "object"
+    ? (responseBody.internal as Record<string, unknown>)
+    : null;
+  const resumeInternal = resumeRecord?.internal && typeof resumeRecord.internal === "object"
+    ? (resumeRecord.internal as Record<string, unknown>)
+    : null;
+  const minimalIndicators = [
+    responseInternal?.minimalFallback,
+    responseInternal?.resumeFailSafeMinimalUsed,
+    responseInternal?.resumeGenerationMode,
+    resumeInternal?.minimalFallback,
+    resumeInternal?.resumeFailSafeMinimalUsed,
+    resumeInternal?.resumeGenerationMode,
+  ];
+  return (
+    minimalIndicators.some((value) => value === true || String(value ?? "").toLowerCase() === "true") ||
+    String(responseInternal?.resumeGenerationMode ?? resumeInternal?.resumeGenerationMode ?? "").trim() ===
+      "top_level_fail_safe_minimal"
+  );
+}
+
 function isSuccessfulResumeArtifact(resume: StudioArtifactsRecordLike): boolean {
+  if (!resume || typeof resume !== "object") return false;
+  const resumeRecord = resume as Record<string, unknown>;
   const responseBody = toRecord(resume?.responseBody);
   if (!responseBody) return false;
+
+  if (String(resumeRecord.status ?? "").trim().toUpperCase() !== "COMPLETED") return false;
 
   const status = String(responseBody.status ?? "").trim().toLowerCase();
   const generationStatus = String(responseBody.generationStatus ?? "").trim().toLowerCase();
   const generationState = String(responseBody.generationState ?? "").trim().toLowerCase();
-  const exportReady = responseBody.exportReady === true;
-  const preview = toRecord(responseBody.preview)?.resume;
+
+  if (isMinimalResumeArtifact(resume, responseBody)) return false;
 
   return (
     status === "success" &&
     generationStatus === "success" &&
-    (generationState === "" || generationState === "generated_usable") &&
-    exportReady &&
-    Boolean(preview) &&
-    (hasNonEmptyText((resume as any)?.content) || hasNonEmptyText(responseBody.content))
+    (generationState === "" || generationState === "generated_usable")
   );
 }
 
