@@ -374,18 +374,10 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
         // Drop weak fragment roles entirely when any stronger emphasized roles exist.
         return planned.filter((x) => !isWeakFragmentRole({ company: x.entry?.company, roleTitle: x.entry?.roleTitle }));
       }
-      return planned;
+      return planned.length ? planned : baselineExperience.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry }));
     }
 
-    // Fallback: if no explicit role order is available, render a conservative subset of baseline roles
-    // while still enforcing suppression/weak-fragment filtering.
-    const fallback = baselineExperience.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry }));
-    const allowed = fallback.filter((x) => x.entry).filter((x) => !suppressed.has(x.id));
-    const weakFiltered = allowed.filter(
-      (x) => !isWeakFragmentRole({ company: x.entry?.company, roleTitle: x.entry?.roleTitle }),
-    );
-    // Preserve every role that survives the structured baseline filters.
-    return weakFiltered.length ? weakFiltered : allowed;
+    return baselineExperience.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry }));
   })();
 
   const selectedExperience = selected.map((x) => {
@@ -403,17 +395,7 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   });
 
   const finalExperience = (() => {
-    if (selectedExperience.length > 0) return selectedExperience;
-
-    // Preserve the authoritative ResumeV2 experience source when plan selection
-    // filters everything away. Readiness already established these entries as usable.
-    const fallbackExperience = baselineExperience.map((entry) => ({
-      company: trimToText(entry.company),
-      roleTitle: trimToText(entry.roleTitle),
-      ...(entry.dateRange ? { dateRange: trimToText(entry.dateRange) } : {}),
-      bullets: (entry.bullets ?? []).map((bullet) => trimToText(bullet)).filter(Boolean),
-    }));
-    return fallbackExperience.filter((entry) => entry.company && entry.roleTitle);
+    return selectedExperience;
   })();
   const precomposition = detectPrecompositionContamination({ experience: finalExperience as any });
   const authorityFingerprint = buildAuthorityFingerprint({ experience: finalExperience as any, renderPlan: input.renderPlan ?? null });
@@ -461,7 +443,7 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
     })),
   });
 
-  const summary = ensureSummaryMinimum(composition.summary, composition.experience as any);
+  const summary = trimToText(composition.summary);
   if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
     try {
       const renderedRoleIds = selected.map((x) => x.id);

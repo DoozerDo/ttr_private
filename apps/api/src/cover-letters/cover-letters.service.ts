@@ -1939,62 +1939,31 @@ export class CoverLettersService {
           traceMap: {},
         };
       } else {
-        const positioningPlan = (() => {
-          try {
-            // When present, use the PositioningPlan as narrative authority for the cover letter renderer.
-            // This must not fabricate evidence: it only constrains which baseline blocks are eligible.
-            const resumeV2Like = {
-              heading: { name: candidateName || 'Candidate', contactLine: '' },
-              experience: (structuredBaseline?.experience ?? []).map((e: any) => ({
-                company: e.company,
-                roleTitle: e.roleTitle,
-                dateRange: e.dates,
-                bullets: e.bullets,
-              })),
-              summary: typeof structuredBaseline?.summary === 'string' ? structuredBaseline.summary : '',
-            } as any;
-            return this.positioningPlanService.buildPlan({
-              job: { title: job?.title ?? null, company: job?.company ?? null, description: job.rawDescription ?? null },
-              resumeV2: resumeV2Like,
-              careerIdentity: careerIdentitySnapshot,
-            });
-          } catch {
-            return null;
-          }
-        })();
-        const authoritativeRenderPlan = buildAuthoritativeRenderPlan({
-          positioningPlan,
-          orderedFallbackRoleIds: positioningPlan?.emphasizeRoleIds ?? null,
-          suppressedFallbackRoleIds: positioningPlan?.suppressRoleIds ?? null,
-          allowedEvidenceSnippetIds: allowedBlocks.map((b) => b.id),
+        const document = assembleCoverLetterFromStructuredBaseline({
+          structured: structuredBaseline as any,
+          senderName: candidateName || 'Candidate',
+          senderContactLine: null,
+          jobTitle: job?.title ?? null,
+          companyName: job?.company ?? null,
         });
-        if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
-          // eslint-disable-next-line no-console
-          console.log('[DOCGEN][authoritativeRenderPlan]', {
-            orderedRoleIds: authoritativeRenderPlan.orderedRoleIds,
-            suppressedRoleIds: authoritativeRenderPlan.suppressedRoleIds,
-            coverLetterThesis: authoritativeRenderPlan.coverLetterThesis,
-            evidencePriorities: authoritativeRenderPlan.evidencePriorities,
-          });
-        }
-        generation = this.generator.generate({
-          baselineId: baseline.id,
-          jobId: job.id,
-          allowedBaselineBlocks: allowedBlocks,
-          job: jobContext,
-          candidateName,
-          closingTemplate,
-          maxWords: input.maxWords,
-          tone: input.tone,
-          safeMode: requestSafeMode,
-          complianceConstraints,
-          documentStrategyPlan: input.documentStrategyPlan ?? undefined,
-          authoritativeRenderPlan,
-          gapAnalysis: {
-            strengths: gapInsights.strengths,
-            criticalGaps: gapInsights.criticalGaps,
-          },
-        });
+        const paragraphs = [
+          document.opening,
+          ...(document.bodyParagraphs ?? []),
+          document.closingParagraph,
+        ].map((p) => String(p ?? '').trim()).filter(Boolean);
+        const content = paragraphs.join('\n\n');
+        const wordCount = content.split(/\s+/).filter(Boolean).length;
+        generation = {
+          document,
+          content,
+          wordCount,
+          greeting: document.salutation,
+          paragraphs,
+          closingParagraphs: [document.closingParagraph].filter(Boolean),
+          salutation: document.salutation,
+          closing: `${document.signoff}\n${document.signatureName}`,
+          traceMap: {},
+        };
       }
     } catch (error) {
       if (error instanceof Error) {

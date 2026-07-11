@@ -206,7 +206,7 @@ export class NarrativeCompositionEngine {
     });
 
     return {
-      summary: summaryResult.summary || input.summaryFallback,
+      summary: summaryResult.summary,
       experience: shapedExperience,
       diagnostics: {
         rewrittenBulletCount,
