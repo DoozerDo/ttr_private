@@ -742,6 +742,42 @@ type ResumeExperiencePipelineDiagnostics = {
   stageFailureReason?: string;
 };
 
+export function resolveCanonicalResumeIdentity(params: {
+  baselineIdentity?: { fullName?: unknown; contactLine?: unknown; links?: unknown } | null;
+  resumeAuthorityHeading?: { name?: unknown; contactLine?: unknown; links?: unknown } | null;
+  fallbackHeading?: { name?: unknown; contactLine?: unknown; links?: unknown } | null;
+}): { name: string | null; contactLine: string | null; links: unknown[] } {
+  const pickText = (...values: unknown[]): string | null => {
+    for (const value of values) {
+      if (typeof value !== 'string') continue;
+      const trimmed = value.trim();
+      if (trimmed.length > 0) return trimmed;
+    }
+    return null;
+  };
+
+  const pickLinks = (...values: unknown[]): unknown[] => {
+    for (const value of values) {
+      if (Array.isArray(value) && value.length > 0) return value;
+    }
+    return [];
+  };
+
+  const baselineIdentity = params.baselineIdentity ?? {};
+  const resumeAuthorityHeading = params.resumeAuthorityHeading ?? null;
+  const fallbackHeading = params.fallbackHeading ?? null;
+
+  return {
+    name: pickText(baselineIdentity.fullName, resumeAuthorityHeading?.name, fallbackHeading?.name),
+    contactLine: pickText(
+      baselineIdentity.contactLine,
+      resumeAuthorityHeading?.contactLine,
+      fallbackHeading?.contactLine,
+    ),
+    links: pickLinks(baselineIdentity.links, resumeAuthorityHeading?.links, fallbackHeading?.links),
+  };
+}
+
 @Injectable()
 export class ResumeService {
   private readonly positioningResolver = new TargetRolePositioningResolver();
@@ -3846,16 +3882,40 @@ export class ResumeService {
             return null;
           }
         })();
-        const baselineIdentity = resolveBaselineIdentity(baseline);
-        const identityRecord =
-          baselineIdentity && typeof baselineIdentity === 'object'
-            ? (baselineIdentity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
-            : {};
-        const authoritative = buildAuthoritativeResumeDraftFromResumeV2({
-          resumeV2: resumeAuthority,
-          identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
-          renderPlan: buildAuthoritativeRenderPlan({
-            positioningPlan: plan,
+          const baselineIdentity = resolveBaselineIdentity(baseline);
+          const identityRecord =
+            baselineIdentity && typeof baselineIdentity === 'object'
+              ? (baselineIdentity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
+              : {};
+          const resumeAuthorityHeading =
+            (resumeAuthority as any)?.heading && typeof (resumeAuthority as any).heading === 'object'
+              ? ((resumeAuthority as any).heading as { name?: unknown; contactLine?: unknown; links?: unknown })
+              : null;
+          const canonicalResumeIdentity = {
+            name:
+              typeof identityRecord.fullName === 'string' && identityRecord.fullName.trim().length > 0
+                ? identityRecord.fullName
+                : typeof resumeAuthorityHeading?.name === 'string' && String(resumeAuthorityHeading.name).trim().length > 0
+                  ? resumeAuthorityHeading.name
+                  : null,
+            contactLine:
+              typeof identityRecord.contactLine === 'string' && identityRecord.contactLine.trim().length > 0
+                ? identityRecord.contactLine
+                : typeof resumeAuthorityHeading?.contactLine === 'string' && String(resumeAuthorityHeading.contactLine).trim().length > 0
+                  ? resumeAuthorityHeading.contactLine
+                  : null,
+            links:
+              Array.isArray(identityRecord.links) && identityRecord.links.length
+                ? identityRecord.links
+                : Array.isArray(resumeAuthorityHeading?.links) && resumeAuthorityHeading.links.length
+                  ? resumeAuthorityHeading.links
+                  : [],
+          };
+          const authoritative = buildAuthoritativeResumeDraftFromResumeV2({
+            resumeV2: resumeAuthority,
+            identity: canonicalResumeIdentity,
+            renderPlan: buildAuthoritativeRenderPlan({
+              positioningPlan: plan,
             orderedFallbackRoleIds: positioning.prioritizedExperienceIds ?? [],
             suppressedFallbackRoleIds: positioning.suppressedExperienceIds ?? [],
             allowedEvidenceSnippetIds: null,
@@ -4477,6 +4537,13 @@ export class ResumeService {
         baselineIdentity && typeof baselineIdentity === 'object'
           ? (baselineIdentity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
           : {};
+      const canonicalResumeIdentity = resolveCanonicalResumeIdentity({
+        baselineIdentity: identityRecord,
+        resumeAuthorityHeading:
+          (normalizedDocument as any)?.heading && typeof (normalizedDocument as any).heading === 'object'
+            ? ((normalizedDocument as any).heading as { name?: unknown; contactLine?: unknown; links?: unknown })
+            : null,
+      });
 
       // eslint-disable-next-line no-console
       console.log('[RESUME_POSITIONING]', {
@@ -4512,7 +4579,7 @@ export class ResumeService {
 
       normalizedDocument = buildAuthoritativeResumeDraftFromResumeV2({
         resumeV2: normalizedDocument as any,
-        identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
+        identity: canonicalResumeIdentity,
         renderPlan,
         professionalIdentity: positioning.professionalIdentity ?? null,
         targetNarrative: positioning.targetNarrative ?? null,
@@ -5341,13 +5408,24 @@ export class ResumeService {
             baselineIdentity && typeof baselineIdentity === 'object'
               ? (baselineIdentity as unknown as { fullName?: unknown; contactLine?: unknown; links?: unknown })
               : {};
+          const canonicalResumeIdentity = resolveCanonicalResumeIdentity({
+            baselineIdentity: identityRecord,
+            resumeAuthorityHeading:
+              (persistedResumeV2 as any)?.heading && typeof (persistedResumeV2 as any).heading === 'object'
+                ? ((persistedResumeV2 as any).heading as { name?: unknown; contactLine?: unknown; links?: unknown })
+                : (canonicalResponsePreview as any)?.heading && typeof (canonicalResponsePreview as any).heading === 'object'
+                  ? ((canonicalResponsePreview as any).heading as { name?: unknown; contactLine?: unknown; links?: unknown })
+                  : (response?.preview?.resume as any)?.heading && typeof (response?.preview?.resume as any).heading === 'object'
+                    ? ((response?.preview?.resume as any).heading as { name?: unknown; contactLine?: unknown; links?: unknown })
+                    : null,
+          });
           const authoritative = buildAuthoritativeResumeDraftFromResumeV2({
             resumeV2:
               (persistedResumeV2 as any) ??
               canonicalResponsePreview ??
               (response?.preview?.resume as any) ??
               {},
-            identity: { name: identityRecord.fullName, contactLine: identityRecord.contactLine, links: identityRecord.links },
+            identity: canonicalResumeIdentity,
             renderPlan: buildAuthoritativeRenderPlan({
               positioningPlan: plan,
               orderedFallbackRoleIds: positioning.prioritizedExperienceIds ?? [],

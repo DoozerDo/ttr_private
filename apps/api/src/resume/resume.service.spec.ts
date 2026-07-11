@@ -1,6 +1,11 @@
 import { BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { Repository } from 'typeorm';
-import { ResumeService, GenerateResumeRequest, buildFailSafeExperienceContentFromStructuredAndBaseline } from './resume.service';
+import {
+  ResumeService,
+  GenerateResumeRequest,
+  buildFailSafeExperienceContentFromStructuredAndBaseline,
+  resolveCanonicalResumeIdentity,
+} from './resume.service';
 import { RESUME_GENERATION_V2_FEATURE_FLAG } from './resume-generation-v2';
 import { UnprocessableEntityException } from '@nestjs/common';
 import { Baseline, BaselineStatus } from '../baseline/baseline.entity';
@@ -376,6 +381,25 @@ const buildService = (options?: {
     workflowIdempotencyService,
   };
 };
+
+describe('resolveCanonicalResumeIdentity', () => {
+  it('prefers canonical resume authority heading contact details over empty baseline identity fields', () => {
+    expect(
+      resolveCanonicalResumeIdentity({
+        baselineIdentity: { fullName: null, contactLine: null, links: [] },
+        resumeAuthorityHeading: {
+          name: 'Test Candidate',
+          contactLine: 'test@example.com | Seattle, WA',
+          links: ['https://example.com'],
+        },
+      }),
+    ).toEqual({
+      name: 'Test Candidate',
+      contactLine: 'test@example.com | Seattle, WA',
+      links: ['https://example.com'],
+    });
+  });
+});
 
 describe('ResumeService contract', () => {
   it('uses persisted ResumeV2 as the only resume generation authority (not baseline section text)', async () => {
