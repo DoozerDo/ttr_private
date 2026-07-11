@@ -345,12 +345,17 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   }
 
   const resumeV2ForAuthority = input.resumeV2;
-
-  const baselineExperience = Array.isArray((resumeV2ForAuthority as any)?.experience)
-    ? (((resumeV2ForAuthority as any).experience as any[]) ?? [])
+  const structuredExperience = Array.isArray((input.structuredBaselineForIdentity as any)?.experience)
+    ? (((input.structuredBaselineForIdentity as any).experience as any[]) ?? [])
     : [];
+  const authoritativeExperienceSource =
+    structuredExperience.length > 0
+      ? structuredExperience
+      : Array.isArray((resumeV2ForAuthority as any)?.experience)
+        ? (((resumeV2ForAuthority as any).experience as any[]) ?? [])
+        : [];
   const idToEntry = new Map<string, any>();
-  baselineExperience.forEach((entry, index) => idToEntry.set(`resume_v2_exp_${index}`, entry));
+  authoritativeExperienceSource.forEach((entry, index) => idToEntry.set(`resume_v2_exp_${index}`, entry));
 
   const suppressed = new Set((input.renderPlan?.suppressedRoleIds ?? []).map((id) => String(id ?? '')));
   const ranked = (input.renderPlan?.orderedRoleIds ?? []).map((id) => String(id ?? '')).filter(Boolean);
@@ -374,10 +379,12 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
         // Drop weak fragment roles entirely when any stronger emphasized roles exist.
         return planned.filter((x) => !isWeakFragmentRole({ company: x.entry?.company, roleTitle: x.entry?.roleTitle }));
       }
-      return planned.length ? planned : baselineExperience.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry }));
+      return planned.length
+        ? planned
+        : authoritativeExperienceSource.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry }));
     }
 
-    return baselineExperience.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry }));
+    return authoritativeExperienceSource.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry }));
   })();
 
   const selectedExperience = selected.map((x) => {
@@ -400,18 +407,8 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
   const precomposition = detectPrecompositionContamination({ experience: finalExperience as any });
   const authorityFingerprint = buildAuthorityFingerprint({ experience: finalExperience as any, renderPlan: input.renderPlan ?? null });
 
-  const positioningSummary = (() => {
-    const pro = trimToText(input.professionalIdentity ?? '');
-    const narrative = trimToText(input.targetNarrative ?? '');
-    const thesis = trimToText(input.renderPlan?.summaryNarrative ?? '');
-    if (thesis) return thesis;
-    if (!pro && !narrative) return '';
-    return `${pro ? `${pro}.` : ''} ${narrative}`.trim();
-  })();
-
   const composition = new NarrativeCompositionEngine().composeResume({
     renderPlan: input.renderPlan ?? null,
-    summaryFallback: positioningSummary || trimToText((resumeV2ForAuthority as any)?.summary ?? ''),
     careerIdentity: input.careerIdentity ?? null,
     experience: (finalExperience as any).map((e: any) => ({
       company: trimToText(e.company),
@@ -455,7 +452,7 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
         renderedRoleIds,
         leakedRoleIds,
         suppressedRoleLeakDetected: leakedRoleIds.length > 0,
-        renderedSummarySource: input.renderPlan?.summaryNarrative ? 'authoritative_render_plan' : 'fallback',
+        renderedSummarySource: input.renderPlan?.summaryNarrative ? 'authoritative_render_plan' : 'canonical_composer',
         rewrittenBulletCount: composition.diagnostics.rewrittenBulletCount,
         narrativeQualityScore: composition.diagnostics.narrativeQualityScore,
         genericLanguageFlags: composition.diagnostics.genericLanguageFlags,

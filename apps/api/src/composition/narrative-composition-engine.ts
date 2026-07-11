@@ -6,7 +6,7 @@ import { NarrativeQualityEvaluator } from './narrative-quality-evaluator';
 
 export type ResumeCompositionInput = {
   renderPlan: AuthoritativeRenderPlan | null;
-  summaryFallback: string;
+  summaryFallback?: string;
   careerIdentity?: CareerIdentitySnapshot | null;
   experience: Array<{
     company: string;

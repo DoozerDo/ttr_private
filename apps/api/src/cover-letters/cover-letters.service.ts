@@ -2309,7 +2309,7 @@ export class CoverLettersService {
       baseline,
       baselineVersion,
       job,
-      generationAuthority: baselineFileUsable ? 'baseline_file' : 'fallback',
+      generationAuthority: 'baseline_file',
       baselineFileUsable,
       baselineFileVersionHash,
       analysisAssessment,
