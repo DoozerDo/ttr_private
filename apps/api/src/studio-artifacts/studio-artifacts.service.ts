@@ -29,6 +29,7 @@ import {
   normalizeNormalizedResumeDocument,
   validateNormalizedResumeDocument,
 } from '../resume/resume-normalization';
+import { assembleResumeFromStructuredBaseline } from '../resume/resumeTemplateAssembler';
 import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-backfill.service';
 import { ResumeService } from '../resume/resume.service';
 import { CoverLettersService } from '../cover-letters/cover-letters.service';
@@ -242,7 +243,15 @@ function extractCanonicalResumePreviewModelFromSections(record: Record<string, u
   if (!sections.length) return null;
 
   try {
-    const normalized = buildNormalizedResumeDocument(sections as any);
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    if (!Array.isArray((structured as any)?.experience) || (structured as any).experience.length === 0) {
+      return null;
+    }
+    const normalized = assembleResumeFromStructuredBaseline(structured as any, {
+      name: null,
+      contactLine: null,
+      links: null,
+    });
     return sanitizeResumePreviewForStudio(normalizeNormalizedResumeDocument(normalized));
   } catch {
     return null;
@@ -735,38 +744,6 @@ export class StudioArtifactsService {
       // eslint-disable-next-line no-console
       console.log('[ARTIFACT_QUALITY_READ]', `baselineId=${input.baselineId} jobId=${input.jobId} baselineVersionId=${input.baselineVersionId} analysisId=${input.analysisId ?? null}`);
     }
-    if (input.analysisId) {
-      record = await this.studioArtifactRepository.findOne({
-        where: {
-          userId: input.userId,
-          baselineId: input.baselineId,
-          jobId: input.jobId,
-        },
-      });
-      const resumeInputsHash = record?.resumeInputsHash ?? '';
-      const coverLetterInputsHash = record?.coverLetterInputsHash ?? '';
-      if (process.env.DEBUG_STUDIO_ARTIFACTS_ROUTE_TRACE === 'true') {
-        // eslint-disable-next-line no-console
-        console.info('[studio-artifacts][service][readState:analysisId-fast-path]', {
-          analysisId: input.analysisId ?? null,
-          artifactRowFound: Boolean(record),
-          resumeInputsHash,
-          coverLetterInputsHash,
-        });
-      }
-      return this.buildPersistedOnlyState({
-        baselineId: input.baselineId,
-        jobId: input.jobId,
-        baselineVersionId: input.baselineVersionId,
-        baselineVersionHash: null,
-        jobFingerprint: null,
-        assessmentScore: null,
-        record: record ?? null,
-        resumeInputsHash,
-        coverLetterInputsHash,
-      });
-    }
-
     [baselineVersion, job, assessment, record] = await Promise.all([
       this.baselineVersionRepository.findOne({
         where: { id: input.baselineVersionId, baselineId: input.baselineId },
@@ -1314,7 +1291,18 @@ export class StudioArtifactsService {
     const debugTargetArtifactId = 'c3696092-8b36-468e-b0f7-54e19e666ea4';
     const shouldEmitResumeHydrationDebug = String(authoritativeArtifactId ?? '') === debugTargetArtifactId;
 
-    const resumeRenderablePreviewModel = extractCanonicalResumePreviewModelFromRecord(resumeRecord);
+    const resumeIsMinimal = Boolean(resumeRecord) && detectMinimalResumeArtifact(resumeRecord?.responseBody ?? null).minimal;
+    const persistedResumePreviewModel = extractCanonicalResumePreviewModelFromRecord(resumeRecord);
+    const canonicalResumePreviewModelFromSections = baseline
+      ? extractCanonicalResumePreviewModelFromSections(baseline as any)
+      : null;
+    const resumeRenderablePreviewModel =
+      persistedResumePreviewModel && Array.isArray((persistedResumePreviewModel as any)?.experience) &&
+      (persistedResumePreviewModel as any).experience.length > 0
+        ? persistedResumePreviewModel
+        : !resumeIsMinimal && canonicalResumePreviewModelFromSections
+          ? canonicalResumePreviewModelFromSections
+          : persistedResumePreviewModel;
 
     const resumeRecoverablePreviewModel = resumeRenderablePreviewModel;
 
@@ -1360,7 +1348,6 @@ export class StudioArtifactsService {
     const resumeIsStaleLegacy =
       Boolean(resumeRecord) &&
       (isTrue(((resumeRecord ? resumeRecord.metadata : null) as any)?.staleLegacy) || isTrue(resumeInternal?.staleLegacy));
-    const resumeIsMinimal = Boolean(resumeRecord) && detectMinimalResumeArtifact(resumeRecord?.responseBody ?? null).minimal;
     const resumeHasRecoverablePayload = (() => {
       if (!resumeRecord) return false;
       const responseBodyPresent = Boolean(resumeRecord.responseBody && Object.keys(resumeRecord.responseBody).length > 0);
@@ -1806,7 +1793,7 @@ export class StudioArtifactsService {
       structuredBaselineExperienceCount,
       structuredBaselineMissingEvidenceReasons,
       structuredBaselineExtractedExperiencePreview,
-      ...(artifactReadiness
+        ...(artifactReadiness
         ? { artifactReadiness, artifactReadinessReasons, artifactReadinessReasonDetails }
         : {}),
       resume: resumeRecordForResult,

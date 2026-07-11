@@ -43,6 +43,7 @@ describe('resolveGenerationEvidence', () => {
         source: 'resume_v2',
       }),
     );
+    expect(bundle.generationAuthority).toBe('baseline_file');
     expect(bundle.workHistory[0]?.provenance?.baselineId).toBe('baseline-1');
   });
 

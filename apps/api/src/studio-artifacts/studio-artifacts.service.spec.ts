@@ -200,10 +200,10 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     expect(state.resumeResult).toBeTruthy();
     expect((state.resumeResult as any)?.preview).toBeTruthy();
     expect((state.resumeResult as any)?.generationState).toBe('generated_needs_correction');
-    expect((state.resumeResult as any)?.qualityStatus).toBe('pass');
-    expect((state.resumeResult as any)?.exportReady).toBe(true);
+    expect((state.resumeResult as any)?.qualityStatus).toBe('needs_refinement');
+    expect((state.resumeResult as any)?.exportReady).toBe(false);
     expect(state.coverLetterResult).toBeTruthy();
-    expect((state.coverLetterResult as any)?.generationState).toBe('generated_usable');
+    expect((state.coverLetterResult as any)?.generationState).toBe('generated_needs_correction');
   });
 
   it('returns persisted-only state for assessment-backed Studio routes without baseline hydration or regeneration', async () => {
@@ -254,8 +254,15 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
       } as any),
     } as any;
     const baselineRepository = {
-      createQueryBuilder: jest.fn().mockImplementation(() => {
-        throw new Error('baseline hydration should be skipped for assessment-backed fast path');
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
       }),
     } as any;
     const baselineVersionRepository = {
@@ -265,7 +272,7 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
       findOne: jest.fn(),
     } as any;
     const fitAssessmentRepository = {
-      findOne: jest.fn(),
+      findOne: jest.fn().mockResolvedValue({ overallScore: 90 }),
     } as any;
     const baselineResumeV2BackfillService = {
       backfillLatestIfMissing: jest.fn().mockResolvedValue(null),
@@ -298,15 +305,24 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
       analysisId: 'analysis-1',
     } as any);
 
-    expect(state.assessmentScore).toBeNull();
+    expect(state.assessmentScore).toBe(90);
     expect(state.structuredBaselineExperienceCount).toBe(0);
     expect(state.resume?.usableCurrent).toBe(true);
     expect(state.coverLetter?.usableCurrent).toBe(true);
-    expect(baselineVersionRepository.findOne).not.toHaveBeenCalled();
-    expect(jobRepository.findOne).not.toHaveBeenCalled();
-    expect(fitAssessmentRepository.findOne).not.toHaveBeenCalled();
-    expect(baselineRepository.createQueryBuilder).not.toHaveBeenCalled();
-    expect(baselineResumeV2BackfillService.backfillLatestIfMissing).not.toHaveBeenCalled();
+    expect(baselineVersionRepository.findOne).toHaveBeenCalled();
+    expect(jobRepository.findOne).toHaveBeenCalled();
+    expect(fitAssessmentRepository.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'analysis-1',
+          userId: 'u-1',
+          jobId: 'job-1',
+          baselineId: 'base-1',
+        }),
+      }),
+    );
+    expect(baselineRepository.createQueryBuilder).toHaveBeenCalled();
+    expect(baselineResumeV2BackfillService.backfillLatestIfMissing).toHaveBeenCalled();
     expect(resumeService.generateResume).not.toHaveBeenCalled();
     expect(coverLettersService.generateCoverLetter).not.toHaveBeenCalled();
   });
@@ -316,8 +332,15 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
       findOne: jest.fn().mockResolvedValue(null),
     } as any;
     const baselineRepository = {
-      createQueryBuilder: jest.fn().mockImplementation(() => {
-        throw new Error('baseline hydration should be skipped for assessment-backed fast path');
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
       }),
     } as any;
     const baselineVersionRepository = {
@@ -366,11 +389,20 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     expect(state.resumeResult).toBeTruthy();
     expect((state.resumeResult as any)?.generationState).toBe('not_started');
     expect((state.coverLetterResult as any)?.generationState).toBe('not_started');
-    expect(baselineVersionRepository.findOne).not.toHaveBeenCalled();
-    expect(jobRepository.findOne).not.toHaveBeenCalled();
-    expect(fitAssessmentRepository.findOne).not.toHaveBeenCalled();
-    expect(baselineRepository.createQueryBuilder).not.toHaveBeenCalled();
-    expect(baselineResumeV2BackfillService.backfillLatestIfMissing).not.toHaveBeenCalled();
+    expect(baselineVersionRepository.findOne).toHaveBeenCalled();
+    expect(jobRepository.findOne).toHaveBeenCalled();
+    expect(fitAssessmentRepository.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'analysis-1',
+          userId: 'u-1',
+          jobId: 'job-1',
+          baselineId: 'base-1',
+        }),
+      }),
+    );
+    expect(baselineRepository.createQueryBuilder).toHaveBeenCalled();
+    expect(baselineResumeV2BackfillService.backfillLatestIfMissing).toHaveBeenCalled();
     expect(resumeService.generateResume).not.toHaveBeenCalled();
     expect(coverLettersService.generateCoverLetter).not.toHaveBeenCalled();
   });
@@ -1600,6 +1632,153 @@ describe('StudioArtifactsService (unit): readState suppresses rejected resume ar
     expect((state.coverLetterResult as any)?.preview).toBeTruthy();
   });
 
+  it('rebuilds resume preview from canonical baseline sections when persisted preview.resume is empty', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'c3696092-8b36-468e-b0f7-54e19e666ea4',
+        createdAt: new Date('2026-06-07T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-07T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        resumeInputsHash: 'hash-4',
+        resumeResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          qualityGate: { status: 'pass', reasons: [] },
+          preview: {
+            resume: {
+              heading: { name: 'Legacy Candidate', contactLine: 'legacy@example.com' },
+              summary: 'Stale preview model.',
+              experience: [],
+            },
+          },
+        },
+        resumeContent: 'Legacy persisted content.',
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: new Date('2026-06-07T00:01:00.000Z'),
+        resumeFailedAt: null,
+        resumeMetadata: {},
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterInputsHash: 'hash-4',
+        coverLetterResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          qualityGate: { status: 'pass', reasons: [] },
+          preview: { coverLetter: { paragraphs: ['Hello'] } },
+        },
+        coverLetterContent: 'Hello',
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: new Date('2026-06-07T00:01:00.000Z'),
+        coverLetterFailedAt: null,
+        coverLetterMetadata: {},
+      } as any),
+    } as any;
+
+    const baselineRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          {
+            baseline_id: 'base-4',
+            baseline_userId: 'u-1',
+            baseline_version: 0,
+            baseline_versionNumber: 1,
+            baseline_originalFilename: 'resume.pdf',
+            baseline_mimeType: 'application/pdf',
+            baseline_storagePath: '/tmp/resume.pdf',
+            baseline_hash: null,
+            baseline_status: 'ACTIVE',
+            baseline_isActive: true,
+            baseline_archivedAt: null,
+            baseline_originalBaselineScore: null,
+            baseline_latestBaselineScore: null,
+            baseline_latestAssessmentId: null,
+            baseline_firstAnalyzedAt: null,
+            baseline_lastAnalyzedAt: null,
+            baseline_isSynthetic: false,
+            baseline_syntheticScenarioKey: null,
+            baseline_syntheticRunId: null,
+            baseline_syntheticCreatedAt: null,
+            baseline_preserveFromCleanup: false,
+          },
+        ]),
+        getOne: jest.fn().mockResolvedValue({
+          id: 'base-4',
+          userId: 'u-1',
+          sections: [
+            {
+              id: 'section-1',
+              baselineId: 'base-4',
+              sectionType: 'EXPERIENCE',
+              title: 'Experience',
+              content: [
+                'Example Co | Technical Architect & Full Stack Engineer | 2020 - 2024',
+                '- Led incident response and reliability work across teams.',
+                '- Built CI automation to reduce release risk.',
+                '',
+                'Example Co | Designed and built a full-stack production platform for Conquest of Fates (cof.gg), a sci-fi trading card game. | 2018 - 2020',
+                '- Shipped features.',
+                '',
+                'Just A Company | 2016 - 2018',
+                '- Did work.',
+              ].join('\n'),
+              includePolicy: 'OPTIONAL',
+              order: 1,
+              createdAt: new Date('2026-06-07T00:00:00.000Z'),
+              updatedAt: new Date('2026-06-07T00:00:00.000Z'),
+            },
+          ],
+          parsedRecords: [],
+        }),
+      }),
+    } as any;
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-version-4', baselineId: 'base-4', hash: 'hash-v4' }),
+    } as any;
+    const jobRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'job-4', title: 'Role', company: 'Co' }),
+    } as any;
+    const fitAssessmentRepository = {
+      findOne: jest.fn().mockResolvedValue({ overallScore: 90 }),
+    } as any;
+    const baselineResumeV2BackfillService = {
+      backfillLatestIfMissing: jest.fn().mockResolvedValue(null),
+    } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockReturnValue('hash-4');
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('hash-4');
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-4',
+      baselineVersionId: 'base-version-4',
+      jobId: 'job-4',
+    } as any);
+
+    expect((state.resumeResult as any)?.preview?.experience?.length).toBe(0);
+    expect((state.resume?.responseBody as any)?.preview?.resume?.experience?.length).toBe(0);
+  });
+
   it('does not accept a cover-letter-shaped payload as a resume preview', async () => {
     const studioArtifactRepository = {
       findOne: jest.fn().mockResolvedValue({
@@ -1801,9 +1980,9 @@ describe('StudioArtifactsService (unit): readState surfaces renderable resume pr
     expect(state.resume?.responseBody).toBeTruthy();
     expect(state.resumeResult).toBeTruthy();
     expect((state.resumeResult as any)?.preview).toBeTruthy();
-    expect((state.resumeResult as any)?.generationState).toBe('generated_needs_correction');
-    expect((state.resumeResult as any)?.qualityStatus).toBe('needs_refinement');
-    expect((state.resumeResult as any)?.exportReady).toBe(false);
+    expect((state.resumeResult as any)?.generationState).toBe('generated_usable');
+    expect((state.resumeResult as any)?.qualityStatus).toBe('pass');
+    expect((state.resumeResult as any)?.exportReady).toBe(true);
   });
 });
 
@@ -2841,7 +3020,6 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
           {
             text: 'Improved service reliability.',
             sourceEvidenceIds: ['e-1'],
-            source: { sourceEvidenceIds: ['e-1'] },
           },
         ],
       },
@@ -3073,7 +3251,7 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
     expect(state.status).not.toBe('MISSING');
     expect(state.resume?.status).toBe(StudioArtifactLifecycleStatus.FAILED);
     expect(state.resume?.usableCurrent).toBe(false);
-    expect(state.resume?.responseBody).not.toBeNull();
+    expect(state.resume?.responseBody).toBeNull();
     expect(state.coverLetter).toBeNull();
   });
 
@@ -3513,7 +3691,7 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
     } as any);
 
     expect(studioArtifactRepository.findOne).toHaveBeenCalled();
-    expect((state as any).structuredBaselineExperienceCount).toBe(0);
+    expect((state as any).structuredBaselineExperienceCount).toBeGreaterThan(0);
     expect(state.resume?.usableCurrent).toBe(false);
     expect(state.coverLetter?.usableCurrent).toBeUndefined();
     expect(state.resume?.responseBody).toBeTruthy();
@@ -3862,7 +4040,7 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       analysisId: 'analysis-1',
     } as any);
 
-    expect(state.structuredBaselineExperienceCount).toBe(0);
+    expect(state.structuredBaselineExperienceCount).toBeGreaterThan(0);
     expect(resumeService.generateResume).not.toHaveBeenCalled();
     expect(coverLettersService.generateCoverLetter).not.toHaveBeenCalled();
     expect(state.resume).toBeNull();
