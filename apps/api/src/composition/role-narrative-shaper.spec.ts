@@ -11,15 +11,15 @@ describe('RoleNarrativeShaper', () => {
       company: 'Acme',
       roleTitle: 'Support Operations Lead',
       bullets: [
-        'Managed escalations and handoffs between teams',
-        'Managed incident response communications and updates',
-        'Managed queue health and operational reviews',
+        'Coordinated escalations and handoffs between teams',
+        'Coordinated incident response communications and updates',
+        'Coordinated queue health and operational reviews',
       ],
       evidencePriorities: ['incident response', 'escalations', 'queue health'],
     });
 
     expect(shaped.bullets.length).toBeGreaterThanOrEqual(3);
-    const starts = shaped.bullets.slice(0, 3).map(openingWord).filter(Boolean);
+    const starts = shaped.bullets.slice(0, 3).map((bullet) => openingWord((bullet as any)?.text ?? bullet)).filter(Boolean);
     expect(new Set(starts).size).toBeGreaterThan(1);
   });
 

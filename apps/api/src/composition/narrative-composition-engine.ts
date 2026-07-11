@@ -156,22 +156,12 @@ export class NarrativeCompositionEngine {
         filteredCandidates.push(candidate);
       }
 
-      // Secondary fallback: role-local derivation from that role's bullet corpus.
-      // This is not the primary guard (provenance checks above are).
-      const roleScopedPriorities = filteredCandidates
-        .map((c) => String(c.theme ?? '').trim())
-        .filter(Boolean)
-        .filter((theme) => {
-          const needle = normalizeToken(theme);
-          return needle.length >= 4 && roleBulletText.includes(needle);
-        });
-
       const shaped = this.roleShaper.shapeRole({
         company: role.company,
         roleTitle: role.roleTitle,
         dateRange: role.dateRange,
         bullets: role.bullets,
-        evidencePriorities: roleScopedPriorities.length ? roleScopedPriorities : filteredCandidates.map((c) => c.theme),
+        evidencePriorities: filteredCandidates.map((c) => c.theme),
         prohibitedDomainSignals: prohibitedSignals.length ? prohibitedSignals : null,
       });
       rewrittenBulletCount += shaped.rewrittenBulletCount;
