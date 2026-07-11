@@ -51,8 +51,7 @@ describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
     expect(JSON.stringify(draft.experience ?? [])).not.toContain('Vue 3), deck builder frontend');
     expect(JSON.stringify(draft.experience ?? [])).not.toContain('AMS DataSerfs');
 
-    const sentenceCount = String(draft.summary ?? '').split(/(?<=[.!?])\s+/).filter(Boolean).length;
-    expect(sentenceCount).toBeGreaterThanOrEqual(2);
+    expect(String(draft.summary ?? '')).toBe('');
 
     const firstBullets = (draft.experience?.[0] as any)?.bullets ?? [];
     expect(firstBullets.length).toBeGreaterThanOrEqual(2);

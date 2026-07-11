@@ -17,7 +17,7 @@ function countWords(text: string): number {
 }
 
 describe('ExecutiveSummaryComposer', () => {
-  it('keeps summary concise, non-stuffed, and sentence-bounded', () => {
+  it('returns the approved thesis without synthesizing additional summary text', () => {
     const composer = new ExecutiveSummaryComposer();
 
     const result = composer.compose({
@@ -38,23 +38,17 @@ describe('ExecutiveSummaryComposer', () => {
       ],
     });
 
-    expect(result.summary).toMatch(/\.$/);
-    expect(countSentences(result.summary)).toBeLessThanOrEqual(3);
-    expect(countWords(result.summary)).toBeLessThanOrEqual(55);
-    // Summary should read like natural senior positioning, not metadata labeling.
-    expect(result.summary).not.toMatch(/Focus areas:\s+/i);
-    expect(result.summary).not.toMatch(/\bKnown for\b/i);
-    expect(result.summary).not.toMatch(/\bleader leading\b/i);
-    // Avoid keyword-stuffed comma inventories in the summary.
-    expect((result.summary.match(/,/g) ?? []).length).toBeLessThanOrEqual(2);
+    expect(result.summary).toBe(
+      'Support operations leader who improves incident response, escalations, and customer outcomes while staying grounded in verified experience',
+    );
+    expect(result.source).toBe('authoritative_thesis');
   });
 
-  it('does not fabricate a billing-domain narrative when baseline corpus does not support it', () => {
+  it('returns an empty summary when the canonical planner does not approve one', () => {
     const composer = new ExecutiveSummaryComposer();
 
     const result = composer.compose({
-      positioningThesis:
-        'Support operations leader focused on billing support operations, invoice accuracy, entitlement mismatches, and reconciliation workflows.',
+      positioningThesis: '',
       experienceSnippets: [
         'Director of Support at Acme',
         'Owned escalations and incident communications for a SaaS platform',
@@ -63,7 +57,7 @@ describe('ExecutiveSummaryComposer', () => {
       evidencePriorities: ['incident response', 'support operations'],
     });
 
-    // If the baseline evidence doesn't mention billing/invoice/etc, the thesis must not introduce it.
-    expect(result.summary.toLowerCase()).not.toMatch(/\b(billing|invoice|entitlement|reconciliation|metering|credit|dispute|revenue)\b/);
+    expect(result.summary).toBe('');
+    expect(result.source).toBe('inferred');
   });
 });
