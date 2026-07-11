@@ -396,13 +396,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
           ])
         : '',
     ].filter(Boolean);
-    const narrativeClosing = this.narrativeComposer.compose({
-      thesis: null,
-      evidenceSnippets: [],
-      jobCompany: normalizedJob.company,
-      jobTitle: normalizedJob.title,
-      maxBodyParagraphs: COVER_LETTER_MAX_BODY_PARAGRAPHS,
-    }).closing;
+    const narrativeClosing = this.ensureSentence(renderPlan?.coverLetterThesis ?? renderPlan?.summaryNarrative ?? '');
 
     const closingEvidenceText = closingEvidence.length
       ? this.ensureSentence(this.compactEvidenceText(closingEvidence[0].normalizedText, 26))
@@ -410,7 +404,6 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
 
     const closing = this.joinSentences([
       ...(closingEvidenceText ? [closingEvidenceText] : []),
-      ...(closingEvidence.length ? [this.ensureSentence('Led operating reviews, coaching rhythms, and escalation playbooks.')] : []),
       ...(strategySentence ? [strategySentence] : []),
       this.ensureSentence(narrativeClosing),
     ]);

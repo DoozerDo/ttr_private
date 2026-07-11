@@ -62,13 +62,7 @@ function varyImpactSentence(source: string): string {
 }
 
 function chooseVariedOpenings(paragraphs: string[]): string[] {
-  const starters = [
-    'In prior roles,',
-    'Across teams,',
-    'In practice,',
-    'One consistent pattern is',
-    'A concrete example is',
-  ];
+  const starters = ['In prior roles,', 'Across teams,', 'In practice,', 'One consistent pattern is', 'A concrete example is'];
   let i = 0;
   return paragraphs.map((p) => {
     const text = trimToText(p);
@@ -82,19 +76,7 @@ function chooseVariedOpenings(paragraphs: string[]): string[] {
   });
 }
 
-const BILLING_DOMAIN_TERMS = [
-  'billing',
-  'invoice',
-  'invoicing',
-  'reconciliation',
-  'reconcile',
-  'entitlement',
-  'metering',
-  'usage metering',
-  'credit',
-  'dispute',
-  'revenue',
-];
+const BILLING_DOMAIN_TERMS = ['billing', 'invoice', 'invoicing', 'reconciliation', 'reconcile', 'entitlement', 'metering', 'usage metering', 'credit', 'dispute', 'revenue'];
 
 function containsBillingDomain(text: string): boolean {
   const lowered = trimToText(text).toLowerCase();
@@ -121,16 +103,6 @@ function sanitizeThesisAgainstEvidence(thesis: string, evidenceCorpus: string): 
 export class CoverLetterNarrativeComposer {
   private detector = new GenericLanguageDetector();
 
-  private buildBodyParagraph(snippets: string[]): string {
-    const cleaned = snippets.map((s) => trimToText(s)).filter(Boolean);
-    const first = cleaned[0] ? sentenceFromSnippet(cleaned[0]) : '';
-    const second = cleaned[1]
-      ? ensureSentence(`For example, ${compactSnippet(cleaned[1], 50)}`)
-      : '';
-    const impact = cleaned.length ? ensureSentence(varyImpactSentence(cleaned.join(' '))) : '';
-    return [first, second, impact].filter(Boolean).join(' ').trim();
-  }
-
   compose(input: {
     thesis: string | null;
     evidenceSnippets: Array<{ id: string; text: string; roleId?: string | null }>;
@@ -149,23 +121,9 @@ export class CoverLetterNarrativeComposer {
   } {
     const evidenceCorpus = input.evidenceSnippets.map((s) => trimToText(s.text)).filter(Boolean).join(' ');
     const thesis = sanitizeThesisAgainstEvidence(trimToText(input.thesis ?? ''), evidenceCorpus);
-    const company = trimToText(input.jobCompany ?? '');
-    const title = trimToText(input.jobTitle ?? '');
     const renderedEvidenceSnippetIds = input.evidenceSnippets.map((s) => s.id);
 
-    const opening = (() => {
-      const identity = thesis
-        ? ensureSentence(thesis)
-        : ensureSentence(
-            title && company ? `I am applying for the ${title} opportunity at ${company}` : 'I am applying for this role',
-          );
-      const fit = ensureSentence(
-        title && company
-          ? `My focus is translating operational evidence into clear priorities and reliable execution for ${company}`
-          : 'My focus is translating operational evidence into clear priorities and reliable execution',
-      );
-      return [identity, fit].filter(Boolean).join(' ').trim();
-    })();
+    const opening = thesis ? ensureSentence(thesis) : '';
 
     const grouped = input.evidenceSnippets
       .map((s) => compactSnippet(s.text))
@@ -176,40 +134,27 @@ export class CoverLetterNarrativeComposer {
     for (let idx = 0; idx < grouped.length; idx += 2) {
       const a = grouped[idx];
       const b = grouped[idx + 1];
-      const paragraph = this.buildBodyParagraph([a, b].filter(Boolean) as string[]);
+      const first = a ? sentenceFromSnippet(a) : '';
+      const second = b ? ensureSentence(`For example, ${compactSnippet(b, 50)}`) : '';
+      const impact = ensureSentence(varyImpactSentence([a, b].filter(Boolean).join(' ')));
+      const paragraph = [first, second, impact].filter(Boolean).join(' ').trim();
       if (paragraph) paragraphsRaw.push(paragraph);
     }
 
     const bodyParagraphs = chooseVariedOpenings(paragraphsRaw).slice(0, input.maxBodyParagraphs);
-    const closing = (() => {
-      const line1 = ensureSentence(
-        company ? `I’d welcome the chance to discuss how I can contribute at ${company}` : 'I’d welcome the chance to discuss how I can contribute',
-      );
-      const line2 = ensureSentence(
-        title && company
-          ? `If you’re hiring for ${title}, I can bring a steady operating rhythm, clear handoffs, and evidence led decisions`
-          : 'I can bring a steady operating rhythm, clear handoffs, and evidence led decisions',
-      );
-      return [line1, line2].filter(Boolean).join(' ').trim();
-    })();
+    const closing = '';
 
-    // Domain-fidelity guard: avoid introducing billing-domain narrative unless supported by evidence snippets.
-    const corpusHasBilling = containsBillingDomain(evidenceCorpus);
-    const safeOpening = corpusHasBilling ? opening : stripBillingDomainSentences(opening);
-    const safeBody = corpusHasBilling ? bodyParagraphs : bodyParagraphs.map(stripBillingDomainSentences).filter(Boolean);
-    const safeClosing = corpusHasBilling ? closing : stripBillingDomainSentences(closing);
-
-    const fullText = [safeOpening, ...safeBody, safeClosing].filter(Boolean).join('\n\n');
+    const fullText = [opening, ...bodyParagraphs, closing].filter(Boolean).join('\n\n');
     const flags = this.detector.detect(fullText);
 
     return {
-      opening: safeOpening,
-      bodyParagraphs: safeBody,
-      closing: safeClosing,
+      opening,
+      bodyParagraphs,
+      closing,
       diagnostics: {
         genericLanguageFlags: flags,
         renderedEvidenceSnippetIds,
-        narrativeStrategy: thesis ? 'thesis_first' : 'job_identity_first',
+        narrativeStrategy: thesis ? 'thesis_first' : 'canonical_absence',
       },
     };
   }

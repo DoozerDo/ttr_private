@@ -39,9 +39,9 @@ describe('CoverLetterNarrativeComposer', () => {
     });
 
     // Complete letter structure (intro + body + close).
-    expect(result.opening).toMatch(/I am applying/i);
+    expect(result.opening).toBe('');
     expect(result.bodyParagraphs.length).toBeGreaterThanOrEqual(2);
-    expect(result.closing).toMatch(/welcome the chance/i);
+    expect(result.closing).toBe('');
 
     // Regression: prior composer glued 3 raw evidence snippets into a single paragraph.
     const evidenceNeedles = ['EvidenceOne', 'EvidenceTwo', 'EvidenceThree'];
