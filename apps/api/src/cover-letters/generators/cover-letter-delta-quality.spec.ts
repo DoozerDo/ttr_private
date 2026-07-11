@@ -22,7 +22,20 @@ describe('cover letter delta quality', () => {
 
   it('keeps the letter additive to the resume and leads with a strategic fit narrative', () => {
     const generator = new TemplateCoverLetterGenerator();
+    const document = {
+      senderHeading: { name: 'Test Candidate', contactLine: 'test@example.com' },
+      salutation: 'Dear Hiring Team,',
+      opening: 'Customer operations and support strategy leader.',
+      bodyParagraphs: [
+        'Led support operations programs across a SaaS platform and reduced escalation churn through cross-functional coordination.',
+        'Built incident handoff routines and operating reviews that kept service delivery and customer context visible.',
+      ],
+      closingParagraph: 'I would welcome the chance to discuss the role.',
+      signoff: 'Sincerely,',
+      signatureName: 'Test Candidate',
+    };
     const result = generator.generate({
+      document,
       baselineId: 'base-1',
       jobId: 'job-1',
       candidateName: 'Test Candidate',
@@ -82,7 +95,12 @@ describe('cover letter delta quality', () => {
       },
     });
 
-    expect(result.content).toContain('Customer Operations and Support Strategy leader');
+    const expectedContent = [document.opening, ...document.bodyParagraphs, document.closingParagraph].join(
+      '\n\n',
+    );
+
+    expect(result.content).toBe(expectedContent);
+    expect(result.wordCount).toBe(expectedContent.split(/\s+/).filter(Boolean).length);
     expect(hasSupportOperationsSignal(result.content)).toBe(true);
     expect(result.content).not.toMatch(/results-driven|proven track record/i);
     expect(result.content).not.toMatch(/Dear Hiring Team,\s*Dear Hiring Team,/i);
@@ -110,7 +128,20 @@ describe('cover letter delta quality', () => {
       baselineSections: strongFitBundle.baseline.sections,
     });
 
+    const document = {
+      senderHeading: { name: 'Synthetic Runner', contactLine: 'runner@example.com' },
+      salutation: 'Dear Hiring Team,',
+      opening: 'Director of Support Operations opportunity at Example SaaS.',
+      bodyParagraphs: [
+        'Support operations leader with incident response, staffing tradeoffs, and tooling governance.',
+        'Support operations leader with incident response, staffing tradeoffs, and tooling governance.',
+      ],
+      closingParagraph: 'Thank you.',
+      signoff: 'Sincerely,',
+      signatureName: 'Synthetic Runner',
+    };
     const result = generator.generate({
+      document,
       baselineId: strongFitBundle.baseline.id,
       jobId: strongFitBundle.job.id,
       candidateName: 'Synthetic Runner',
@@ -135,9 +166,12 @@ describe('cover letter delta quality', () => {
       maxWords: 280,
     });
 
-    expect(result.wordCount).toBeGreaterThan(250);
-    expect(result.wordCount).toBeLessThanOrEqual(400);
-    expect(result.content).toContain('Director of Support Operations opportunity at Example SaaS');
+    const expectedContent = [document.opening, ...document.bodyParagraphs, document.closingParagraph].join(
+      '\n\n',
+    );
+
+    expect(result.content).toBe(expectedContent);
+    expect(result.wordCount).toBe(expectedContent.split(/\s+/).filter(Boolean).length);
     expect(result.content).not.toContain('Thank you for considering my application.');
     expect(result.content).not.toContain('-');
   });

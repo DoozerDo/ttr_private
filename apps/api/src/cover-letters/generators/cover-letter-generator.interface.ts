@@ -31,6 +31,7 @@ import type { DocumentStrategyPlanLike } from '../../document-strategy-plan.type
 import type { AuthoritativeRenderPlan } from '../../positioning/authoritative-render-plan';
 
 export type CoverLetterGenerationInput = {
+  document: NormalizedCoverLetterDocument;
   baselineId: string;
   jobId: string;
   allowedBaselineBlocks: AllowedBaselineBlock[];
@@ -52,6 +53,11 @@ export type CoverLetterGenerationInput = {
       reasoning: string;
     }>;
   };
+  traceMap?: Record<string, string[]>;
+  paragraphEvidence?: CoverLetterGenerationResult['paragraphEvidence'];
+  internalTrace?: CoverLetterGenerationResult['internalTrace'];
+  constraintSummary?: string | null;
+  debugTrace?: CoverLetterGenerationResult['debugTrace'];
 };
 
 export type CoverLetterGenerationResult = {

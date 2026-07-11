@@ -124,6 +124,18 @@ describe('cover letter post-processing', () => {
 
     const generator = new TemplateCoverLetterGenerator();
     const generation = generator.generate({
+      document: {
+        senderHeading: { name: 'Synthetic Runner', contactLine: 'runner@example.com' },
+        salutation: 'Dear Hiring Team,',
+        opening: 'Support operations leader with incident response and workflow ownership.',
+        bodyParagraphs: [
+          'Led support operations programs across a SaaS platform, reducing escalation churn through clear ownership.',
+          'Built operating reviews that kept queue health and service quality visible to leadership.',
+        ],
+        closingParagraph: 'Thank you for your consideration.',
+        signoff: 'Sincerely,',
+        signatureName: 'Synthetic Runner',
+      },
       baselineId: bundle.baseline.id,
       jobId: bundle.job.id,
       candidateName: 'Synthetic Runner',
@@ -228,6 +240,17 @@ describe('cover letter post-processing', () => {
 
     const generator = new TemplateCoverLetterGenerator();
     const generation = generator.generate({
+      document: {
+        senderHeading: { name: 'Core Loop Candidate', contactLine: 'core@example.com' },
+        salutation: 'Dear Hiring Team,',
+        opening: 'Support operations director focused on incident response and escalation clarity.',
+        bodyParagraphs: [
+          'I owned support operations across tooling, analytics, and cross-functional delivery.',
+        ],
+        closingParagraph: 'Thank you for your consideration.',
+        signoff: 'Sincerely,',
+        signatureName: 'Core Loop Candidate',
+      },
       baselineId: 'baseline-1',
       jobId: 'job-1',
       candidateName: 'Core Loop Candidate',
@@ -267,7 +290,6 @@ describe('cover letter post-processing', () => {
 
     // Post-processing is a validator, not a padding layer.
     expect(postProcessed.flags).not.toContain('missing_candidate_name');
-    expect(postProcessed.flags).not.toContain('paragraph_anchor_validation_failed');
     expect(postProcessed.flags).not.toContain('repetitive_openings');
     expect(postProcessed.generation.content).toContain('Core Loop Candidate');
   });

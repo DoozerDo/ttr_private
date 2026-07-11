@@ -1,6 +1,21 @@
 import type { CoverLetterGenerationInput } from '../cover-letter-generator.interface';
 
 export const gameDesignFixture: CoverLetterGenerationInput = {
+  document: {
+    senderHeading: {
+      name: 'Alex Rivera',
+      contactLine: 'alex@example.com',
+    },
+    salutation: 'Dear Hiring Team,',
+    opening: 'Game design leader focused on live-service progression and team alignment.',
+    bodyParagraphs: [
+      'Designed progression and rewards systems for a live multiplayer title, then tuned economy and unlock pacing from weekly playtest feedback.',
+      'Partnered with product managers, gameplay engineers, and artists to ship seasonal feature sets with clear scope and milestone ownership.',
+    ],
+    closingParagraph: 'Thank you for your consideration.',
+    signoff: 'Sincerely,',
+    signatureName: 'Alex Rivera',
+  },
   baselineId: 'baseline-game-1',
   jobId: 'job-game-1',
   candidateName: 'Alex Rivera',
@@ -37,6 +52,21 @@ export const gameDesignFixture: CoverLetterGenerationInput = {
 };
 
 export const supportOperationsFixture: CoverLetterGenerationInput = {
+  document: {
+    senderHeading: {
+      name: 'Jordan Lee',
+      contactLine: 'jordan@example.com',
+    },
+    salutation: 'Dear Hiring Team,',
+    opening: 'Support operations leader with a steady focus on escalation clarity and service quality.',
+    bodyParagraphs: [
+      'Led support operations for a high volume service organization and built intake, triage, and escalation routines that reduced repeat tickets.',
+      'Worked with product and engineering partners to prioritize root cause fixes and stabilize the most frequent incident paths.',
+    ],
+    closingParagraph: 'Thank you for your consideration.',
+    signoff: 'Sincerely,',
+    signatureName: 'Jordan Lee',
+  },
   baselineId: 'baseline-ops-1',
   jobId: 'job-ops-1',
   candidateName: 'Jordan Lee',

@@ -2114,6 +2114,7 @@ export class CoverLettersService {
 
     if (qualityResult.flags.length > 0) {
       generation = this.generator.generate({
+        document: generation.document,
         baselineId: baseline.id,
         jobId: job.id,
         allowedBaselineBlocks: allowedBlocks,
@@ -2129,6 +2130,9 @@ export class CoverLettersService {
           strengths: gapInsights.strengths,
           criticalGaps: gapInsights.criticalGaps,
         },
+        paragraphEvidence: generation.paragraphEvidence,
+        traceMap: generation.traceMap,
+        internalTrace: generation.internalTrace,
       });
       qualityResult = this.applyCoverLetterPostProcessing(
         generation,
@@ -2147,6 +2151,7 @@ export class CoverLettersService {
     );
     if (!paragraphAnchorValidation.valid) {
       generation = this.generator.generate({
+        document: generation.document,
         baselineId: baseline.id,
         jobId: job.id,
         allowedBaselineBlocks: allowedBlocks,
@@ -2162,6 +2167,9 @@ export class CoverLettersService {
           strengths: gapInsights.strengths,
           criticalGaps: gapInsights.criticalGaps,
         },
+        paragraphEvidence: generation.paragraphEvidence,
+        traceMap: generation.traceMap,
+        internalTrace: generation.internalTrace,
       });
       qualityResult = this.applyCoverLetterPostProcessing(
         generation,
@@ -2218,6 +2226,7 @@ export class CoverLettersService {
 
     if (complianceResult.blocked) {
       generation = this.generator.generate({
+        document: generation.document,
         baselineId: baseline.id,
         jobId: job.id,
         allowedBaselineBlocks: allowedBlocks,
@@ -2232,6 +2241,9 @@ export class CoverLettersService {
           strengths: gapInsights.strengths,
           criticalGaps: gapInsights.criticalGaps,
         },
+        paragraphEvidence: generation.paragraphEvidence,
+        traceMap: generation.traceMap,
+        internalTrace: generation.internalTrace,
       });
       qualityResult = this.applyCoverLetterPostProcessing(
         generation,
