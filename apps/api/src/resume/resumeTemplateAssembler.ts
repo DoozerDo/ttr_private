@@ -379,9 +379,7 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
         // Drop weak fragment roles entirely when any stronger emphasized roles exist.
         return planned.filter((x) => !isWeakFragmentRole({ company: x.entry?.company, roleTitle: x.entry?.roleTitle }));
       }
-      return planned.length
-        ? planned
-        : authoritativeExperienceSource.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry }));
+      return planned;
     }
 
     return authoritativeExperienceSource.map((entry, index) => ({ id: `resume_v2_exp_${index}`, entry }));

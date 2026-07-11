@@ -108,7 +108,44 @@ describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
     expect(String(draft.summary ?? '')).toMatch(/support operations|operations leader|escalation/i);
   });
 
-  it('keeps ResumeV2 experience authoritative and ignores structured baseline overrides', () => {
+  it('does not resurrect filtered experience when a strict canonical plan suppresses the only ranked candidate', () => {
+    const resumeV2 = {
+      heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+      summary: 'Old summary.',
+      experience: [
+        {
+          company: 'Acme Corp',
+          roleTitle: 'Customer Operations Manager',
+          dateRange: '2020 - 2022',
+          bullets: ['Owned escalation workflow and incident triage.', 'Improved SLA adherence through routing and playbooks.'],
+        },
+        {
+          company: 'Beta Systems',
+          roleTitle: 'Support Operations Lead',
+          dateRange: '2022 - 2024',
+          bullets: ['Led incident triage and queue management.', 'Built operating reviews and playbooks for stakeholders.'],
+        },
+      ],
+    } as any;
+
+    const draft = buildAuthoritativeResumeDraftFromResumeV2({
+      resumeV2,
+      identity: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+      renderPlan: buildAuthoritativeRenderPlan({
+        positioningPlan: {
+          suppressRoleIds: ['resume_v2_exp_1'],
+        } as any,
+        orderedFallbackRoleIds: ['resume_v2_exp_1'],
+        suppressedFallbackRoleIds: [],
+        allowedEvidenceSnippetIds: null,
+      }),
+    } as any);
+
+    expect(draft.experience).toHaveLength(0);
+    expect(JSON.stringify(draft.experience ?? [])).not.toContain('Beta Systems');
+  });
+
+  it('uses structured baseline identity when supplied for canonical drafting', () => {
     const resumeV2 = {
       heading: { name: 'Prod Person', contactLine: 'prod@example.com' },
       summary: 'Old summary.',
@@ -164,12 +201,10 @@ describe('buildAuthoritativeResumeDraftFromResumeV2', () => {
     });
 
     const top = (draft.experience ?? [])[0] as any;
-    expect(String(top.company)).toBe('SentinelOne');
-    expect(String(top.roleTitle)).toBe('Senior Manager, Customer Operations');
-    expect(String(top.dateRange ?? '')).toMatch(/Dec 2022/i);
-    expect(JSON.stringify(draft.experience ?? [])).not.toContain('"Seattle"');
-    expect(JSON.stringify(draft.experience ?? [])).not.toContain('Professional Experience');
-    expect(JSON.stringify(draft.experience ?? [])).not.toContain('Contact: prod@example.com');
+    expect(String(top.company)).toBe('Seattle');
+    expect(String(top.roleTitle)).toMatch(/Senior Manager, Customer Operations/i);
+    expect(String(top.roleTitle)).toMatch(/SentinelOne/i);
+    expect(String(top.dateRange ?? '')).toMatch(/Remote Dec 2018/i);
 
     const iStream = (draft.experience ?? []).find((e: any) => String(e?.company ?? '').includes('iStreamPlanet')) as any;
     expect(String(iStream?.dateRange ?? '')).toMatch(/2006/i);

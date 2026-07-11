@@ -31,7 +31,7 @@ export function buildAuthoritativeRenderPlan(input: {
   const suppressedRoleIdsRaw = Array.from(
     new Set([...toIds(input.suppressedFallbackRoleIds), ...toIds(plan?.suppressRoleIds)]),
   );
-  const suppressedRoleIds = suppressedRoleIdsRaw.filter((id) => !orderedRoleIds.includes(id));
+  const suppressedRoleIds = suppressedRoleIdsRaw;
 
   const summaryNarrative =
     typeof plan?.positioningThesis === 'string' && plan.positioningThesis.trim()
