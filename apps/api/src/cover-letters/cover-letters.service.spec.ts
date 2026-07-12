@@ -388,15 +388,17 @@ describe('CoverLettersService contract', () => {
         createdAt: new Date('2026-05-01T00:00:00.000Z'),
         parsedJson: {
           identity: { full_name: 'Jordan Lee' },
-        },
-        resumeV2Json: {
-          heading: { name: 'Jordan Lee', contactLine: 'jordan.lee@example.com | Seattle, WA' },
-          summary: 'Valid persisted Resume V2 that must not become authoritative for cover letters.',
+          summary: 'Canonical parsed baseline summary.',
           experience: [
             {
-              company: 'Persisted Co',
-              roleTitle: 'Legacy Role',
-              bullets: ['Legacy evidence.'],
+              company: 'Parsed Co',
+              role_title: 'Director of Support Operations',
+              details_text: 'Led support operations and exec updates.\nImproved incident routing and operating reviews.',
+            },
+            {
+              company: 'Parsed Co',
+              role_title: 'Support Operations Manager',
+              details_text: 'Built reporting and queue health dashboards.\nPartnered cross-functionally to reduce repeat escalations.',
             },
           ],
         },
@@ -426,28 +428,19 @@ describe('CoverLettersService contract', () => {
         parsedJson: {
           identity: { full_name: 'Jordan Lee' },
         },
-        resumeV2Json: {
-          heading: { name: 'Jordan Lee', contactLine: 'jordan.lee@example.com | Seattle, WA' },
-          summary: 'Canonical persisted Resume V2 summary.',
-          competencies: ['Support Operations'],
+        parsedJson: {
+          identity: { full_name: 'Jordan Lee' },
+          summary: 'Canonical parsed baseline summary.',
           experience: [
             {
               company: 'Parsed Co',
-              roleTitle: 'Director of Support Operations',
-              dateRange: '2021 - Present',
-              bullets: [
-                'Led support operations and exec updates.',
-                'Improved incident routing and operating reviews.',
-              ],
+              role_title: 'Director of Support Operations',
+              details_text: 'Led support operations and exec updates.\nImproved incident routing and operating reviews.',
             },
             {
               company: 'Parsed Co',
-              roleTitle: 'Support Operations Manager',
-              dateRange: '2018 - 2021',
-              bullets: [
-                'Built reporting and queue health dashboards.',
-                'Partnered cross-functionally to reduce repeat escalations.',
-              ],
+              role_title: 'Support Operations Manager',
+              details_text: 'Built reporting and queue health dashboards.\nPartnered cross-functionally to reduce repeat escalations.',
             },
           ],
         },
@@ -464,7 +457,6 @@ describe('CoverLettersService contract', () => {
       expect(allowedBlockIds).toEqual(
         expect.arrayContaining([
           'resume_v2_summary',
-          'resume_v2_skills',
           'parsed-experience-0',
           'parsed-experience-1',
         ]),
@@ -1061,17 +1053,7 @@ describe('CoverLettersService contract', () => {
     assessment.overallScore = 90;
 
     try {
-      baseline.sections = [
-        {
-          id: 'summary-sparse-1',
-          baselineId: baseline.id,
-          title: 'Summary',
-          sectionType: BaselineSectionType.SUMMARY,
-          content: 'Operations leader focused on measurable improvements and reliable execution.',
-          includePolicy: BaselineIncludePolicy.OPTIONAL,
-          order: 0,
-        } as any,
-      ] as any;
+      baseline.sections = [] as any;
       baseline.parsedRecords = [
         {
           createdAt: new Date(),
@@ -1081,21 +1063,31 @@ describe('CoverLettersService contract', () => {
               {
                 company: 'Example Co',
                 role_title: 'Director of Customer Operations',
-                start_date: 'Jan 2020',
-                end_date: 'Dec 2021',
-                details_text: 'Led escalation triage and operating reviews across support teams.',
-              },
-              {
-                company: 'Acme Corp',
-                role_title: 'Customer Operations Manager',
-                start_date: 'Jan 2022',
-                end_date: 'Present',
-                details_text: 'Built queue health dashboards and playbooks to improve response time.',
+                details_text: '',
               },
             ],
           },
           flagsJson: {
             reviewState: { verified: true },
+          },
+          resumeV2Json: {
+            heading: { name: 'Jordan Lee', contactLine: 'jordan.lee@example.com | Seattle, WA' },
+            summary: 'Sparse persisted Resume V2 that must not become authoritative.',
+            competencies: ['Support Operations'],
+            experience: [
+              {
+                company: 'Persisted Co',
+                roleTitle: 'Legacy Role',
+                dateRange: '2020 - 2021',
+                bullets: ['Legacy evidence that should not rescue generation.'],
+              },
+              {
+                company: 'Persisted Co',
+                roleTitle: 'Legacy Role Two',
+                dateRange: '2021 - Present',
+                bullets: ['Additional legacy evidence that should not rescue generation.'],
+              },
+            ],
           },
         } as any,
       ];

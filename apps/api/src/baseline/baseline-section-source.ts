@@ -1,5 +1,6 @@
 import { Baseline } from './baseline.entity';
 import { BaselineIncludePolicy, BaselineSection, BaselineSectionType } from './baseline-section.entity';
+import { buildValidatedResumeV2FromParsedBaseline } from './baseline-resume-v2';
 import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
 import {
   normalizeNormalizedResumeDocument,
@@ -15,44 +16,56 @@ export function resolveBaselineSectionsForGeneration(
     return canonicalSections;
   }
 
-  const latestPersistedResumeV2 = getLatestPersistedResumeV2Json(baseline.parsedRecords);
-  if (!latestPersistedResumeV2) {
+  const latestParsedBaseline = getLatestParsedBaseline(baseline.parsedRecords);
+  const authoritativeResumeV2 = getAuthoritativeResumeV2(canonicalSections, latestParsedBaseline);
+  if (!authoritativeResumeV2) {
     return canonicalSections;
   }
 
-  const normalized = normalizeNormalizedResumeDocument(latestPersistedResumeV2 as any);
+  const normalized = normalizeNormalizedResumeDocument(authoritativeResumeV2 as any);
   const validation = validateNormalizedResumeDocument(normalized as any);
   if (!validation.valid) {
     return canonicalSections;
   }
 
-  const experienceSections = buildExperienceSectionsFromNormalizedResumeV2(baseline.id, normalized);
   if (canonicalSections.length === 0) {
     return buildSectionsFromNormalizedResumeV2(baseline.id, normalized);
   }
-  if (experienceSections.length > 0) {
-    return [...canonicalSections, ...experienceSections].sort((a, b) => a.order - b.order);
+
+  const synthesizedSections = buildSectionsFromNormalizedResumeV2(baseline.id, normalized);
+  const nonExperienceCanonicalSections = canonicalSections.filter(
+    (section) => String(section.sectionType ?? section.type ?? '').toUpperCase() !== BaselineSectionType.EXPERIENCE,
+  );
+  const experienceSections = synthesizedSections.filter(
+    (section) => String(section.sectionType ?? section.type ?? '').toUpperCase() === BaselineSectionType.EXPERIENCE,
+  );
+  const supplementalSections = synthesizedSections.filter((section) => {
+    const sectionType = String(section.sectionType ?? section.type ?? '').toUpperCase();
+    if (sectionType === BaselineSectionType.EXPERIENCE) return false;
+    return !nonExperienceCanonicalSections.some(
+      (existing) => String(existing.sectionType ?? existing.type ?? '').toUpperCase() === sectionType,
+    );
+  });
+
+  if (experienceSections.length === 0 && supplementalSections.length === 0) {
+    return nonExperienceCanonicalSections;
   }
 
-  return canonicalSections;
+  return [...nonExperienceCanonicalSections, ...supplementalSections, ...experienceSections].sort(
+    (a, b) => a.order - b.order,
+  );
 }
 
 function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
-function getLatestPersistedResumeV2Json(
+function getLatestParsedBaseline(
   parsedRecords: Baseline['parsedRecords'] | null | undefined,
-): unknown | null {
+): Record<string, unknown> | null {
   if (!Array.isArray(parsedRecords) || parsedRecords.length === 0) return null;
   const candidates = parsedRecords
-    .filter(
-      (record) =>
-        record &&
-        typeof record === 'object' &&
-        (record as any).resumeV2Json &&
-        typeof (record as any).resumeV2Json === 'object',
-    )
+    .filter((record) => record && typeof record === 'object' && (record as any).parsedJson && typeof (record as any).parsedJson === 'object')
     .slice();
   if (candidates.length === 0) return null;
   candidates.sort((a, b) => {
@@ -60,7 +73,31 @@ function getLatestPersistedResumeV2Json(
     const bt = (b as any)?.createdAt ? new Date((b as any).createdAt).getTime() : 0;
     return at - bt;
   });
-  return (candidates[candidates.length - 1] as any).resumeV2Json ?? null;
+  return ((candidates[candidates.length - 1] as any).parsedJson ?? null) as Record<string, unknown> | null;
+}
+
+function getAuthoritativeResumeV2(
+  canonicalSections: BaselineSection[],
+  parsedBaseline: Record<string, unknown> | null,
+): unknown | null {
+  const authoritativeFromParsedBaseline = (() => {
+    if (!parsedBaseline || typeof parsedBaseline !== 'object') return null;
+    try {
+      const built = buildValidatedResumeV2FromParsedBaseline(parsedBaseline, canonicalSections as any);
+      const candidate = built && typeof built === 'object' ? built : null;
+      if (!candidate || typeof candidate !== 'object') return null;
+      const experienceCount = Array.isArray((candidate as any)?.experience)
+        ? (candidate as any).experience.length
+        : 0;
+      if (experienceCount > 0) return candidate;
+      return null;
+    } catch {
+      return null;
+    }
+  })();
+
+  if (authoritativeFromParsedBaseline) return authoritativeFromParsedBaseline;
+  return null;
 }
 
 function formatExperienceSectionContent(entry: {

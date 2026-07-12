@@ -103,51 +103,40 @@ describe('resolveBaselineSectionsForGeneration', () => {
     expect(sections[0].content).not.toContain('Resume V2 Co');
   });
 
-  it('derives canonical parsed-experience sections from the latest valid persisted Resume V2 when baseline sections are absent', () => {
+  it('derives canonical parsed-experience sections from the latest parsed baseline when baseline sections are absent', () => {
     const baseline = {
       id: 'baseline-1',
       sections: [],
       parsedRecords: [
         {
           createdAt: new Date('2026-04-01T00:00:00.000Z'),
-          resumeV2Json: {
-            heading: { name: 'Old Candidate', contactLine: '' },
+          parsedJson: {
+            identity: { full_name: 'Old Candidate' },
             summary: 'Should be surfaced canonically.',
-            competencies: ['Operations', 'Leadership'],
             experience: [
               {
                 company: 'Older Co',
-                roleTitle: 'Earlier Role',
-                dateRange: '2019 - 2021',
-                bullets: ['Legacy experience should not win.'],
+                role_title: 'Earlier Role',
+                details_text: 'Legacy experience should not win.',
               },
             ],
           },
         },
         {
           createdAt: new Date('2026-05-01T00:00:00.000Z'),
-          resumeV2Json: {
-            heading: { name: 'Jordan Lee', contactLine: 'jordan.lee@example.com | Seattle, WA' },
-            summary: 'Canonical persisted Resume V2 summary.',
-            competencies: ['Support Operations'],
+          parsedJson: {
+            identity: { full_name: 'Jordan Lee' },
+            summary: 'Canonical parsed baseline summary.',
             experience: [
               {
                 company: 'Parsed Co',
-                roleTitle: 'Director of Support Operations',
-                dateRange: '2021 - Present',
-                bullets: [
-                  'Led support operations and exec updates.',
-                  'Improved incident routing and operating reviews.',
-                ],
+                role_title: 'Director of Support Operations',
+                details_text: 'Led support operations and exec updates.\nImproved incident routing and operating reviews.',
               },
               {
                 company: 'Parsed Co',
-                roleTitle: 'Support Operations Manager',
-                dateRange: '2018 - 2021',
-                bullets: [
-                  'Built reporting and queue health dashboards.',
-                  'Partnered cross-functionally to reduce repeat escalations.',
-                ],
+                role_title: 'Support Operations Manager',
+                details_text: 'Built reporting and queue health dashboards.\nPartnered cross-functionally to reduce repeat escalations.',
               },
             ],
           },
@@ -160,7 +149,6 @@ describe('resolveBaselineSectionsForGeneration', () => {
     expect(sections.map((section) => section.id)).toEqual(
       expect.arrayContaining([
         'baseline-1:resume-v2:summary',
-        'baseline-1:resume-v2:skills',
         'parsed-experience-0',
         'parsed-experience-1',
       ]),
@@ -170,6 +158,44 @@ describe('resolveBaselineSectionsForGeneration', () => {
     expect(sections.find((section) => section.id === 'parsed-experience-1')?.content).toContain('Support Operations Manager');
     expect(sections.some((section) => String(section.id ?? '').startsWith('resume_v2_exp_'))).toBe(false);
     expect(sections.some((section) => String(section.content ?? '').includes('Legacy experience should not win.'))).toBe(false);
+  });
+
+  it('derives canonical parsed-experience sections from the latest parsed baseline when persisted Resume V2 is sparse', () => {
+    const baseline = {
+      id: 'baseline-1',
+      sections: [],
+      parsedRecords: [
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          parsedJson: {
+            identity: { full_name: 'Jordan Lee' },
+            summary: 'Structured parsed baseline summary.',
+            experience: [
+              {
+                company: 'Parsed Co',
+                role_title: 'Director of Support Operations',
+                details_text: 'Led support operations and exec updates.\nImproved incident routing and operating reviews.',
+              },
+              {
+                company: 'Parsed Co',
+                role_title: 'Support Operations Manager',
+                details_text: 'Built reporting and queue health dashboards.\nPartnered cross-functionally to reduce repeat escalations.',
+              },
+            ],
+          },
+          resumeV2Json: null,
+        },
+      ],
+    } as any;
+
+    const sections = resolveBaselineSectionsForGeneration(baseline);
+
+    expect(sections.map((section) => section.id)).toEqual(
+      expect.arrayContaining(['parsed-experience-0', 'parsed-experience-1']),
+    );
+    expect(sections.find((section) => section.id === 'parsed-experience-0')?.content).toContain('Parsed Co');
+    expect(sections.find((section) => section.id === 'parsed-experience-1')?.content).toContain('Support Operations Manager');
+    expect(sections.some((section) => String(section.id ?? '').startsWith('resume_v2_exp_'))).toBe(false);
   });
 
   it('appends canonical parsed-experience sections when existing baseline sections do not already include experience', () => {
@@ -191,16 +217,14 @@ describe('resolveBaselineSectionsForGeneration', () => {
       parsedRecords: [
         {
           createdAt: new Date('2026-05-01T00:00:00.000Z'),
-          resumeV2Json: {
-            heading: { name: 'Jordan Lee', contactLine: 'jordan.lee@example.com | Seattle, WA' },
-            summary: 'Canonical persisted Resume V2 summary.',
-            competencies: ['Support Operations'],
+          parsedJson: {
+            identity: { full_name: 'Jordan Lee' },
+            summary: 'Canonical parsed baseline summary.',
             experience: [
               {
                 company: 'Parsed Co',
-                roleTitle: 'Director of Support Operations',
-                dateRange: '2021 - Present',
-                bullets: ['Led support operations and exec updates.'],
+                role_title: 'Director of Support Operations',
+                details_text: 'Led support operations and exec updates.',
               },
             ],
           },
@@ -216,5 +240,60 @@ describe('resolveBaselineSectionsForGeneration', () => {
     expect(sections.filter((section) => section.sectionType === BaselineSectionType.EXPERIENCE)).toHaveLength(1);
     expect(sections.find((section) => section.id === 'parsed-experience-0')?.content).toContain('Parsed Co');
     expect(sections.some((section) => String(section.id ?? '').startsWith('resume_v2_exp_'))).toBe(false);
+  });
+
+  it('replaces malformed legacy experience sections with canonical parsed-experience sections from parsed baseline evidence', () => {
+    const baseline = {
+      id: 'baseline-1',
+      sections: [
+        {
+          id: 'malformed-experience',
+          baselineId: 'baseline-1',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: 'Legacy malformed experience content that should not stay authoritative.',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: 'section-summary',
+          baselineId: 'baseline-1',
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          content: 'Customer operations leader.',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+      parsedRecords: [
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          parsedJson: {
+            identity: { full_name: 'Jordan Lee' },
+            summary: 'Canonical parsed baseline summary.',
+            experience: [
+              {
+                company: 'Parsed Co',
+                role_title: 'Director of Support Operations',
+                details_text: 'Led support operations and exec updates.',
+              },
+            ],
+          },
+        },
+      ],
+    } as any;
+
+    const sections = resolveBaselineSectionsForGeneration(baseline);
+
+    expect(sections.map((section) => section.id)).toEqual(
+      expect.arrayContaining(['section-summary', 'parsed-experience-0']),
+    );
+    expect(sections.some((section) => section.id === 'malformed-experience')).toBe(false);
+    expect(sections.filter((section) => section.sectionType === BaselineSectionType.EXPERIENCE)).toHaveLength(1);
+    expect(sections.find((section) => section.id === 'parsed-experience-0')?.content).toContain('Parsed Co');
   });
 });
