@@ -1912,13 +1912,15 @@ export class CoverLettersService {
       }
 
       if (templateReadiness.canGenerateCoverLetter) {
-        const document = assembleCoverLetterFromStructuredBaseline({
+        const composition = assembleCoverLetterFromStructuredBaseline({
           structured: structuredBaseline as any,
           senderName: candidateName || 'Candidate',
           senderContactLine: null,
           jobTitle: job?.title ?? null,
           companyName: job?.company ?? null,
+          allowedBlocks,
         });
+        const document = composition.document;
         const paragraphs = [
           document.opening,
           ...(document.bodyParagraphs ?? []),
@@ -1936,15 +1938,18 @@ export class CoverLettersService {
           salutation: document.salutation,
           closing: `${document.signoff}\n${document.signatureName}`,
           traceMap: {},
+          paragraphEvidence: composition.paragraphEvidence,
         };
       } else {
-        const document = assembleCoverLetterFromStructuredBaseline({
+        const composition = assembleCoverLetterFromStructuredBaseline({
           structured: structuredBaseline as any,
           senderName: candidateName || 'Candidate',
           senderContactLine: null,
           jobTitle: job?.title ?? null,
           companyName: job?.company ?? null,
+          allowedBlocks,
         });
+        const document = composition.document;
         const paragraphs = [
           document.opening,
           ...(document.bodyParagraphs ?? []),
@@ -1962,6 +1967,7 @@ export class CoverLettersService {
           salutation: document.salutation,
           closing: `${document.signoff}\n${document.signatureName}`,
           traceMap: {},
+          paragraphEvidence: composition.paragraphEvidence,
         };
       }
     } catch (error) {

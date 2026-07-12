@@ -100,12 +100,136 @@ function sanitizeThesisAgainstEvidence(thesis: string, evidenceCorpus: string): 
   return stripBillingDomainSentences(normalizedThesis);
 }
 
+type EvidenceSnippet = {
+  id: string;
+  text: string;
+  roleId?: string | null;
+};
+
+type ParagraphKey = 'opening' | 'body_1' | 'body_2' | 'closing';
+
+type ParagraphEvidence = {
+  paragraphKey: ParagraphKey;
+  sourceEvidenceIds: string[];
+  anchorTexts?: string[];
+};
+
+function jobContextSentence(jobTitle?: string | null, jobCompany?: string | null): string {
+  const title = trimToText(jobTitle ?? '');
+  const company = trimToText(jobCompany ?? '');
+  if (title && company) {
+    return `I am focused on the ${title} role at ${company}.`;
+  }
+  if (title) {
+    return `I am focused on the ${title} role.`;
+  }
+  if (company) {
+    return `I am focused on the opportunity at ${company}.`;
+  }
+  return '';
+}
+
+function splitEvidenceIntoBodyGroups(snippets: EvidenceSnippet[]): EvidenceSnippet[][] {
+  const usable = snippets.slice(0, 6);
+  if (usable.length === 0) return [];
+  if (usable.length === 1) {
+    const [only] = usable;
+    return [
+      [{ ...only }],
+      [{ ...only }],
+    ];
+  }
+
+  const midpoint = Math.ceil(usable.length / 2);
+  const first = usable.slice(0, midpoint);
+  const second = usable.slice(midpoint);
+  return second.length > 0 ? [first, second] : [first];
+}
+
+function buildParagraphText(args: {
+  snippets: EvidenceSnippet[];
+  jobTitle?: string | null;
+  jobCompany?: string | null;
+  paragraphIndex: number;
+}): string {
+  const { snippets, jobTitle, jobCompany, paragraphIndex } = args;
+  const sentenceParts: string[] = [];
+
+  const firstSnippet = snippets[0];
+  if (firstSnippet) {
+    sentenceParts.push(sentenceFromSnippet(firstSnippet.text));
+  }
+
+  const secondSnippet = snippets[1];
+  if (secondSnippet) {
+    sentenceParts.push(ensureSentence(`For example, ${compactSnippet(secondSnippet.text, 50)}`));
+  }
+
+  const context = jobContextSentence(jobTitle, jobCompany);
+  if (context) {
+    sentenceParts.push(
+      ensureSentence(
+        `It keeps the work grounded in the ${trimToText(jobTitle ?? 'target')} role${jobCompany ? ` at ${trimToText(jobCompany)}` : ''}.`,
+      ),
+    );
+  }
+
+  const impact = varyImpactSentence(`${snippets.map((snippet) => snippet.text).join(' ')} ${paragraphIndex}`).replace(/[.!?]\s*$/, '');
+  const laneSuffix =
+    paragraphIndex === 1
+      ? 'across the first operating lane.'
+      : 'across the second operating lane.';
+  sentenceParts.push(ensureSentence(`${impact} ${laneSuffix}`));
+
+  return sentenceParts.filter(Boolean).join(' ').trim();
+}
+
+function buildClosingText(args: {
+  snippets: EvidenceSnippet[];
+  jobTitle?: string | null;
+  jobCompany?: string | null;
+}): string {
+  const { snippets, jobTitle, jobCompany } = args;
+  const sentenceParts: string[] = [];
+  const finalSnippet = snippets[snippets.length - 1];
+
+  if (finalSnippet) {
+    sentenceParts.push(sentenceFromSnippet(finalSnippet.text));
+  }
+
+  const title = trimToText(jobTitle ?? '');
+  const company = trimToText(jobCompany ?? '');
+  if (title && company) {
+    sentenceParts.push(
+      ensureSentence(
+        `I would welcome the chance to discuss how this background supports the ${title} role at ${company}.`,
+      ),
+    );
+  } else if (title) {
+    sentenceParts.push(
+      ensureSentence(
+        `I would welcome the chance to discuss how this background supports the ${title} role.`,
+      ),
+    );
+  } else if (company) {
+    sentenceParts.push(
+      ensureSentence(
+        `I would welcome the chance to discuss how this background supports the opportunity at ${company}.`,
+      ),
+    );
+  } else {
+    sentenceParts.push('I would welcome the chance to discuss the fit in more detail.');
+  }
+
+  return sentenceParts.filter(Boolean).join(' ').trim();
+}
+
 export class CoverLetterNarrativeComposer {
   private detector = new GenericLanguageDetector();
 
   compose(input: {
     thesis: string | null;
-    evidenceSnippets: Array<{ id: string; text: string; roleId?: string | null }>;
+    evidenceSnippets: EvidenceSnippet[];
     jobCompany?: string | null;
     jobTitle?: string | null;
     maxBodyParagraphs: number;
@@ -113,6 +237,7 @@ export class CoverLetterNarrativeComposer {
     opening: string;
     bodyParagraphs: string[];
     closing: string;
+    paragraphEvidence: ParagraphEvidence[];
     diagnostics: {
       genericLanguageFlags: ReturnType<GenericLanguageDetector['detect']>;
       renderedEvidenceSnippetIds: string[];
@@ -123,26 +248,57 @@ export class CoverLetterNarrativeComposer {
     const thesis = sanitizeThesisAgainstEvidence(trimToText(input.thesis ?? ''), evidenceCorpus);
     const renderedEvidenceSnippetIds = input.evidenceSnippets.map((s) => s.id);
 
-    const opening = thesis ? ensureSentence(thesis) : '';
+    const jobTitle = trimToText(input.jobTitle ?? '');
+    const jobCompany = trimToText(input.jobCompany ?? '');
+    const bodyParagraphGroups = splitEvidenceIntoBodyGroups(input.evidenceSnippets).slice(
+      0,
+      Math.min(Math.max(input.maxBodyParagraphs, 0), 2),
+    );
 
-    const grouped = input.evidenceSnippets
-      .map((s) => compactSnippet(s.text))
-      .filter(Boolean)
-      .slice(0, Math.max(6, input.maxBodyParagraphs * 4));
+    const openingEvidence = input.evidenceSnippets.slice(0, Math.min(2, input.evidenceSnippets.length));
+    const openingParts = [
+      thesis,
+      openingEvidence[0] ? sentenceFromSnippet(openingEvidence[0].text) : '',
+      jobContextSentence(jobTitle, jobCompany),
+    ].filter(Boolean);
+    const opening = chooseVariedOpenings([openingParts.join(' ')])[0] ?? '';
 
-    const paragraphsRaw: string[] = [];
-    for (let idx = 0; idx < grouped.length; idx += 2) {
-      const a = grouped[idx];
-      const b = grouped[idx + 1];
-      const first = a ? sentenceFromSnippet(a) : '';
-      const second = b ? ensureSentence(`For example, ${compactSnippet(b, 50)}`) : '';
-      const impact = ensureSentence(varyImpactSentence([a, b].filter(Boolean).join(' ')));
-      const paragraph = [first, second, impact].filter(Boolean).join(' ').trim();
-      if (paragraph) paragraphsRaw.push(paragraph);
+    const bodyParagraphs = chooseVariedOpenings(
+      bodyParagraphGroups.map((group, index) =>
+        buildParagraphText({ snippets: group, jobTitle, jobCompany, paragraphIndex: index + 1 }),
+      ),
+    );
+    const closing = buildClosingText({
+      snippets: input.evidenceSnippets.slice(-1),
+      jobTitle,
+      jobCompany,
+    });
+
+    const paragraphEvidence: ParagraphEvidence[] = [];
+    if (opening) {
+      paragraphEvidence.push({
+        paragraphKey: 'opening',
+        sourceEvidenceIds: openingEvidence.map((snippet) => snippet.id).filter(Boolean),
+        anchorTexts: openingEvidence.map((snippet) => compactSnippet(snippet.text, 24)).filter(Boolean),
+      });
     }
-
-    const bodyParagraphs = chooseVariedOpenings(paragraphsRaw).slice(0, input.maxBodyParagraphs);
-    const closing = '';
+    bodyParagraphGroups.forEach((group, index) => {
+      if (!group.length) return;
+      const paragraphKey: ParagraphKey = index === 0 ? 'body_1' : 'body_2';
+      paragraphEvidence.push({
+        paragraphKey,
+        sourceEvidenceIds: group.map((snippet) => snippet.id).filter(Boolean),
+        anchorTexts: group.map((snippet) => compactSnippet(snippet.text, 24)).filter(Boolean),
+      });
+    });
+    if (closing) {
+      const finalEvidence = input.evidenceSnippets.slice(-1);
+      paragraphEvidence.push({
+        paragraphKey: 'closing',
+        sourceEvidenceIds: finalEvidence.map((snippet) => snippet.id).filter(Boolean),
+        anchorTexts: finalEvidence.map((snippet) => compactSnippet(snippet.text, 24)).filter(Boolean),
+      });
+    }
 
     const fullText = [opening, ...bodyParagraphs, closing].filter(Boolean).join('\n\n');
     const flags = this.detector.detect(fullText);
@@ -151,6 +307,7 @@ export class CoverLetterNarrativeComposer {
       opening,
       bodyParagraphs,
       closing,
+      paragraphEvidence,
       diagnostics: {
         genericLanguageFlags: flags,
         renderedEvidenceSnippetIds,

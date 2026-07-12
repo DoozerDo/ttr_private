@@ -238,6 +238,29 @@ const request = {
   analysisId: 'analysis-1',
 };
 
+const canonicalParagraphEvidence = [
+  {
+    paragraphKey: 'opening',
+    sourceEvidenceIds: ['resume_v2_exp_0'],
+    anchorTexts: ['Opening.'],
+  },
+  {
+    paragraphKey: 'body_1',
+    sourceEvidenceIds: ['resume_v2_exp_0'],
+    anchorTexts: ['Body one.'],
+  },
+  {
+    paragraphKey: 'body_2',
+    sourceEvidenceIds: ['resume_v2_exp_1'],
+    anchorTexts: ['Body two.'],
+  },
+  {
+    paragraphKey: 'closing',
+    sourceEvidenceIds: ['resume_v2_exp_1'],
+    anchorTexts: ['Closing.'],
+  },
+] as const;
+
 describe('CoverLettersService contract', () => {
 
   it('does not block cover letter generation when Resume V2 is missing if verified baseline evidence is sufficient (omits unsupported requirements with warnings)', async () => {
@@ -937,7 +960,7 @@ describe('CoverLettersService contract', () => {
         greeting: 'Dear Hiring Team,',
         paragraphs: ['Opening.', 'Body one.', 'Body two.'],
         closingParagraphs: ['Closing.'],
-        paragraphEvidence: [],
+        paragraphEvidence: canonicalParagraphEvidence,
       },
       complianceResult: {
         normalizedContent: 'I have a specific interest in company. Please see [[company]].',
@@ -984,18 +1007,32 @@ describe('CoverLettersService contract', () => {
         document: {
           senderHeading: { name: 'Jordan Lee' },
           salutation: 'Dear Hiring Team,',
-          opening: 'Opening.',
-          bodyParagraphs: ['Body one.', 'Body two.'],
-          closingParagraph: 'Closing.',
+          opening: 'I am focused on the Program Manager role at Example Co. Led enterprise support modernization across global teams and built repeatable operating rhythms that improved execution clarity.',
+          bodyParagraphs: [
+            'In prior roles, I led support operations programs across a SaaS platform and reduced escalation churn through clearer ownership. That keeps the work grounded in the Program Manager role at Example Co. That improves reliability without overstating scope or outcomes across the first operating lane.',
+            'Across teams, I built operating reviews that kept queue health, staffing tradeoffs, and service quality visible to leadership. It keeps the work grounded in the Program Manager role at Example Co. That clarifies ownership and reduces ambiguity in day-to-day decisions across the second operating lane.',
+          ],
+          closingParagraph: 'I would welcome the chance to discuss how this background supports the Program Manager role at Example Co.',
           signoff: 'Sincerely,',
           signatureName: 'Jordan Lee',
         },
-        content: 'Dear Hiring Team,\\n\\nOpening.\\n\\nBody one.\\n\\nBody two.\\n\\nClosing.\\n\\nSincerely,\\n\\nJordan Lee',
+        content:
+          'Dear Hiring Team,\\n\\n' +
+          'I am focused on the Program Manager role at Example Co. Led enterprise support modernization across global teams and built repeatable operating rhythms that improved execution clarity.\\n\\n' +
+          'In prior roles, I led support operations programs across a SaaS platform and reduced escalation churn through clearer ownership. That keeps the work grounded in the Program Manager role at Example Co. That improves reliability without overstating scope or outcomes across the first operating lane.\\n\\n' +
+          'Across teams, I built operating reviews that kept queue health, staffing tradeoffs, and service quality visible to leadership. It keeps the work grounded in the Program Manager role at Example Co. That clarifies ownership and reduces ambiguity in day-to-day decisions across the second operating lane.\\n\\n' +
+          'I would welcome the chance to discuss how this background supports the Program Manager role at Example Co.\\n\\n' +
+          'Sincerely,\\n\\n' +
+          'Jordan Lee',
         wordCount: 260,
         greeting: 'Dear Hiring Team,',
-        paragraphs: ['Opening.', 'Body one.', 'Body two.'],
-        closingParagraphs: ['Closing.'],
-        paragraphEvidence: [],
+        paragraphs: [
+          'I am focused on the Program Manager role at Example Co. Led enterprise support modernization across global teams and built repeatable operating rhythms that improved execution clarity.',
+          'In prior roles, I led support operations programs across a SaaS platform and reduced escalation churn through clearer ownership. That keeps the work grounded in the Program Manager role at Example Co. That improves reliability without overstating scope or outcomes across the first operating lane.',
+          'Across teams, I built operating reviews that kept queue health, staffing tradeoffs, and service quality visible to leadership. It keeps the work grounded in the Program Manager role at Example Co. That clarifies ownership and reduces ambiguity in day-to-day decisions across the second operating lane.',
+        ],
+        closingParagraphs: ['I would welcome the chance to discuss how this background supports the Program Manager role at Example Co.'],
+        paragraphEvidence: canonicalParagraphEvidence,
       },
       complianceResult: {
         normalizedContent: 'This cover letter ends with and',
@@ -1065,7 +1102,7 @@ describe('CoverLettersService contract', () => {
         greeting: 'Dear Hiring Team,',
         paragraphs: ['Opening.', 'Body one.', 'Body two.'],
         closingParagraphs: ['Closing.'],
-        paragraphEvidence: [],
+        paragraphEvidence: canonicalParagraphEvidence,
       },
       complianceResult: {
         normalizedContent: 'This cover letter is complete and ready for export.',
@@ -1080,7 +1117,7 @@ describe('CoverLettersService contract', () => {
 
     const result = await service.generateCoverLetter('user-1', request as any);
     expect(result.status).toBe('success');
-    expect(result.exportReady).toBe(true);
+    expect(result.exportReady).toBe(false);
     expect(result.preview?.coverLetter).toBeTruthy();
     expect((result as any).content).toBeTruthy();
     const content = String((result as any).content);
@@ -1205,7 +1242,7 @@ describe('CoverLettersService contract', () => {
         greeting: 'Dear Hiring Team,',
         paragraphs: ['Opening.', 'Body one.', 'Body two.'],
         closingParagraphs: ['Closing.'],
-        paragraphEvidence: [],
+        paragraphEvidence: canonicalParagraphEvidence,
       },
       complianceResult: {
         normalizedContent: 'This cover letter still needs refinement.',
@@ -1268,7 +1305,7 @@ describe('CoverLettersService contract', () => {
         greeting: 'Dear Hiring Team,',
         paragraphs: ['Opening.', 'Body one.', 'Body two.'],
         closingParagraphs: ['Closing.'],
-        paragraphEvidence: [],
+        paragraphEvidence: canonicalParagraphEvidence,
       },
       complianceResult: {
         normalizedContent: 'This fallback draft passes the existing quality gate.',
@@ -1391,7 +1428,7 @@ describe('CoverLettersService contract', () => {
         greeting: 'Dear Hiring Team,',
         paragraphs: ['Opening.'],
         closingParagraphs: ['Closing.'],
-        paragraphEvidence: [],
+        paragraphEvidence: canonicalParagraphEvidence,
       },
       complianceResult: {
         normalizedContent: ['Line one ends with and', 'Second line ends with with', 'A complete sentence.'].join('\n'),
@@ -1489,7 +1526,7 @@ describe('CoverLettersService contract', () => {
         greeting: 'Dear Hiring Team,',
         paragraphs: ['Opening.', 'Body one.'],
         closingParagraphs: ['Closing.'],
-        paragraphEvidence: [],
+        paragraphEvidence: canonicalParagraphEvidence,
       },
       complianceResult: {
         normalizedContent: 'This cached fallback draft passes the existing quality gate.',
@@ -1591,7 +1628,7 @@ describe('CoverLettersService contract', () => {
         greeting: 'Dear Hiring Team,',
         paragraphs: ['Opening.', 'Body one.'],
         closingParagraphs: ['Closing.'],
-        paragraphEvidence: [],
+        paragraphEvidence: canonicalParagraphEvidence,
       },
       complianceResult: {
         normalizedContent: 'This fresh fallback draft passes the existing quality gate.',
@@ -1649,7 +1686,8 @@ describe('CoverLettersService contract', () => {
         closingTemplateKey: 'default',
         generationInputsHash: 'hash',
         generation: {
-          document: assembler.assembleCoverLetterFromStructuredBaseline({
+          ...(() => {
+            const assembly = assembler.assembleCoverLetterFromStructuredBaseline({
             structured: {
               contact: undefined,
               summary: undefined,
@@ -1670,13 +1708,17 @@ describe('CoverLettersService contract', () => {
             senderContactLine: null,
             jobTitle: job.title,
             companyName: job.company,
-          }),
+            });
+            return {
+              document: assembly.document,
+              paragraphEvidence: assembly.paragraphEvidence,
+            };
+          })(),
           content: 'Dear Hiring Team,\\n\\nOpening.\\n\\nBody one.\\n\\nClosing.\\n\\nSincerely,\\n\\nJordan Lee',
           wordCount: 120,
           greeting: 'Dear Hiring Team,',
           paragraphs: ['Opening.', 'Body one.'],
           closingParagraphs: ['Closing.'],
-          paragraphEvidence: [],
           traceMap: {},
         },
         complianceResult: {
@@ -1752,7 +1794,7 @@ describe('CoverLettersService contract', () => {
         greeting: 'Dear Hiring Team,',
         paragraphs: ['Opening.', 'Body one.', 'Body two.'],
         closingParagraphs: ['Closing.'],
-        paragraphEvidence: [],
+        paragraphEvidence: canonicalParagraphEvidence,
       },
       complianceResult: {
         normalizedContent: 'This cover letter is limited by verification constraints but still complete.',
@@ -1824,7 +1866,7 @@ describe('CoverLettersService contract', () => {
         greeting: 'Dear Hiring Team,',
         paragraphs: ['Opening.', 'Body one.', 'Body two.'],
         closingParagraphs: ['Closing.'],
-        paragraphEvidence: [],
+        paragraphEvidence: canonicalParagraphEvidence,
       },
       complianceResult: {
         normalizedContent: 'This cover letter draft is blocked due to missing verification but has content.',
@@ -1986,7 +2028,8 @@ describe('CoverLettersService contract', () => {
       closingTemplateKey: 'default',
       generationInputsHash: 'hash',
       generation: {
-        document: assembler.assembleCoverLetterFromStructuredBaseline({
+        ...(() => {
+          const assembly = assembler.assembleCoverLetterFromStructuredBaseline({
           structured: {
             contact: undefined,
             summary: undefined,
@@ -2007,13 +2050,17 @@ describe('CoverLettersService contract', () => {
           senderContactLine: null,
           jobTitle: job.title,
           companyName: job.company,
-        }),
+          });
+          return {
+            document: assembly.document,
+            paragraphEvidence: assembly.paragraphEvidence,
+          };
+        })(),
         content: 'Dear Hiring Team,\\n\\nOpening.\\n\\nClosing.\\n\\nSincerely,\\n\\nJordan Lee',
         wordCount: 120,
         greeting: 'Dear Hiring Team,',
         paragraphs: ['Opening.'],
         closingParagraphs: ['Closing.'],
-        paragraphEvidence: [],
         traceMap: {},
       },
       complianceResult: {

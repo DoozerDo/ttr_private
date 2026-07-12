@@ -4,6 +4,7 @@ import { ComplianceAction } from '../compliance/compliance.types';
 import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { buildDocumentStrategyPlan } from '../shared/documentStrategyPlan';
 import { listSyntheticGenerationScenarioBundles } from '../synthetic/generation/synthetic-generation.fixtures';
+import { assembleCoverLetterFromStructuredBaseline } from './coverLetterTemplateAssembler';
 import { TemplateCoverLetterGenerator } from './generators/template-cover-letter.generator';
 import {
   DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY,
@@ -123,19 +124,40 @@ describe('cover letter post-processing', () => {
     });
 
     const generator = new TemplateCoverLetterGenerator();
+    const assembly = assembleCoverLetterFromStructuredBaseline({
+      structured: {
+        summary: 'Support operations leader with incident response and workflow ownership.',
+        experience: bundle.baseline.sections
+          .filter((section) => section.sectionType === 'EXPERIENCE')
+          .map((section) => {
+            const lines = String(section.content ?? '')
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter(Boolean);
+            return {
+              id: section.id,
+              company: bundle.job.company,
+              roleTitle: lines[0] ?? section.title,
+              dates: lines[1] ?? null,
+              bullets: lines.slice(2).map((line) => line.replace(/^-+\s*/, '')),
+            };
+          }),
+      } as any,
+      senderName: 'Synthetic Runner',
+      senderContactLine: 'runner@example.com',
+      jobTitle: bundle.job.title,
+      companyName: bundle.job.company,
+      allowedBlocks: bundle.baseline.sections.map((section, order) => ({
+        id: section.id,
+        title: section.title,
+        content: section.content,
+        includePolicy: 'ALWAYS' as never,
+        order,
+        sectionType: section.sectionType as never,
+      })) as never,
+    });
     const generation = generator.generate({
-      document: {
-        senderHeading: { name: 'Synthetic Runner', contactLine: 'runner@example.com' },
-        salutation: 'Dear Hiring Team,',
-        opening: 'Support operations leader with incident response and workflow ownership.',
-        bodyParagraphs: [
-          'Led support operations programs across a SaaS platform, reducing escalation churn through clear ownership.',
-          'Built operating reviews that kept queue health and service quality visible to leadership.',
-        ],
-        closingParagraph: 'Thank you for your consideration.',
-        signoff: 'Sincerely,',
-        signatureName: 'Synthetic Runner',
-      },
+      document: assembly.document,
       baselineId: bundle.baseline.id,
       jobId: bundle.job.id,
       candidateName: 'Synthetic Runner',
@@ -158,6 +180,7 @@ describe('cover letter post-processing', () => {
       safeMode: false,
       documentStrategyPlan: plan,
       maxWords: 280,
+      paragraphEvidence: assembly.paragraphEvidence,
     });
 
     const postProcessed = (service as any).applyCoverLetterPostProcessing(
@@ -180,6 +203,7 @@ describe('cover letter post-processing', () => {
     expect(postProcessed.generation.content.split(/\n\s*\n/).length).toBeGreaterThanOrEqual(5);
     expect(postProcessed.generation.document.closingParagraph).toBeTruthy();
     expect(postProcessed.generation.document.bodyParagraphs.every((paragraph) => paragraph.split(/\s+/).length <= 130)).toBe(true);
+    expect(postProcessed.flags).not.toEqual(expect.arrayContaining(['too_short', 'too_few_body_paragraphs', 'too_few_content_paragraphs', 'missing_role_or_company_context', 'paragraph_anchor_validation_failed']));
   });
 
   it('does not flag keyword_echo_overuse when JD keywords appear naturally once', () => {
