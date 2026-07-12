@@ -27,15 +27,20 @@ function splitBodyLines(text: string): string[] {
 
 function extractExperienceSectionsFromStructuredResume(
   resumeDocument: Record<string, unknown> | undefined,
-): Array<Pick<BaselineSection, 'title' | 'content' | 'sectionType'>> {
-  if (!resumeDocument) return [];
+): {
+  sections: Array<Pick<BaselineSection, 'title' | 'content' | 'sectionType'>>;
+  experienceEntryCount: number;
+} {
+  if (!resumeDocument) return { sections: [], experienceEntryCount: 0 };
 
   const extracted: Array<Pick<BaselineSection, 'title' | 'content' | 'sectionType'>> = [];
   const experienceArray = (resumeDocument['experience'] ?? resumeDocument['work_history']) as
     | Array<Record<string, unknown>>
     | undefined;
+  let experienceEntryCount = 0;
 
   if (Array.isArray(experienceArray) && experienceArray.length) {
+    experienceEntryCount += experienceArray.length;
     const blocks = experienceArray
       .map((entry) => {
         const company =
@@ -109,6 +114,7 @@ function extractExperienceSectionsFromStructuredResume(
         type === 'EXPERIENCE' ||
         /\b(experience|work history|employment history|career history)\b/i.test(title)
       ) {
+        experienceEntryCount += 1;
         extracted.push({
           sectionType: BaselineSectionType.EXPERIENCE,
           title: title || 'Experience',
@@ -118,15 +124,16 @@ function extractExperienceSectionsFromStructuredResume(
     }
   }
 
-  return extracted;
+  return { sections: extracted, experienceEntryCount };
 }
 
 export function resolveBaselineSectionsForGeneration(
   baseline: Pick<Baseline, 'id' | 'sections' | 'parsedRecords'>,
 ): BaselineSection[] {
   const directSections = (baseline.sections ?? []).slice().sort((a, b) => a.order - b.order);
-  const scoreSections = (sections: BaselineSection[]) =>
-    sections.reduce((score, section) => score + toStringValue(section.content).length, 0);
+  const directExperienceSections = directSections.filter(
+    (section) => String(section.sectionType ?? '').toUpperCase() === 'EXPERIENCE',
+  );
 
   const parsed = ((baseline.parsedRecords ?? []) as ParsedRecordLike[])
     .slice()
@@ -143,56 +150,44 @@ export function resolveBaselineSectionsForGeneration(
   );
   const parsedJsonSections = extractExperienceSectionsFromStructuredResume(parsed?.parsedJson);
 
-  const candidates = [
+  const candidateScores = [
     {
-      source: directSections,
-      score: scoreSections(directSections),
-      map: (sections: BaselineSection[]) => sections,
+      sections: resumeV2Sections.sections,
+      priority: 2,
+      experienceCount: resumeV2Sections.experienceEntryCount,
+      totalLength: resumeV2Sections.sections.reduce((score, section) => score + toStringValue(section.content).length, 0),
     },
     {
-      source: resumeV2Sections,
-      score: scoreSections(resumeV2Sections as BaselineSection[]),
-      map: (sections: BaselineSection[]) =>
-        sections.map((section, index) => ({
-          id: `parsed-experience-${index}`,
-          baselineId: baseline.id,
-          sectionType: section.sectionType,
-          title: section.title,
-          content: section.content,
-          includePolicy: BaselineIncludePolicy.ALWAYS,
-          order: index,
-          createdAt: new Date(0),
-          updatedAt: new Date(0),
-        })) as BaselineSection[],
+      sections: parsedJsonSections.sections,
+      priority: 1,
+      experienceCount: parsedJsonSections.experienceEntryCount,
+      totalLength: parsedJsonSections.sections.reduce((score, section) => score + toStringValue(section.content).length, 0),
     },
     {
-      source: parsedJsonSections,
-      score: scoreSections(parsedJsonSections as BaselineSection[]),
-      map: (sections: BaselineSection[]) =>
-        sections.map((section, index) => ({
-          id: `parsed-experience-${index}`,
-          baselineId: baseline.id,
-          sectionType: section.sectionType,
-          title: section.title,
-          content: section.content,
-          includePolicy: BaselineIncludePolicy.ALWAYS,
-          order: index,
-          createdAt: new Date(0),
-          updatedAt: new Date(0),
-        })) as BaselineSection[],
+      sections: directExperienceSections,
+      priority: 0,
+      experienceCount: directExperienceSections.length,
+      totalLength: directExperienceSections.reduce((score, section) => score + toStringValue(section.content).length, 0),
     },
-  ].filter((candidate) => candidate.source.length > 0);
+  ];
 
-  if (!candidates.length) {
-    return [];
-  }
+  const selected = candidateScores
+    .filter((candidate) => candidate.sections.length > 0)
+    .sort((left, right) => {
+      if (right.experienceCount !== left.experienceCount) {
+        return right.experienceCount - left.experienceCount;
+      }
+      if (right.totalLength !== left.totalLength) {
+        return right.totalLength - left.totalLength;
+      }
+      return right.priority - left.priority;
+    })[0];
 
-  const selected = candidates.sort((a, b) => b.score - a.score)[0];
-  if (selected.source === directSections) {
-    return directSections;
-  }
-  return (selected.source as Array<Pick<BaselineSection, 'title' | 'content' | 'sectionType'>>).map(
-    (section, index) => ({
+  if (selected?.sections?.length) {
+    if (selected.sections === directExperienceSections) {
+      return directSections;
+    }
+    return selected.sections.map((section, index) => ({
       id: `parsed-experience-${index}`,
       baselineId: baseline.id,
       sectionType: section.sectionType,
@@ -202,7 +197,9 @@ export function resolveBaselineSectionsForGeneration(
       order: index,
       createdAt: new Date(0),
       updatedAt: new Date(0),
-    }),
-  ) as BaselineSection[];
+    })) as BaselineSection[];
+  }
+
+  return directSections;
 }
 

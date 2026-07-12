@@ -84,40 +84,56 @@ const createRepo = (value: unknown) => ({
     orderBy: jest.fn().mockReturnThis(),
     addOrderBy: jest.fn().mockReturnThis(),
     getOne: jest.fn().mockResolvedValue(Array.isArray(value) ? value[0] ?? null : value),
-    getRawMany: jest.fn().mockImplementation(() => [
-      {
-        baseline_id: (value as any)?.id ?? baseline.id,
-        baseline_userId: (value as any)?.userId ?? baseline.userId,
-        baseline_version: 1,
-        baseline_originalFilename: 'resume.docx',
-        baseline_mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        baseline_storagePath: '/tmp/resume.docx',
-        baseline_hash: null,
-        baseline_status: 'active',
-        baseline_archivedAt: null,
-        baseline_createdAt: new Date(),
-        baseline_updatedAt: new Date(),
-        section_id: (baseline.sections?.[0] as any)?.id ?? null,
-        section_baselineId: baseline.id,
-        section_sectionType: (baseline.sections?.[0] as any)?.sectionType ?? null,
-        section_title: (baseline.sections?.[0] as any)?.title ?? null,
-        section_content: (baseline.sections?.[0] as any)?.content ?? null,
-        section_includePolicy: (baseline.sections?.[0] as any)?.includePolicy ?? null,
-        section_order: (baseline.sections?.[0] as any)?.order ?? null,
-        section_createdAt: (baseline.sections?.[0] as any)?.createdAt ?? new Date(),
-        section_updatedAt: (baseline.sections?.[0] as any)?.updatedAt ?? new Date(),
-        parsed_id: (baseline.parsedRecords?.[0] as any)?.id ?? 'parsed-1',
-        parsed_baselineId: baseline.id,
-        parsed_sourceFileId: (baseline.parsedRecords?.[0] as any)?.sourceFileId ?? 'source-file-1',
-        parsed_schemaVersion: (baseline.parsedRecords?.[0] as any)?.schemaVersion ?? '1',
-        parsed_sourceFormat: (baseline.parsedRecords?.[0] as any)?.sourceFormat ?? 'docx',
-        parsed_ingestedAt: (baseline.parsedRecords?.[0] as any)?.ingestedAt ?? new Date(),
-        parsed_parsedJson: (baseline.parsedRecords?.[0] as any)?.parsedJson ?? null,
-        parsed_resumeV2Json: (baseline.parsedRecords?.[0] as any)?.resumeV2Json ?? null,
-        parsed_flagsJson: (baseline.parsedRecords?.[0] as any)?.flagsJson ?? null,
-        parsed_createdAt: (baseline.parsedRecords?.[0] as any)?.createdAt ?? new Date(),
-      },
-    ]),
+    getRawMany: jest.fn().mockImplementation(() => {
+      const sections =
+        Array.isArray(baseline.sections) && baseline.sections.length > 0
+          ? baseline.sections
+          : [null];
+      const parsedRecords =
+        Array.isArray(baseline.parsedRecords) && baseline.parsedRecords.length > 0
+          ? baseline.parsedRecords
+          : [null];
+      const rows: Record<string, unknown>[] = [];
+
+      for (const section of sections) {
+        for (const parsedRecord of parsedRecords) {
+          rows.push({
+            baseline_id: (value as any)?.id ?? baseline.id,
+            baseline_userId: (value as any)?.userId ?? baseline.userId,
+            baseline_version: 1,
+            baseline_originalFilename: 'resume.docx',
+            baseline_mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            baseline_storagePath: '/tmp/resume.docx',
+            baseline_hash: null,
+            baseline_status: 'active',
+            baseline_archivedAt: null,
+            baseline_createdAt: new Date(),
+            baseline_updatedAt: new Date(),
+            section_id: (section as any)?.id ?? null,
+            section_baselineId: baseline.id,
+            section_sectionType: (section as any)?.sectionType ?? null,
+            section_title: (section as any)?.title ?? null,
+            section_content: (section as any)?.content ?? null,
+            section_includePolicy: (section as any)?.includePolicy ?? null,
+            section_order: (section as any)?.order ?? null,
+            section_createdAt: (section as any)?.createdAt ?? new Date(),
+            section_updatedAt: (section as any)?.updatedAt ?? new Date(),
+            parsed_id: (parsedRecord as any)?.id ?? 'parsed-1',
+            parsed_baselineId: baseline.id,
+            parsed_sourceFileId: (parsedRecord as any)?.sourceFileId ?? 'source-file-1',
+            parsed_schemaVersion: (parsedRecord as any)?.schemaVersion ?? '1',
+            parsed_sourceFormat: (parsedRecord as any)?.sourceFormat ?? 'docx',
+            parsed_ingestedAt: (parsedRecord as any)?.ingestedAt ?? new Date(),
+            parsed_parsedJson: (parsedRecord as any)?.parsedJson ?? null,
+            parsed_resumeV2Json: (parsedRecord as any)?.resumeV2Json ?? null,
+            parsed_flagsJson: (parsedRecord as any)?.flagsJson ?? null,
+            parsed_createdAt: (parsedRecord as any)?.createdAt ?? new Date(),
+          });
+        }
+      }
+
+      return rows;
+    }),
   }),
 });
 

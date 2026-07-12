@@ -145,18 +145,48 @@ describe('resolveBaselineSectionsForGeneration', () => {
     expect(sections[0].content).toContain('Led operational planning and execution.');
   });
 
-  it('prefers verified Resume V2 evidence over sparse direct sections when parsed records carry canonical resumeV2Json', () => {
+  it('prefers verified Resume V2 evidence over longer direct sections when parsed records carry canonical resumeV2Json', () => {
     const baseline = {
       id: 'baseline-1',
       sections: [
         {
           id: 'section-1',
           baselineId: 'baseline-1',
+          sectionType: BaselineSectionType.RAW,
+          title: 'Raw',
+          content:
+            'Michael Talbert Customer Operations and ITSM Leader | SaaS | Incident/Change | Automation | Global Teams ' +
+            'Supports global customer escalations, incident management, and service reliability operations. '.repeat(10),
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: 'section-2',
+          baselineId: 'baseline-1',
           sectionType: BaselineSectionType.SUMMARY,
           title: 'Summary',
-          content: 'Senior operations leader.',
+          content:
+            'Senior operations leader with experience across incident management, service reliability, ' +
+            'customer operations, and cross-functional execution. '.repeat(6),
           includePolicy: BaselineIncludePolicy.OPTIONAL,
-          order: 0,
+          order: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: 'section-3',
+          baselineId: 'baseline-1',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Professional Experience',
+          content:
+            'Starbucks Senior Manager, Technology Operations Excellence Apr 2020 Mar 2022\n' +
+            '- Led global incident response for executive and customer-facing operations.\n' +
+            '- Managed workforce scheduling, voice operations, and escalation management for distributed teams.\n' +
+            '- Improved operational consistency across high-volume support channels.',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 2,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -177,6 +207,25 @@ describe('resolveBaselineSectionsForGeneration', () => {
                   { text: 'Managed Five9 voice operations and workforce management.' },
                 ],
               },
+              {
+                company: 'Customer Support Co',
+                roleTitle: 'Director of Support Operations',
+                dateRange: 'Jan 2018 - Mar 2020',
+                bullets: [],
+                evidence: [
+                  { text: 'Led global support operations and escalation strategy.' },
+                  { text: 'Improved queue health and SLA adherence across distributed teams.' },
+                ],
+              },
+              {
+                company: 'Operations Lab',
+                roleTitle: 'Program Manager',
+                dateRange: '2016 - 2018',
+                bullets: [],
+                evidence: [
+                  { text: 'Built operational reporting and executive cadence for service teams.' },
+                ],
+              },
             ],
           },
         },
@@ -191,5 +240,8 @@ describe('resolveBaselineSectionsForGeneration', () => {
     expect(sections[0].content).toContain('Senior Manager, Technology Operations Excellence');
     expect(sections[0].content).toContain('Owned global incident and escalation management.');
     expect(sections[0].content).toContain('Managed Five9 voice operations and workforce management.');
+    expect(sections[0].content).toContain('Customer Support Co');
+    expect(sections[0].content).toContain('Director of Support Operations');
+    expect(sections[0].content).toContain('Operations Lab');
   });
 });
