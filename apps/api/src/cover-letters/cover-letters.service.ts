@@ -3593,7 +3593,8 @@ export class CoverLettersService {
       order += 1000;
     }
 
-    // Fallback: include plain text dump only if we couldn't form any structured blocks.
+    // Legacy plain-text recovery remains available only as a last resort for sparse baselines,
+    // but evidence extraction must still filter out header/contact fragments.
     if (blocks.filter((b) => b.sectionType === BaselineSectionType.EXPERIENCE).length === 0) {
       blocks.push({
         id: 'resume_v2_plain_text',

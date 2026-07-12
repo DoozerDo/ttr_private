@@ -27,6 +27,25 @@ describe('resume draft bullets', () => {
     ]);
   });
 
+  it('rejects resume header and employment-heading fragments while keeping valid accomplishment evidence', () => {
+    const logicalUnits = reconstructLogicalTextUnits(
+      [
+        'Jordan Lee | jordan@example.com | Seattle, WA',
+        'Customer Operations Support ITSM Service Reliability Executive206.',
+        'Starbucks Senior Manager, Technology Operations Excellence Apr 2020 Mar 2022...',
+        '- Led a support transformation that improved queue health and reduced escalations.',
+      ].join('\n'),
+    );
+
+    const evidenceUnits = extractEvidenceUnitsFromLogicalUnits('resume_v2_plain_text', logicalUnits);
+
+    expect(evidenceUnits).toHaveLength(1);
+    expect(evidenceUnits[0]?.sourceText).toBe(
+      'Led a support transformation that improved queue health and reduced escalations.',
+    );
+    expect(evidenceUnits[0]?.id).toContain('resume_v2_plain_text:evidence:3');
+  });
+
   it('ranks bullets by job keyword overlap when keywords are present', () => {
     const section = {
       id: 'section-1',

@@ -247,6 +247,37 @@ function isLowercaseStart(text: string) {
   return /^[a-z]/.test(normalizeLine(text));
 }
 
+function looksLikeResumeMetadataFragment(text: string) {
+  const normalized = normalizeLine(text);
+  if (!normalized) return true;
+
+  const hasContactSignal =
+    /@|https?:\/\/|www\./i.test(normalized) ||
+    /\b\d{3}[.\s-]?\d{3}[.\s-]?\d{4}\b/.test(normalized);
+  if (hasContactSignal) return true;
+
+  const tokens = normalized
+    .split(/\s+/)
+    .map((token) => token.replace(/[^A-Za-z]/g, ''))
+    .filter(Boolean);
+  const titleCaseTokenCount = tokens.filter(
+    (token) => /^[A-Z][a-z]+$/.test(token) || /^[A-Z]{2,}$/.test(token),
+  ).length;
+  const hasHeadingSignal =
+    DATE_HINT_PATTERN.test(normalized) ||
+    ROLE_HEADER_PATTERN.test(normalized) ||
+    HEADING_HINT_PATTERN.test(normalized) ||
+    normalized.includes('|');
+
+  if (!ACTION_VERB_PATTERN.test(normalized) && titleCaseTokenCount >= 4 && hasHeadingSignal) {
+    return true;
+  }
+  if (!ACTION_VERB_PATTERN.test(normalized) && titleCaseTokenCount >= 5 && tokens.length <= 12) {
+    return true;
+  }
+  return false;
+}
+
 function isCompleteSentenceSpan(text: string) {
   const normalized = normalizeLine(text);
   if (!normalized) return false;
@@ -310,6 +341,7 @@ function isValidBulletCandidateText(text: string, exactBaselineBullet: boolean) 
   if (PLACEHOLDER_ONLY_PATTERN.test(normalized)) return false;
   if (SECTION_HEADING_PATTERN.test(normalized)) return false;
   if (looksLikeExperienceHeader(normalized)) return false;
+  if (looksLikeResumeMetadataFragment(normalized)) return false;
   // Exact baseline bullets that start lowercase are usually wrapped fragments ("needed", "well as ...").
   if (exactBaselineBullet && isLowercaseStart(normalized)) {
     return false;

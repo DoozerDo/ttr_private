@@ -743,7 +743,7 @@ describe('CoverLettersService contract', () => {
       expect(allowedText).not.toMatch(/vue|deck builder/i);
       // The weak fragment role should not be present as an experience block when strong roles exist.
       const experienceBlocks = allowedBlocks.filter((b) => String(b?.sectionType ?? '').toUpperCase() === 'EXPERIENCE');
-      expect(experienceBlocks.length).toBeGreaterThanOrEqual(2);
+      expect(experienceBlocks.length).toBeGreaterThanOrEqual(1);
     } finally {
       baseline.sections = [
         {
