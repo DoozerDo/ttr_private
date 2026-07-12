@@ -5459,14 +5459,10 @@ export class ResumeService {
             })) ?? [],
           });
 
-	          // Best-effort: do not refresh persistence here. Studio should rely on the canonical persisted artifact,
-	          // and production persistence failures must be handled in the primary generation path.
-        } catch {
-          if (response?.preview?.resume) {
-            response.preview.resume = sanitizeResumePreviewForStudio(response.preview.resume);
-          }
-          delete (response as any).error;
-          delete (response as any).resumeState;
+	          // Persistence is authoritative for Studio hydration. If the refresh write fails here,
+	          // we must fail closed instead of returning a success response backed by stale storage.
+        } catch (error) {
+          throw error;
         }
 
         const cachedResponseUsesCanonicalAuthority =

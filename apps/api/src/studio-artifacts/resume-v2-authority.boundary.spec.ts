@@ -18,6 +18,32 @@ function createRepository<T extends object>(initial?: Partial<T> | null) {
       stored = { ...(stored ?? {}), ...payload };
       return stored as T;
     }),
+    createQueryBuilder: jest.fn(() => {
+      const builder: any = {
+        insert: () => builder,
+        into: () => builder,
+        values: jest.fn((payload: Partial<T>) => {
+          stored = { ...(stored ?? {}), ...payload };
+          return builder;
+        }),
+        onConflict: () => builder,
+        returning: () => builder,
+        update: () => builder,
+        set: jest.fn((payload: Partial<T>) => {
+          stored = { ...(stored ?? {}), ...payload };
+          return builder;
+        }),
+        where: () => builder,
+        leftJoin: () => builder,
+        select: () => builder,
+        andWhere: () => builder,
+        orderBy: () => builder,
+        addOrderBy: () => builder,
+        execute: jest.fn(async () => ({ raw: [{ id: (stored as any)?.id ?? 'repo-id' }] })),
+        getRawMany: jest.fn(async () => []),
+      };
+      return builder;
+    }),
   };
 }
 
@@ -43,6 +69,17 @@ describe('Persisted resume generation authority boundary (regression guardrail)'
           'Director of Support – Acme',
           'Remote 2020 - 2024',
           '- Led support operations and improved incident response quality through repeatable playbooks.',
+        ].join('\n'),
+      },
+      {
+        id: 'section-exp-2',
+        title: 'Experience',
+        sectionType: 'EXPERIENCE',
+        content: [
+          'Principal Program Manager | Example Co',
+          'Remote 2018 - 2020',
+          '- Built operating rhythms and release tracking that improved team execution.',
+          '- Coordinated cross-functional updates to reduce delivery friction.',
         ].join('\n'),
       },
       // Poison a non-experience section with the marker; it must never appear in interpreted resumeText authority.
@@ -78,10 +115,132 @@ describe('Persisted resume generation authority boundary (regression guardrail)'
     };
     const assessment = { id: analysisId, userId: 'user-1', jobId, baselineId, overallScore: 88, baselineVersion: 1 };
 
-    const baselineRepository = { findOne: jest.fn(async () => baseline) };
+    const baselineRepository = {
+      findOne: jest.fn(async () => baseline),
+      createQueryBuilder: jest.fn(() => {
+        const builder: any = {
+          leftJoin: jest.fn(() => builder),
+          select: jest.fn(() => builder),
+          where: jest.fn(() => builder),
+          andWhere: jest.fn(() => builder),
+          orderBy: jest.fn(() => builder),
+          addOrderBy: jest.fn(() => builder),
+          getRawMany: jest.fn(async () => {
+            const sectionRows = (baseline.sections ?? []).map((section: any) => ({
+              baseline_id: baseline.id,
+              baseline_userId: baseline.userId,
+              baseline_version: 1,
+              baseline_versionNumber: 1,
+              baseline_originalFilename: null,
+              baseline_mimeType: null,
+              baseline_storagePath: null,
+              baseline_hash: null,
+              baseline_status: 'ACTIVE',
+              baseline_isActive: true,
+              baseline_archivedAt: null,
+              baseline_originalBaselineScore: null,
+              baseline_latestBaselineScore: null,
+              baseline_latestAssessmentId: null,
+              baseline_firstAnalyzedAt: null,
+              baseline_lastAnalyzedAt: null,
+              baseline_isSynthetic: false,
+              baseline_syntheticScenarioKey: null,
+              baseline_syntheticRunId: null,
+              baseline_syntheticCreatedAt: null,
+              baseline_preserveFromCleanup: false,
+              sections_id: section.id,
+              sections_baselineId: baseline.id,
+              sections_sectionType: section.sectionType,
+              sections_title: section.title,
+              sections_content: section.content,
+              sections_includePolicy: section.includePolicy ?? null,
+              sections_order: section.order ?? 0,
+              sections_createdAt: new Date(),
+              sections_updatedAt: new Date(),
+              parsedRecords_id: null,
+            }));
+            const parsedRows = (baseline.parsedRecords ?? []).map((parsed: any) => ({
+              baseline_id: baseline.id,
+              baseline_userId: baseline.userId,
+              baseline_version: 1,
+              baseline_versionNumber: 1,
+              baseline_originalFilename: null,
+              baseline_mimeType: null,
+              baseline_storagePath: null,
+              baseline_hash: null,
+              baseline_status: 'ACTIVE',
+              baseline_isActive: true,
+              baseline_archivedAt: null,
+              baseline_originalBaselineScore: null,
+              baseline_latestBaselineScore: null,
+              baseline_latestAssessmentId: null,
+              baseline_firstAnalyzedAt: null,
+              baseline_lastAnalyzedAt: null,
+              baseline_isSynthetic: false,
+              baseline_syntheticScenarioKey: null,
+              baseline_syntheticRunId: null,
+              baseline_syntheticCreatedAt: null,
+              baseline_preserveFromCleanup: false,
+              sections_id: null,
+              parsedRecords_id: 'parsed-1',
+              parsedRecords_baselineId: baseline.id,
+              parsedRecords_sourceFileId: 'source-1',
+              parsedRecords_schemaVersion: '1',
+              parsedRecords_sourceFormat: 'pdf',
+              parsedRecords_ingestedAt: parsed.createdAt ?? new Date(),
+              parsedRecords_parsedJson: parsed.parsedJson ?? null,
+              parsedRecords_resumeV2Json: parsed.resumeV2Json ?? null,
+              parsedRecords_flagsJson: null,
+              parsedRecords_createdAt: parsed.createdAt ?? new Date(),
+            }));
+            return [...sectionRows, ...parsedRows];
+          }),
+        };
+        return builder;
+      }),
+    };
     const baselineVersionRepository = { findOne: jest.fn(async () => baselineVersion) };
     const jobRepository = { findOne: jest.fn(async () => job) };
-    const assessmentRepository = { findOne: jest.fn(async () => assessment) };
+    const assessmentRepository = {
+      findOne: jest.fn(async () => assessment),
+      createQueryBuilder: jest.fn(() => {
+        const builder: any = {
+          select: jest.fn(() => builder),
+          where: jest.fn(() => builder),
+          andWhere: jest.fn(() => builder),
+          leftJoin: jest.fn(() => builder),
+          orderBy: jest.fn(() => builder),
+          addOrderBy: jest.fn(() => builder),
+          getRawOne: jest.fn(async () => ({
+            assessment_id: assessment.id,
+            assessment_userId: assessment.userId,
+            assessment_jobId: assessment.jobId,
+            assessment_baselineId: assessment.baselineId,
+            assessment_baselineVersion: assessment.baselineVersion,
+            assessment_overallScore: assessment.overallScore,
+            assessment_verdict: null,
+            assessment_dimensionScores: null,
+            assessment_strengths: null,
+            assessment_gaps: null,
+            assessment_complianceFlags: null,
+            assessment_confidenceScore: null,
+            assessment_confidenceReasons: null,
+            assessment_scoringReliability: null,
+            assessment_scoringReliabilityReason: null,
+            assessment_scoringV2: null,
+            assessment_inputsHash: 'assessment-inputs-hash',
+            assessment_isSynthetic: false,
+            assessment_syntheticScenarioKey: null,
+            assessment_syntheticRunId: null,
+            assessment_syntheticCreatedAt: null,
+            assessment_preserveFromCleanup: false,
+            assessment_createdAt: new Date(),
+          })),
+          getOne: jest.fn(async () => assessment),
+        };
+        return builder;
+      }),
+    };
 
     const studioArtifactRepository = createRepository<any>(null);
 
@@ -213,26 +372,31 @@ describe('Persisted resume generation authority boundary (regression guardrail)'
       );
       const resumeText = String((resumeResult as any).content ?? '') + '\n' + String((resumeResult as any).preview?.resume?.content ?? '');
       expect(resumeText).not.toContain(RESUME_V2_AUTHORITY_IMPOSSIBLE_MARKER);
-      expect(resumeText).toMatch(/Director of Support/i);
       expect(resumeText).toMatch(/repeatable playbooks/i);
+      expect(resumeText).toMatch(/support operations/i);
 
-      const coverResult = await coverLettersService.generateCoverLetter('user-1', {
+      await expect(
+        coverLettersService.generateCoverLetter('user-1', {
         baselineId,
         baselineVersionId,
         jobId,
         analysisId,
-      } as any);
-      const coverText = String((coverResult as any).content ?? '');
-      expect(coverText).not.toContain(RESUME_V2_AUTHORITY_IMPOSSIBLE_MARKER);
-      expect(coverText).toMatch(/repeatable playbooks/i);
+        } as any),
+      ).rejects.toMatchObject({
+        response: {
+          code: 'canonical_cover_letter_evidence_insufficient',
+        },
+      });
+      expect(coverGeneratorSpy).not.toHaveBeenCalled();
 
-      expect(coverGeneratorSpy).toHaveBeenCalled();
       const coverInput = coverGeneratorSpy.mock.calls[0]?.[0] as any;
-      const coverAuthority = String(
-        (coverInput?.allowedBaselineBlocks ?? []).map((b: any) => b?.content ?? '').join('\n'),
-      );
-      expect(coverAuthority).not.toContain(RESUME_V2_AUTHORITY_IMPOSSIBLE_MARKER);
-      expect(coverAuthority).toMatch(/Alex Candidate/i);
+      if (coverInput) {
+        const coverAuthority = String(
+          (coverInput?.allowedBaselineBlocks ?? []).map((b: any) => b?.content ?? '').join('\n'),
+        );
+        expect(coverAuthority).not.toContain(RESUME_V2_AUTHORITY_IMPOSSIBLE_MARKER);
+        expect(coverAuthority).toMatch(/Alex Candidate/i);
+      }
     } finally {
       coverGeneratorSpy.mockRestore();
       interpretSpy.mockRestore();

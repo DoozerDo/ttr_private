@@ -1022,6 +1022,73 @@ describe('ResumeService contract', () => {
 
 
 
+  it('fails closed when idempotency reuse cannot refresh the authoritative Studio artifact row', async () => {
+    const { service, workflowIdempotencyService, studioArtifactsService } = buildService();
+    const originalSections = baseline.sections;
+    baseline.sections = [baseSection] as any;
+
+    (workflowIdempotencyService.reserve as jest.Mock).mockResolvedValueOnce({
+      status: 'existing_completed',
+      runId: 'audit-1',
+      responseBody: {
+        ok: true,
+        status: 'success',
+        generationStatus: 'success',
+        exportReady: true,
+        blocked: false,
+        baselineId: 'baseline-1',
+        baselineVersionId: 'baseline-version-1',
+        jobId: 'job-1',
+        sections: [
+          {
+            id: 'exp-1',
+            type: 'EXPERIENCE',
+            title: 'Experience',
+            order: 1,
+            content: [
+              'Example Co | Support Operations Lead | 2022 - Present',
+              '- Led incident response and escalations across teams.',
+              '- Built dashboards for queue health and CSAT reporting.',
+            ].join('\n'),
+          },
+        ],
+        compliance_flags: [],
+        compliance_blocked: false,
+        audit_id: 'audit-1',
+        auditId: 'audit-1',
+        baseline_version_hash: 'hash-1',
+        quality: 'draft',
+        exports: { docx: true, pdf: true },
+        preview: {
+          resume: {
+            heading: { name: 'Test Candidate', contactLine: '' },
+            summary: 'Test summary',
+            experience: [],
+            education: [],
+            competencies: [],
+          },
+        },
+        trackerEntryId: null,
+        trackerStatus: null,
+        opportunityId: null,
+        idempotency: null,
+      },
+    });
+    (studioArtifactsService.recordResumeSuccess as jest.Mock).mockRejectedValueOnce(
+      new Error('refresh persistence failed'),
+    );
+
+    await expect(
+      service.generateResume(
+        'user-1',
+        { ...baseRequest, oneTap: true } as any,
+        { skipReadinessGate: true, enforceOneTap: true } as any,
+      ),
+    ).rejects.toThrow('refresh persistence failed');
+
+    baseline.sections = originalSections;
+  });
+
   it('extracts experience from multi-line headers and implicit bullets (non pipe-delimited)', () => {
     const sections: any[] = [
       {
