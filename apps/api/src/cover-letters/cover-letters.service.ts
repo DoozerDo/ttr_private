@@ -1673,11 +1673,7 @@ export class CoverLettersService {
       : 0;
     const shouldPreferCanonicalParsedBaselineAuthority =
       !persistedResumeV2 || canonicalExperienceCount > persistedResumeV2ExperienceCount;
-    const sourceSections = shouldPreferCanonicalParsedBaselineAuthority
-      ? canonicalBaselineSections
-      : baselineFileUsable
-        ? []
-        : canonicalBaselineSections;
+    const sourceSections = canonicalBaselineSections;
     const sections = this.applyPoliciesToSections(sourceSections, policies);
     const allowedSections = sections.filter(
       (section) =>
@@ -1685,11 +1681,7 @@ export class CoverLettersService {
         BaselineIncludePolicy.NEVER,
     );
 
-    const structuredBaseline = shouldPreferCanonicalParsedBaselineAuthority
-      ? canonicalStructuredBaseline
-      : baselineFileUsable
-        ? persistedResumeV2Normalized
-        : extractStructuredBaselineFromSections(sourceSections as any);
+    const structuredBaseline = canonicalStructuredBaseline;
     if (
       !baselineFileUsable &&
       Array.isArray((structuredBaseline as any)?.experience) &&
@@ -1711,6 +1703,7 @@ export class CoverLettersService {
     };
     let allowedBlocks: AllowedBaselineBlock[] = this.buildAllowedBlocksFromStructuredBaseline({
       structured: structuredBaseline,
+      sourceSections,
       job: jobContext,
     });
     const canonicalEvidenceUnits = this.buildCanonicalEvidenceUnitsFromAllowedBlocks(allowedBlocks);
@@ -3293,27 +3286,28 @@ export class CoverLettersService {
 
   private buildAllowedBlocksFromStructuredBaseline(input: {
     structured: any;
+    sourceSections: BaselineSection[];
     job: { title: string | null; company: string | null; responsibilities: string[]; requirements: string[] };
   }): AllowedBaselineBlock[] {
     const structured = input.structured ?? {};
     const experience = Array.isArray(structured.experience) ? structured.experience : [];
+    const sourceSections = Array.isArray(input.sourceSections) ? input.sourceSections : [];
+    const experienceSections = sourceSections.filter(
+      (section) => String(section?.sectionType ?? '').toUpperCase() === 'EXPERIENCE',
+    );
     const jobText = [input.job.title ?? '', input.job.company ?? '', ...(input.job.responsibilities ?? []), ...(input.job.requirements ?? [])]
       .join(' ')
       .toLowerCase();
     const jobTokens = new Set(jobText.split(/[^a-z0-9]+/g).map((t) => t.trim()).filter((t) => t.length >= 4));
 
     const scoreExperience = (entry: any) => {
-      const company = String(entry?.company ?? '');
-      const roleTitle = String(entry?.roleTitle ?? '');
-      const dates = String(entry?.dates ?? '');
-      const bullets = Array.isArray(entry?.bullets) ? entry.bullets.map((b: any) => String(b ?? '')) : [];
-      const text = [company, roleTitle, dates, ...bullets].join(' ').toLowerCase();
+      const text = String(entry?.content ?? '').replace(/\s+/g, ' ').toLowerCase();
       let score = 0;
       for (const token of jobTokens) {
         if (text.includes(token)) score += 1;
       }
-      if (/\b(contractor|freelance|consultant)\b/i.test(roleTitle)) score -= 2;
-      if (/\b(vue|react|deck builder|frontend)\b/i.test(company)) score -= 3;
+      if (/\b(contractor|freelance|consultant)\b/i.test(String(entry?.title ?? ''))) score -= 2;
+      if (/\b(vue|react|deck builder|frontend)\b/i.test(text)) score -= 3;
       return score;
     };
 
@@ -3322,11 +3316,15 @@ export class CoverLettersService {
         const careerIdentitySnapshot = deriveCareerIdentityFromStructuredBaseline(structured as any);
         const resumeV2Like = {
           heading: { name: 'Candidate', contactLine: '' },
-          experience: (experience ?? []).map((e: any) => ({
-            company: e.company,
-            roleTitle: e.roleTitle,
-            dateRange: e.dates,
-            bullets: e.bullets,
+          experience: experienceSections.map((section: any) => ({
+            company: String(section?.content ?? '').split('\n')[0] ?? '',
+            roleTitle: String(section?.title ?? ''),
+            dateRange: null,
+            bullets: String(section?.content ?? '')
+              .split(/\r?\n/)
+              .slice(1)
+              .map((line) => String(line ?? '').trim())
+              .filter(Boolean),
           })),
           summary: typeof structured.summary === 'string' ? structured.summary : '',
         } as any;
@@ -3347,33 +3345,13 @@ export class CoverLettersService {
     })();
 
     const ranked = [...experience]
-      .map((entry: any, index: number) => {
-        const id = `resume_v2_exp_${index}`;
-        const positioningRank = positioning?.prioritizedExperienceIds?.indexOf(id) ?? -1;
-        const suppressed = positioning?.suppressedExperienceIds?.includes(id) ?? false;
-        const planSuppressed = positioning?.plan?.suppressRoleIds?.includes?.(id) ?? false;
-        const planEmphasisRank = positioning?.plan?.emphasizeRoleIds?.indexOf?.(id) ?? -1;
-        return { entry, index, score: scoreExperience(entry), positioningRank, suppressed };
-      })
-      .sort((a, b) => {
-        const aPlanSuppressed = positioning?.plan?.suppressRoleIds?.includes?.(`resume_v2_exp_${a.index}`) ?? false;
-        const bPlanSuppressed = positioning?.plan?.suppressRoleIds?.includes?.(`resume_v2_exp_${b.index}`) ?? false;
-        if (aPlanSuppressed !== bPlanSuppressed) return aPlanSuppressed ? 1 : -1;
-        if (a.suppressed !== b.suppressed) return a.suppressed ? 1 : -1;
-        const aPlanRank = positioning?.plan?.emphasizeRoleIds?.indexOf?.(`resume_v2_exp_${a.index}`) ?? -1;
-        const bPlanRank = positioning?.plan?.emphasizeRoleIds?.indexOf?.(`resume_v2_exp_${b.index}`) ?? -1;
-        if (aPlanRank !== bPlanRank) {
-          if (aPlanRank === -1) return 1;
-          if (bPlanRank === -1) return -1;
-          return aPlanRank - bPlanRank;
-        }
-        if (a.positioningRank !== b.positioningRank) {
-          if (a.positioningRank === -1) return 1;
-          if (b.positioningRank === -1) return -1;
-          return a.positioningRank - b.positioningRank;
-        }
-        return b.score - a.score;
-      });
+      .map((entry: any, index: number) => ({
+        entry,
+        index,
+        score: scoreExperience(entry),
+        suppressed: false,
+      }))
+      .sort((a, b) => b.score - a.score || a.index - b.index);
 
     const blocks: AllowedBaselineBlock[] = [];
     const summary = typeof structured.summary === 'string' ? structured.summary.trim() : '';
@@ -3407,21 +3385,23 @@ export class CoverLettersService {
     }
 
     let order = 1000;
-    const nonSuppressedCount = ranked.filter((r) => !r.suppressed).length;
-    const shouldDropSuppressed = nonSuppressedCount >= 2;
+    const shouldDropSuppressed = false;
     for (const rankedEntry of ranked.slice(0, 12)) {
       if (shouldDropSuppressed && rankedEntry.suppressed) continue;
       const entry = rankedEntry.entry ?? {};
+      const sourceSection = experienceSections[rankedEntry.index] ?? {};
       const company = String(entry.company ?? '').trim();
       const roleTitle = String(entry.roleTitle ?? '').trim();
       const dates = String(entry.dates ?? '').trim();
       const bullets = Array.isArray(entry.bullets) ? entry.bullets.map((b: any) => String(b ?? '').trim()).filter(Boolean) : [];
-      if (!company || !roleTitle) continue;
+      const id = String(sourceSection.id ?? '').trim() || `parsed-experience-${rankedEntry.index}`;
+      const title = String(sourceSection.title ?? '').trim() || `${company} - ${roleTitle}`;
       const header = [company, roleTitle, dates].filter(Boolean).join(' | ');
-      const content = [header, ...bullets.map((b) => `- ${b}`)].join('\n').trim();
+      const content = [header, ...bullets.map((b) => `- ${b}`)].filter(Boolean).join('\n').trim();
+      if (!id || !content) continue;
       blocks.push({
-        id: `resume_v2_exp_${rankedEntry.index}`,
-        title: `${company} — ${roleTitle}`,
+        id,
+        title,
         content,
         includePolicy: BaselineIncludePolicy.OPTIONAL,
         order,
@@ -3495,3 +3475,5 @@ export class CoverLettersService {
     };
   }
 }
+
+

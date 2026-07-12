@@ -101,7 +101,7 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
       companyName: 'ExampleCo',
       allowedBlocks: [
         {
-          id: 'resume_v2_exp_0',
+          id: 'parsed-experience-0',
           title: 'Acme - Director of Support',
           content:
             'Acme | Director of Support | 2022 - Present\n- Led support operations programs and reduced escalation churn through clear handoffs.\n- Built operating reviews that kept queue health and service quality visible.',
@@ -186,23 +186,7 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
       companyName: 'ExampleCo',
       allowedBlocks: [
         {
-          id: 'resume_v2_summary',
-          title: 'Summary',
-          content: 'Support operations leader focused on execution cadence and measurable outcomes.',
-          includePolicy: 'optional',
-          order: 0,
-          sectionType: 'SUMMARY',
-        },
-        {
-          id: 'resume_v2_skills',
-          title: 'Skills',
-          content: 'ServiceNow, Jira Service Management, Incident Response',
-          includePolicy: 'optional',
-          order: 950,
-          sectionType: 'SKILLS',
-        },
-        {
-          id: 'resume_v2_exp_0',
+          id: 'parsed-experience-0',
           title: 'Acme - Director of Support',
           content:
             'Acme | Director of Support | 2022 - Present\n- Led support operations programs and reduced escalation churn through clear handoffs.\n- Built operating reviews that kept queue health and service quality visible.',
@@ -215,8 +199,8 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
 
     expect(assembly.document.bodyParagraphs.length).toBe(2);
     const sourceEvidenceIds = assembly.paragraphEvidence.flatMap((entry) => entry.sourceEvidenceIds);
-    expect(sourceEvidenceIds.some((id) => id.startsWith('resume_v2_summary:evidence:0'))).toBe(true);
-    expect(sourceEvidenceIds.some((id) => id.startsWith('resume_v2_skills:evidence:0'))).toBe(true);
+    expect(sourceEvidenceIds.some((id) => id.startsWith('parsed-experience-0:evidence:'))).toBe(true);
+    expect(sourceEvidenceIds.some((id) => id.startsWith('resume_v2_exp_'))).toBe(false);
     expect(assembly.paragraphEvidence.every((entry) => entry.sourceEvidenceIds.every((id) => !id.includes('resume_v2_plain_text')))).toBe(true);
   });
 });
