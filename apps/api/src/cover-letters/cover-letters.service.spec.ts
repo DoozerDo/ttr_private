@@ -597,7 +597,7 @@ describe('CoverLettersService contract', () => {
     }
   });
 
-  it('hydrates cover letter generation from parsedJson when persisted ResumeV2 is sparse', async () => {
+  it('hydrates cover letter generation from canonical baseline sections when persisted ResumeV2 is sparse', async () => {
     const { service } = buildService();
     const originalSections = baseline.sections;
     const originalParsed = baseline.parsedRecords;
@@ -645,9 +645,26 @@ describe('CoverLettersService contract', () => {
 
     baseline.sections = [
       {
+        id: 'summary-canonical-1',
+        baselineId: baseline.id,
         title: 'Summary',
-        sectionType: 'SUMMARY',
+        sectionType: BaselineSectionType.SUMMARY,
         content: 'Customer operations leader focused on measurable improvements and execution cadence.',
+        includePolicy: BaselineIncludePolicy.OPTIONAL,
+        order: 0,
+      } as any,
+      {
+        id: 'experience-canonical-1',
+        baselineId: baseline.id,
+        title: 'Professional Experience',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        content: [
+          'Canonical Co | Director of Support Operations | Jan 2021 - Present',
+          '- Led support operations and exec updates.',
+          '- Improved incident routing and operating reviews.',
+        ].join('\n'),
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 1,
       } as any,
     ];
 
@@ -656,8 +673,8 @@ describe('CoverLettersService contract', () => {
       expect(buildAllowedBlocksSpy).toHaveBeenCalled();
       const structuredArg = buildAllowedBlocksSpy.mock.calls[0]?.[0]?.structured as any;
       expect(Array.isArray(structuredArg?.experience)).toBe(true);
-      expect(structuredArg.experience.length).toBe(2);
-      expect(JSON.stringify(structuredArg)).toContain('Parsed Co');
+      expect(structuredArg.experience.length).toBe(1);
+      expect(JSON.stringify(structuredArg)).toContain('Canonical Co');
       expect(JSON.stringify(structuredArg)).toContain('Director of Support Operations');
       expect(JSON.stringify(structuredArg)).not.toContain('Sparse Co');
     } finally {
@@ -968,7 +985,7 @@ describe('CoverLettersService contract', () => {
     buildDraftSpy.mockRestore();
   });
 
-  it('prefers richer parsedJson experience over sparse direct sections when generating a canonical cover letter', async () => {
+  it('does not recover sparse canonical baselines from persisted ResumeV2 evidence', async () => {
     const { service } = buildService();
     const originalSections = baseline.sections;
     const originalParsed = baseline.parsedRecords;
@@ -978,21 +995,13 @@ describe('CoverLettersService contract', () => {
     try {
       baseline.sections = [
         {
-          ...(baseline.sections?.[0] as any),
-          content: [
-            'Sparse Co | Director | 2022 - 2023',
-            '- Led a small operating cadence.',
-          ].join('\n'),
-        } as any,
-        {
-          ...(baseline.sections?.[0] as any),
-          id: 'summary-rich-1',
+          id: 'summary-sparse-1',
+          baselineId: baseline.id,
           title: 'Summary',
           sectionType: BaselineSectionType.SUMMARY,
-          order: 1,
-          content:
-            'Operations leader focused on measurable improvements and reliable execution. ' +
-            'Builds practical operating rhythms and cross-functional collaboration across support and product.',
+          content: 'Operations leader focused on measurable improvements and reliable execution.',
+          includePolicy: BaselineIncludePolicy.OPTIONAL,
+          order: 0,
         } as any,
       ] as any;
       baseline.parsedRecords = [
@@ -1023,13 +1032,11 @@ describe('CoverLettersService contract', () => {
         } as any,
       ];
 
-      const result = await service.generateCoverLetter('user-1', request as any);
-      expect(result.status).toBe('success');
-      expect(result.exportReady).toBe(true);
-      expect((result as any).content).toMatch(/\S/);
-      expect(result.generationAuthority).toBe('canonical');
-      expect(result.baselineVerified).toBe(true);
-      expect((result as any).baselineFileUsable).toBe(true);
+      await expect(service.generateCoverLetter('user-1', request as any)).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'canonical_cover_letter_evidence_insufficient',
+        }),
+      });
     } finally {
       baseline.sections = originalSections;
       baseline.parsedRecords = originalParsed;
