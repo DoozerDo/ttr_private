@@ -110,7 +110,6 @@ import { buildArtifactFailurePayload } from '../generation/artifact-failure';
 import { polishCoverLetterGeneration } from '../language-style-pass';
 import type { DocumentStrategyPlanLike } from '../document-strategy-plan.types';
 import {
-  repairCoverLetterForQuality,
   validateCoverLetterArtifactQuality,
   type ArtifactQualityGate,
 } from '../artifacts/artifactQualityValidator';
@@ -2034,43 +2033,14 @@ export class CoverLettersService {
     let repairAttempted = false;
     if (artifactQuality.status === 'needs_refinement') {
       repairAttempted = true;
-      const repairSource = Array.isArray(generation.paragraphs) && generation.paragraphs.length
-        ? generation.paragraphs
-        : generation.document
-          ? [
-              generation.document.opening,
-              ...(generation.document.bodyParagraphs ?? []),
-              generation.document.closingParagraph,
-            ].filter(Boolean)
-          : [];
-      const repairedParagraphs = repairCoverLetterForQuality(repairSource, artifactQuality);
-      artifactQuality = validateCoverLetterArtifactQuality(repairedParagraphs, {
-        company: jobContext.company,
-        roleTitle: jobContext.title,
-        requiredEvidenceSnippets: evidenceSnippets,
-      });
-      if (generation.document) {
-        const opening = repairedParagraphs[0] ?? generation.document.opening;
-        const closingParagraph = repairedParagraphs.length >= 2 ? repairedParagraphs[repairedParagraphs.length - 1] : generation.document.closingParagraph;
-        const bodyParagraphs = repairedParagraphs.slice(1, Math.max(1, repairedParagraphs.length - 1));
-        generation = {
-          ...generation,
-          document: {
-            ...generation.document,
-            opening,
-            bodyParagraphs,
-            closingParagraph,
-          },
-          paragraphs: repairedParagraphs,
-          content: repairedParagraphs.join('\n\n'),
-        };
-      } else {
-        generation = {
-          ...generation,
-          paragraphs: repairedParagraphs,
-          content: repairedParagraphs.join('\n\n'),
-        };
-      }
+      artifactQuality = validateCoverLetterArtifactQuality(
+        generation.paragraphs ?? generation.document?.bodyParagraphs ?? [],
+        {
+          company: jobContext.company,
+          roleTitle: jobContext.title,
+          requiredEvidenceSnippets: evidenceSnippets,
+        },
+      );
     }
 
     // Real-document contract enforcement (cover letter): preserve rendering but never mark exportable unless it passes.
@@ -2860,8 +2830,7 @@ export class CoverLettersService {
     const sanitizedGeneration: CoverLetterGenerationResult = (() => {
       const document = generation.document;
       if (!document) {
-        const text = sanitizeParagraph(this.complianceService.normalizeText(generation.content));
-        return this.hydrateGenerationFromText(generation, text, candidateName);
+        throw new Error('Cover letter post-processing requires a canonical document.');
       }
       const cleanedDoc = {
         ...document,
@@ -2925,7 +2894,7 @@ export class CoverLettersService {
           .map((line) => line.replace(COVER_LETTER_BULLET_PATTERN, '').trim())
           .filter(Boolean)
           .join(' ');
-        // Always strip signoff tokens from blocks; hydrateGenerationFromText re-inserts a single canonical signoff.
+        // Always strip signoff tokens from blocks so the canonical document keeps a single signoff line.
         current = current.replace(new RegExp(this.escapeRegExp(COVER_LETTER_SIGNOFF), 'gi'), ' ');
         return current;
       })
@@ -2949,79 +2918,6 @@ export class CoverLettersService {
       .replace(/\s*[,;:]\s*[,;:]+/g, ', ')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
-  }
-
-  private hydrateGenerationFromText(
-    generation: CoverLetterGenerationResult,
-    content: string,
-    candidateName: string,
-  ): CoverLetterGenerationResult {
-    const paragraphs = content
-      .split(/\n\s*\n/)
-      .map((part) => this.cleanText(part))
-      .filter(Boolean);
-
-    if ((paragraphs[0] ?? '').toLowerCase() !== COVER_LETTER_REQUIRED_SALUTATION.toLowerCase()) {
-      paragraphs.unshift(COVER_LETTER_REQUIRED_SALUTATION);
-    }
-
-    const firstLine = paragraphs.shift() ?? COVER_LETTER_REQUIRED_SALUTATION;
-    const signoffIndex = paragraphs.findIndex(
-      (line) => this.cleanText(line).toLowerCase() === this.cleanText(COVER_LETTER_SIGNOFF).toLowerCase(),
-    );
-    let signatureName = candidateName;
-    if (signoffIndex >= 0) {
-      if (paragraphs[signoffIndex + 1]) {
-        signatureName = this.cleanText(paragraphs[signoffIndex + 1]);
-      }
-      paragraphs.splice(signoffIndex);
-    }
-
-    const opening = this.stripLeadingSalutationPrefix(
-      paragraphs.shift() ?? generation.document.opening,
-    );
-    const closingParagraph = paragraphs.pop() ?? generation.document.closingParagraph;
-    const bodyParagraphs = paragraphs.slice(0, COVER_LETTER_MAX_BODY_PARAGRAPHS);
-    // Narrative authority: avoid injecting generic filler that dilutes evidence/thesis.
-    // Template generator is responsible for producing fully-populated evidence-grounded paragraphs.
-    // If it fails to do so, quality gates should force regeneration rather than padding.
-
-    const document = {
-      ...generation.document,
-      salutation: COVER_LETTER_REQUIRED_SALUTATION,
-      opening,
-      bodyParagraphs,
-      closingParagraph,
-      signoff: COVER_LETTER_SIGNOFF,
-      signatureName,
-      senderHeading: {
-        ...generation.document.senderHeading,
-        name: signatureName,
-      },
-    };
-
-    const normalizedContent = [
-      firstLine,
-      document.opening,
-      ...document.bodyParagraphs,
-      document.closingParagraph,
-      COVER_LETTER_SIGNOFF,
-      document.signatureName,
-    ]
-      .map((line) => this.cleanText(line))
-      .filter((line) => line.length > 0)
-      .join('\n\n');
-
-    return {
-      ...generation,
-      document,
-      content: normalizedContent,
-      wordCount: this.countWords(normalizedContent),
-      greeting: COVER_LETTER_REQUIRED_SALUTATION,
-      paragraphs: [document.opening, ...document.bodyParagraphs],
-      closingParagraphs: [document.closingParagraph],
-      paragraphEvidence: generation.paragraphEvidence,
-    };
   }
 
   private validateCoverLetterQuality(
