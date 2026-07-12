@@ -144,4 +144,52 @@ describe('resolveBaselineSectionsForGeneration', () => {
     expect(sections[0].content).toContain('Director');
     expect(sections[0].content).toContain('Led operational planning and execution.');
   });
+
+  it('prefers verified Resume V2 evidence over sparse direct sections when parsed records carry canonical resumeV2Json', () => {
+    const baseline = {
+      id: 'baseline-1',
+      sections: [
+        {
+          id: 'section-1',
+          baselineId: 'baseline-1',
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          content: 'Senior operations leader.',
+          includePolicy: BaselineIncludePolicy.OPTIONAL,
+          order: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+      parsedRecords: [
+        {
+          createdAt: new Date(),
+          parsedJson: {},
+          resumeV2Json: {
+            experience: [
+              {
+                company: 'Starbucks',
+                roleTitle: 'Senior Manager, Technology Operations Excellence',
+                dateRange: 'Apr 2020 - Mar 2022',
+                bullets: [],
+                evidence: [
+                  { text: 'Owned global incident and escalation management.' },
+                  { text: 'Managed Five9 voice operations and workforce management.' },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    } as any;
+
+    const sections = resolveBaselineSectionsForGeneration(baseline);
+
+    expect(sections).toHaveLength(1);
+    expect(sections[0].id).toBe('parsed-experience-0');
+    expect(sections[0].content).toContain('Starbucks');
+    expect(sections[0].content).toContain('Senior Manager, Technology Operations Excellence');
+    expect(sections[0].content).toContain('Owned global incident and escalation management.');
+    expect(sections[0].content).toContain('Managed Five9 voice operations and workforce management.');
+  });
 });
