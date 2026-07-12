@@ -84,11 +84,6 @@ import {
   normalizeNormalizedResumeDocument,
   validateNormalizedResumeDocument,
 } from '../resume/resume-normalization';
-import {
-  extractEvidenceUnitsFromLogicalUnits,
-  reconstructLogicalTextUnits,
-  type ResumeEvidenceUnit,
-} from '../resume/resume-draft-bullets';
 import type {
   DocumentGenerationExports,
   UserSafeDisplayPayload,
@@ -117,17 +112,9 @@ import { trimIncompleteTrailingFragments } from '../artifacts/artifactQualityVal
 import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
 import { deriveCareerIdentityFromStructuredBaseline } from '../career-identity/career-identity.derive';
 import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateReadiness';
-import { buildBaselineEvidenceSignals } from '../baseline/baselineEvidenceSignals';
-import type { EvidenceItem } from '../evidence/evidence-model';
-import {
-  evaluateInterpretedEvidenceEligibility,
-  buildSyntheticAllowedBlocksFromInterpretedEvidence,
-  buildInterpretedEvidenceIdToItemMapFromSyntheticContainers,
-  buildEvidenceDetailsMapFromTraceMap,
-} from '../generation/interpreted-evidence-artifact-support';
-import { resolveEvidenceReadinessFromSummary } from '../evidence/readiness-thresholds';
 import {
   assembleCoverLetterFromStructuredBaseline,
+  type CanonicalEvidenceUnit,
   toCanonicalEvidenceUnits,
 } from './coverLetterTemplateAssembler';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
@@ -143,16 +130,11 @@ type CoverLetterDraft = {
   baseline: Baseline;
   baselineVersion: BaselineVersion;
   job: Job;
-  generationAuthority: 'baseline_file' | 'fallback';
+  generationAuthority: 'baseline_file';
   baselineFileUsable: boolean;
   baselineFileVersionHash: string | null;
   allowedBlocks: AllowedBaselineBlock[];
   positioningMetadata?: unknown;
-  interpretedEvidenceIdToItem?: Map<string, EvidenceItem>;
-  interpretedEvidenceSummary?: { strongEvidenceCount: number; partialEvidenceCount: number; weakEvidenceCount: number; unusableEvidenceCount: number };
-  interpretedEvidenceReadiness?: ReturnType<typeof resolveEvidenceReadinessFromSummary>;
-  omittedInterpretedEvidence?: { weak: string[]; unusable: string[]; no_tools_or_metrics: string[] };
-  bypassedTemplateHardBlockWithInterpretedEvidence?: boolean;
   candidateName: string;
   qualityGate: ArtifactQualityGate;
   firstPassQualityGate: ArtifactQualityGate;
@@ -236,7 +218,7 @@ export type CoverLetterGenerationResponse = {
   audit_id: string;
   auditId: string;
   baseline_version_hash: string | null;
-  generationAuthority?: 'baseline_file' | 'fallback';
+  generationAuthority?: 'baseline_file';
   baselineVerified?: boolean;
   baselineFileUsable?: boolean;
   baselineFileVersionHash?: string | null;
@@ -250,7 +232,7 @@ export type CoverLetterGenerationResponse = {
     auditId: string;
     baselineVersionHash: string | null;
     complianceFlags: ComplianceFlag[];
-    generationAuthority?: 'baseline_file' | 'fallback';
+    generationAuthority?: 'baseline_file';
     baselineFileUsable?: boolean;
     baselineFileVersionHash?: string | null;
   };
@@ -941,15 +923,6 @@ export class CoverLettersService {
           unusedEvidence: [],
           selectedEvidence: [],
         },
-        ...(draft.interpretedEvidenceIdToItem
-          ? (() => {
-              const evidenceDetailsMap = buildEvidenceDetailsMapFromTraceMap({
-                traceMap: draft.generation.traceMap,
-                interpretedEvidenceByGeneratedEvidenceId: draft.interpretedEvidenceIdToItem,
-              });
-              return evidenceDetailsMap ? { evidenceDetailsMap } : {};
-            })()
-          : {}),
         display,
         safeDisplay: display,
         internal: {
@@ -966,15 +939,6 @@ export class CoverLettersService {
                     ? (draft.generation.debugTrace.unusedEvidence as unknown[]).map((x) => String(x ?? '')).slice(0, 24)
                     : [],
                 },
-              }
-            : {}),
-          ...(draft.interpretedEvidenceIdToItem
-            ? {
-                interpretedEvidenceSummary: draft.interpretedEvidenceSummary,
-                interpretedEvidenceReadiness: draft.interpretedEvidenceReadiness,
-                omittedInterpretedEvidence: draft.omittedInterpretedEvidence,
-                bypassedTemplateHardBlockWithInterpretedEvidence:
-                  draft.bypassedTemplateHardBlockWithInterpretedEvidence,
               }
             : {}),
           ...(forceTemplateRegen || dedupeKey.includes('mode:structured_baseline_template')
@@ -1721,11 +1685,6 @@ export class CoverLettersService {
         BaselineIncludePolicy.NEVER,
     );
 
-    const evidenceSignals = buildBaselineEvidenceSignals({
-      baselineId: baseline.id,
-      baselineVersionId: baselineVersion.id,
-      baselineSections: allowedSections as any,
-    });
     const structuredBaseline = shouldPreferCanonicalParsedBaselineAuthority
       ? canonicalStructuredBaseline
       : baselineFileUsable
@@ -1739,35 +1698,6 @@ export class CoverLettersService {
       baselineFileUsable = true;
     }
     const templateReadiness = evaluateBaselineTemplateReadiness(structuredBaseline as any);
-    const interpretedEvidence = evidenceSignals.interpretedEvidence ?? [];
-    const interpretedEligibility = evaluateInterpretedEvidenceEligibility(interpretedEvidence);
-    const meaningfulInterpretedEvidenceExists = interpretedEligibility.hasMeaningfulInterpretedEvidence;
-    const interpretedEvidenceReadiness = resolveEvidenceReadinessFromSummary(evidenceSignals.interpretedEvidenceSummary);
-
-    const structuredEvidenceText = [
-      structuredBaseline?.summary ?? '',
-      ...(structuredBaseline?.experience ?? []).flatMap((entry: any) => [
-        String(entry?.company ?? '').trim(),
-        String(entry?.roleTitle ?? '').trim(),
-        String(entry?.dates ?? '').trim(),
-        ...(Array.isArray(entry?.bullets) ? entry.bullets.map((bullet: unknown) => String(bullet ?? '').trim()) : []),
-      ]),
-      ...(Array.isArray((structuredBaseline as any)?.skills)
-        ? (structuredBaseline as any).skills
-        : Array.isArray((structuredBaseline as any)?.competencies)
-          ? (structuredBaseline as any).competencies
-          : []),
-    ]
-      .map((value) => String(value ?? '').trim())
-      .filter(Boolean)
-      .join('\n');
-    const fallbackSectionText = allowedSections
-      .map((section) => String(section?.content ?? '').trim())
-      .filter(Boolean)
-      .join('\n');
-    const baselineText = resumeV2PlainText;
-    const canonicalBaselineText = baselineText || structuredEvidenceText || fallbackSectionText;
-    const canonicalTextInsufficiency = getInsufficientExtractedTextDetails(canonicalBaselineText);
 
     // Generation must be driven by ResumeV2-derived content (structured baseline), not baseline section concatenations.
     // Prefer role-aligned structured experience blocks over a single plain-text dump so evidence selection can
@@ -1781,30 +1711,23 @@ export class CoverLettersService {
     };
     let allowedBlocks: AllowedBaselineBlock[] = this.buildAllowedBlocksFromStructuredBaseline({
       structured: structuredBaseline,
-      resumeV2PlainText,
       job: jobContext,
     });
     const canonicalEvidenceUnits = this.buildCanonicalEvidenceUnitsFromAllowedBlocks(allowedBlocks);
-    const hasArtifactReadyEvidenceBlocks = allowedBlocks.length > 0 || templateReadiness.canGenerateCoverLetter;
-    if (
-      canonicalTextInsufficiency &&
-      !baselineFileUsable &&
-      !hasArtifactReadyEvidenceBlocks &&
-      !meaningfulInterpretedEvidenceExists
-    ) {
+    if (canonicalEvidenceUnits.length < 2) {
       throw new UnprocessableEntityException(buildArtifactFailurePayload({
-        code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+        code: 'canonical_cover_letter_evidence_insufficient',
         category: 'unsupported_input',
-        message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
-        detail: 'The current cover letter input cannot be grounded into a supported artifact.',
+        message: 'The current cover letter input does not contain enough canonical evidence to generate a cover letter.',
+        detail: 'The current cover letter input cannot be grounded into a supported artifact without recovering legacy evidence.',
         retryable: false,
         userAction: {
           title: 'Add stronger baseline evidence',
-          description: 'Include clearer accomplishment bullets and fuller role details before generating again.',
+          description: 'Include at least two grounded canonical experience evidence units before generating again.',
         },
         diagnostics: {
-          unsupportedEnvelope: 'insufficient_extracted_text',
-          missingRequirements: canonicalTextInsufficiency.tips,
+          unsupportedEnvelope: 'canonical_cover_letter_evidence_insufficient',
+          missingRequirements: [],
         },
       }));
     }
@@ -1836,30 +1759,6 @@ export class CoverLettersService {
         return null;
       }
     })();
-    const interpretedEvidenceIdToItem = new Map<string, EvidenceItem>();
-    const enforceTemplateReadiness =
-      Boolean(input.jobId?.trim()) && Boolean(input.analysisId?.trim()) && !Boolean(oneTap);
-    const bypassedTemplateHardBlockWithInterpretedEvidence =
-      enforceTemplateReadiness && !templateReadiness.canGenerateCoverLetter && meaningfulInterpretedEvidenceExists;
-    if (!templateReadiness.canGenerateCoverLetter && meaningfulInterpretedEvidenceExists) {
-      const injectedBlocks = buildSyntheticAllowedBlocksFromInterpretedEvidence({
-        eligibleEvidence: interpretedEligibility.eligibleEvidence,
-        includePolicy: BaselineIncludePolicy.OPTIONAL,
-        sectionType: BaselineSectionType.SUMMARY,
-        baseOrder: (allowedBlocks.length + 1) * 1000,
-      }) as AllowedBaselineBlock[];
-      if (injectedBlocks.length) {
-        allowedBlocks = allowedBlocks.concat(injectedBlocks);
-        const map = buildInterpretedEvidenceIdToItemMapFromSyntheticContainers({
-          syntheticContainers: injectedBlocks.map((block) => ({ id: String(block.id), content: block.content ?? '' })),
-          eligibleEvidence: interpretedEligibility.eligibleEvidence,
-          reconstructLogicalTextUnits,
-          extractEvidenceUnitsFromLogicalUnits,
-        });
-        map.forEach((value, key) => interpretedEvidenceIdToItem.set(key, value));
-      }
-    }
-    const artifactReadyByEvidenceBlocks = allowedBlocks.length > 0 || meaningfulInterpretedEvidenceExists;
     const baselineIdentity = resolveBaselineIdentity(baseline);
     let candidateName = baselineFileUsable
       ? this.cleanText((structuredBaseline as any)?.heading?.name ?? baselineIdentity?.fullName)
@@ -1906,14 +1805,6 @@ export class CoverLettersService {
     let generation: CoverLetterGenerationResult;
     try {
       const requestSafeMode = oneTap || complianceConstraints?.mode === 'strict';
-
-      if (enforceTemplateReadiness && !artifactReadyByEvidenceBlocks) {
-        throw new UnprocessableEntityException({
-          code: 'baseline_template_not_ready',
-          reasons: templateReadiness.hardBlockReasons,
-          details: templateReadiness,
-        });
-      }
 
       const composition = assembleCoverLetterFromStructuredBaseline({
         structured: structuredBaseline as any,
@@ -1985,23 +1876,15 @@ export class CoverLettersService {
       generation,
       jobContext,
       candidateName,
+      canonicalEvidenceUnits,
     );
     generation = qualityResult.generation;
 
     // Soft quality enforcement (server-side self-heal): run shared artifact quality validation.
     // If the first pass fails, attempt one deterministic repair pass. If it still fails, return
     // the artifact but include quality metadata so Studio can surface the safety net.
-    const usedEvidenceIds = Array.isArray((generation as any)?.internalTrace?.usedEvidenceIds)
-      ? ((generation as any).internalTrace.usedEvidenceIds as unknown[]).map((id) => String(id ?? '')).filter(Boolean)
-      : [];
-    const evidenceSnippets = usedEvidenceIds
-      .slice(0, 6)
-      .map((id) => {
-        const found = allowedBlocks.find((b) => String((b as any)?.id ?? '') === id);
-        return found ? String((found as any)?.content ?? '') : '';
-      })
-      .map((text) => text.replace(/\s+/g, ' ').trim())
-      .map((text) => (text.length > 80 ? text.slice(0, 80) : text))
+    const evidenceSnippets = canonicalEvidenceUnits
+      .map((unit) => String(unit.text ?? '').trim())
       .filter(Boolean)
       .slice(0, 4);
 
@@ -2088,6 +1971,7 @@ export class CoverLettersService {
         generation,
         jobContext,
         candidateName,
+        canonicalEvidenceUnits,
       );
       generation = qualityResult.generation;
     }
@@ -2097,40 +1981,21 @@ export class CoverLettersService {
 
     let paragraphAnchorValidation = this.validateCoverLetterParagraphAnchors(
       generation,
-      allowedBlocks,
+      canonicalEvidenceUnits,
     );
     if (!paragraphAnchorValidation.valid) {
-      generation = this.generator.generate({
-        document: generation.document,
-        baselineId: baseline.id,
-        jobId: job.id,
-        allowedBaselineBlocks: allowedBlocks,
-        job: jobContext,
-        candidateName,
-        closingTemplate,
-        maxWords: input.maxWords,
-        tone: input.tone,
-        safeMode: true,
-        complianceConstraints,
-        documentStrategyPlan: input.documentStrategyPlan ?? undefined,
-        gapAnalysis: {
-          strengths: gapInsights.strengths,
-          criticalGaps: gapInsights.criticalGaps,
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'canonical_cover_letter_evidence_insufficient',
+          message:
+            'Cover letter could not be generated because canonical evidence could not be anchored to the rendered document.',
+          details: {
+            stage: 'anchor_validation',
+            reason: 'canonical_cover_letter_evidence_insufficient',
+            reasons: paragraphAnchorValidation.reasons.slice(0, 6),
+          },
         },
-        paragraphEvidence: generation.paragraphEvidence,
-        traceMap: generation.traceMap,
-        internalTrace: generation.internalTrace,
       });
-      qualityResult = this.applyCoverLetterPostProcessing(
-        generation,
-        jobContext,
-        candidateName,
-      );
-      generation = qualityResult.generation;
-      paragraphAnchorValidation = this.validateCoverLetterParagraphAnchors(
-        generation,
-        allowedBlocks,
-      );
     }
 
     if (!paragraphAnchorValidation.valid) {
@@ -2199,6 +2064,7 @@ export class CoverLettersService {
         generation,
         jobContext,
         candidateName,
+        canonicalEvidenceUnits,
       );
       generation = qualityResult.generation;
       if (qualityResult.flags.length > 0) {
@@ -2206,7 +2072,7 @@ export class CoverLettersService {
       }
       const strictAnchorValidation = this.validateCoverLetterParagraphAnchors(
         generation,
-        allowedBlocks,
+        canonicalEvidenceUnits,
       );
       if (!strictAnchorValidation.valid) {
         throw new UnprocessableEntityException({
@@ -2244,13 +2110,13 @@ export class CoverLettersService {
     const finalArtifactQuality = validateCoverLetterArtifactQuality(finalParagraphs, {
       company: jobContext.company,
       roleTitle: jobContext.title,
-      requiredEvidenceSnippets: evidenceSnippets,
+      requiredEvidenceSnippets: canonicalEvidenceUnits.map((unit) => unit.text).filter(Boolean).slice(0, 4),
     });
     const finalRealDocument = validateRealCoverLetterDocument({
       paragraphs: finalParagraphs,
       jobTitle: jobContext.title ?? null,
       companyName: jobContext.company ?? null,
-      requiredEvidenceSnippets: evidenceSnippets,
+      requiredEvidenceSnippets: canonicalEvidenceUnits.map((unit) => unit.text).filter(Boolean).slice(0, 4),
     });
     const finalQualityGate: ArtifactQualityGate =
       finalArtifactQuality.status === 'pass' &&
@@ -2277,19 +2143,6 @@ export class CoverLettersService {
       analysisAssessment,
       allowedBlocks,
       positioningMetadata,
-      ...(interpretedEvidenceIdToItem.size ? { interpretedEvidenceIdToItem } : {}),
-      ...(interpretedEvidenceIdToItem.size
-        ? {
-            interpretedEvidenceSummary: evidenceSignals.interpretedEvidenceSummary,
-            interpretedEvidenceReadiness,
-            omittedInterpretedEvidence: {
-              weak: interpretedEligibility.omissions.omittedWeakEvidenceIds,
-              unusable: interpretedEligibility.omissions.omittedUnusableEvidenceIds,
-              no_tools_or_metrics: interpretedEligibility.omissions.omittedNoToolsOrMetricsIds,
-            },
-            bypassedTemplateHardBlockWithInterpretedEvidence,
-          }
-        : {}),
       candidateName,
       qualityGate: finalQualityGate,
       firstPassQualityGate: firstPassArtifactQuality,
@@ -2805,6 +2658,7 @@ export class CoverLettersService {
       requirements: string[];
     },
     candidateName: string,
+    canonicalEvidenceUnits: CanonicalEvidenceUnit[],
   ): CoverLetterQualityResult {
     const sanitizeParagraph = (value: string) => this.sanitizeCoverLetterText(value);
     const sanitizedGeneration: CoverLetterGenerationResult = (() => {
@@ -2849,6 +2703,7 @@ export class CoverLettersService {
       sanitizedGeneration,
       jobContext,
       candidateName,
+      canonicalEvidenceUnits,
     );
 
     return {
@@ -2909,6 +2764,7 @@ export class CoverLettersService {
       requirements: string[];
     },
     candidateName: string,
+    canonicalEvidenceUnits: CanonicalEvidenceUnit[],
   ): string[] {
     const text = generation.content;
     const lowered = text.toLowerCase();
@@ -3083,7 +2939,7 @@ export class CoverLettersService {
     if (this.detectJobDescriptionEcho(text, jobContext)) {
       flags.push('jd_echo');
     }
-    const anchorValidation = this.validateCoverLetterParagraphAnchors(generation, []);
+    const anchorValidation = this.validateCoverLetterParagraphAnchors(generation, canonicalEvidenceUnits);
     if (!anchorValidation.valid) {
       flags.push('paragraph_anchor_validation_failed');
     }
@@ -3119,23 +2975,15 @@ export class CoverLettersService {
     });
   }
 
-  private buildCoverLetterEvidenceById(
-    allowedBlocks: AllowedBaselineBlock[],
-  ): Map<string, ResumeEvidenceUnit> {
-    const evidenceById = new Map<string, ResumeEvidenceUnit>();
-    for (const block of allowedBlocks) {
-      const logicalUnits = reconstructLogicalTextUnits(block.content ?? '');
-      const evidenceUnits = extractEvidenceUnitsFromLogicalUnits(block.id, logicalUnits);
-      evidenceUnits.forEach((unit) => {
-        evidenceById.set(unit.id, unit);
-      });
-    }
-    return evidenceById;
+  private buildCanonicalEvidenceById(
+    canonicalEvidenceUnits: CanonicalEvidenceUnit[],
+  ): Map<string, CanonicalEvidenceUnit> {
+    return new Map(canonicalEvidenceUnits.map((unit) => [unit.id, unit]));
   }
 
   private buildCanonicalEvidenceUnitsFromAllowedBlocks(
     allowedBlocks: AllowedBaselineBlock[],
-  ): ReturnType<typeof toCanonicalEvidenceUnits> {
+  ): CanonicalEvidenceUnit[] {
     return toCanonicalEvidenceUnits({ allowedBlocks });
   }
 
@@ -3168,12 +3016,11 @@ export class CoverLettersService {
 
   private validateCoverLetterParagraphAnchors(
     generation: CoverLetterGenerationResult,
-    allowedBlocks: AllowedBaselineBlock[],
+    canonicalEvidenceUnits: ReturnType<typeof toCanonicalEvidenceUnits>,
   ): { valid: boolean; reasons: string[] } {
     const reasons: string[] = [];
     const paragraphEvidence = generation.paragraphEvidence ?? [];
-    const evidenceById =
-      allowedBlocks.length > 0 ? this.buildCoverLetterEvidenceById(allowedBlocks) : new Map();
+    const evidenceById = this.buildCanonicalEvidenceById(canonicalEvidenceUnits);
 
     const textByKey: Record<string, string> = {
       opening: generation.document?.opening ?? '',
@@ -3201,13 +3048,10 @@ export class CoverLettersService {
         reasons.push(`Paragraph ${key} has no sourceEvidenceIds.`);
         continue;
       }
-      if (allowedBlocks.length === 0) {
-        continue;
-      }
       const evidenceTexts = meta.sourceEvidenceIds
         .map((id) => evidenceById.get(id))
-        .filter((entry): entry is ResumeEvidenceUnit => Boolean(entry))
-        .map((entry) => this.normalizeForAnchorMatch(entry.normalizedText));
+        .filter((entry): entry is CanonicalEvidenceUnit => Boolean(entry))
+        .map((entry) => this.normalizeForAnchorMatch(entry.text));
       if (!evidenceTexts.length) {
         reasons.push(`Paragraph ${key} references evidence that was not found in baseline.`);
         continue;
@@ -3449,7 +3293,6 @@ export class CoverLettersService {
 
   private buildAllowedBlocksFromStructuredBaseline(input: {
     structured: any;
-    resumeV2PlainText: string;
     job: { title: string | null; company: string | null; responsibilities: string[]; requirements: string[] };
   }): AllowedBaselineBlock[] {
     const structured = input.structured ?? {};
