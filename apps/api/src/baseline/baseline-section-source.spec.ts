@@ -98,4 +98,50 @@ describe('resolveBaselineSectionsForGeneration', () => {
     expect(sections[0].content).toContain('Acme Corp');
     expect(sections[0].content).toContain('Customer Operations Manager');
   });
+
+  it('prefers parsedJson when direct sections tie with parsed structured experience coverage', () => {
+    const baseline = {
+      id: 'baseline-1',
+      sections: [
+        {
+          id: 'section-1',
+          baselineId: 'baseline-1',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: [
+            'Example Co | Director | 2020 - Present',
+            '- Led operational planning and execution.',
+          ].join('\n'),
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+      parsedRecords: [
+        {
+          createdAt: new Date(),
+          parsedJson: {
+            experience: [
+              {
+                company: 'Example Co',
+                role_title: 'Director',
+                start_date: 'Jan 2020',
+                end_date: 'Present',
+                details_text: 'Led operational planning and execution.',
+              },
+            ],
+          },
+        },
+      ],
+    } as any;
+
+    const sections = resolveBaselineSectionsForGeneration(baseline);
+
+    expect(sections).toHaveLength(1);
+    expect(sections[0].id).toBe('parsed-experience-0');
+    expect(sections[0].content).toContain('Example Co');
+    expect(sections[0].content).toContain('Director');
+    expect(sections[0].content).toContain('Led operational planning and execution.');
+  });
 });

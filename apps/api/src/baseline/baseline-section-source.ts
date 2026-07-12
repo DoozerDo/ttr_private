@@ -128,7 +128,7 @@ export function resolveBaselineSectionsForGeneration(
     }
   })();
 
-  if (parsedStructuredExperienceCount > directStructuredExperienceCount && parsedSections.length > 0) {
+  if (parsedStructuredExperienceCount >= directStructuredExperienceCount && parsedSections.length > 0) {
     return parsedSections.map((section, index) => ({
       id: `parsed-experience-${index}`,
       baselineId: baseline.id,
