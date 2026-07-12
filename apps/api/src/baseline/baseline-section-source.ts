@@ -5,6 +5,10 @@ import {
   BaselineSectionType,
 } from './baseline-section.entity';
 import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
+import {
+  extractEvidenceUnitsFromLogicalUnits,
+  reconstructLogicalTextUnits,
+} from '../resume/resume-draft-bullets';
 
 type ParsedRecordLike = {
   createdAt?: Date | string;
@@ -23,6 +27,15 @@ function splitBodyLines(text: string): string[] {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function estimateEvidenceUnitCount(section: Pick<BaselineSection, 'id' | 'content' | 'sectionType'>): number {
+  const content = toStringValue(section.content);
+  if (!content) return 0;
+  const logicalUnits = reconstructLogicalTextUnits(content);
+  return extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits, {
+    allowImplicitBullets: true,
+  }).length;
 }
 
 function extractExperienceSectionsFromStructuredResume(
@@ -131,14 +144,6 @@ export function resolveBaselineSectionsForGeneration(
   baseline: Pick<Baseline, 'id' | 'sections' | 'parsedRecords'>,
 ): BaselineSection[] {
   const directSections = (baseline.sections ?? []).slice().sort((a, b) => a.order - b.order);
-  const directExperienceSections = directSections.filter(
-    (section) => String(section.sectionType ?? '').toUpperCase() === 'EXPERIENCE',
-  );
-  const directHasRawArtifact = directSections.some(
-    (section) =>
-      String(section.sectionType ?? '').toUpperCase() === 'RAW' ||
-      /\braw\b/i.test(String(section.title ?? '')),
-  );
 
   const parsed = ((baseline.parsedRecords ?? []) as ParsedRecordLike[])
     .slice()
@@ -159,44 +164,45 @@ export function resolveBaselineSectionsForGeneration(
     {
       sections: resumeV2Sections.sections,
       priority: 2,
-      experienceCount: resumeV2Sections.experienceEntryCount,
-      score:
-        resumeV2Sections.experienceEntryCount * 100000 +
-        resumeV2Sections.sections.reduce((score, section) => score + toStringValue(section.content).length, 0),
+      evidenceCount: resumeV2Sections.sections.reduce((score, section) => score + estimateEvidenceUnitCount({
+        id: `resume-v2-${score}`,
+        sectionType: section.sectionType,
+        content: section.content,
+      }), 0),
+      totalLength: resumeV2Sections.sections.reduce((score, section) => score + toStringValue(section.content).length, 0),
     },
     {
       sections: parsedJsonSections.sections,
       priority: 1,
-      experienceCount: parsedJsonSections.experienceEntryCount,
-      score:
-        parsedJsonSections.experienceEntryCount * 100000 +
-        parsedJsonSections.sections.reduce((score, section) => score + toStringValue(section.content).length, 0),
+      evidenceCount: parsedJsonSections.sections.reduce((score, section) => score + estimateEvidenceUnitCount({
+        id: `parsed-json-${score}`,
+        sectionType: section.sectionType,
+        content: section.content,
+      }), 0),
+      totalLength: parsedJsonSections.sections.reduce((score, section) => score + toStringValue(section.content).length, 0),
     },
     {
-      sections: directExperienceSections,
+      sections: directSections,
       priority: 0,
-      experienceCount: directExperienceSections.length,
-      score:
-        directExperienceSections.length * 100000 +
-        directExperienceSections.reduce((score, section) => score + toStringValue(section.content).length, 0) -
-        (directHasRawArtifact ? 1000000 : 0),
+      evidenceCount: directSections.reduce((score, section) => score + estimateEvidenceUnitCount(section), 0),
+      totalLength: directSections.reduce((score, section) => score + toStringValue(section.content).length, 0),
     },
   ];
 
   const selected = candidateScores
     .filter((candidate) => candidate.sections.length > 0)
     .sort((left, right) => {
-      if (right.score !== left.score) {
-        return right.score - left.score;
+      if (right.evidenceCount !== left.evidenceCount) {
+        return right.evidenceCount - left.evidenceCount;
       }
-      if (right.experienceCount !== left.experienceCount) {
-        return right.experienceCount - left.experienceCount;
+      if (right.totalLength !== left.totalLength) {
+        return right.totalLength - left.totalLength;
       }
       return right.priority - left.priority;
     })[0];
 
   if (selected?.sections?.length) {
-    if (selected.sections === directExperienceSections) {
+    if (selected.sections === directSections) {
       return directSections;
     }
     return selected.sections.map((section, index) => ({

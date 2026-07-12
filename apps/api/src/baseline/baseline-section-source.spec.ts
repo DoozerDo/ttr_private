@@ -145,7 +145,7 @@ describe('resolveBaselineSectionsForGeneration', () => {
     expect(sections[0].content).toContain('Led operational planning and execution.');
   });
 
-  it('prefers verified Resume V2 evidence over longer direct sections when parsed records carry canonical resumeV2Json', () => {
+  it('prefers direct canonical baseline sections when they yield more canonical evidence than persisted Resume V2', () => {
     const baseline = {
       id: 'baseline-1',
       sections: [
@@ -234,14 +234,18 @@ describe('resolveBaselineSectionsForGeneration', () => {
 
     const sections = resolveBaselineSectionsForGeneration(baseline);
 
-    expect(sections).toHaveLength(1);
-    expect(sections[0].id).toBe('parsed-experience-0');
-    expect(sections[0].content).toContain('Starbucks');
-    expect(sections[0].content).toContain('Senior Manager, Technology Operations Excellence');
-    expect(sections[0].content).toContain('Owned global incident and escalation management.');
-    expect(sections[0].content).toContain('Managed Five9 voice operations and workforce management.');
-    expect(sections[0].content).toContain('Customer Support Co');
-    expect(sections[0].content).toContain('Director of Support Operations');
-    expect(sections[0].content).toContain('Operations Lab');
+    expect(sections).toHaveLength(3);
+    expect(sections.map((section) => section.id)).toEqual([
+      'section-1',
+      'section-2',
+      'section-3',
+    ]);
+    expect(sections[0].content).toContain('Michael Talbert');
+    expect(sections[1].content).toContain('Senior operations leader');
+    expect(sections[2].content).toContain('Starbucks');
+    expect(sections[2].content).toContain('Senior Manager, Technology Operations Excellence');
+    expect(sections[2].content).toContain('Led global incident response for executive and customer-facing operations.');
+    expect(sections[2].content).toContain('Managed workforce scheduling, voice operations, and escalation management for distributed teams.');
+    expect(sections[2].content).toContain('Improved operational consistency across high-volume support channels.');
   });
 });
