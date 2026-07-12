@@ -361,25 +361,18 @@ describe('CoverLettersService contract', () => {
     }
   });
 
-  it('fails explicitly when the canonical baseline is unverified and does not fall back to persisted Resume V2', async () => {
+  it('treats canonical structured evidence as authoritative even when parsed verification flags are absent', async () => {
     const { service } = buildService();
     const originalSections = baseline.sections;
     const originalParsed = baseline.parsedRecords;
 
-    baseline.sections = [
-      {
-        id: 'summary-1',
-        title: 'Summary',
-        sectionType: BaselineSectionType.SUMMARY,
-        includePolicy: BaselineIncludePolicy.ALWAYS,
-        order: 0,
-        content: 'Operations leader focused on measurable improvements and reliable execution.',
-      } as any,
-    ] as any;
+    baseline.sections = createCanonicalCoverLetterSections();
     (baseline as any).parsedRecords = [
       {
         createdAt: new Date('2026-05-01T00:00:00.000Z'),
-        parsedJson: {},
+        parsedJson: {
+          identity: { full_name: 'Jordan Lee' },
+        },
         resumeV2Json: {
           heading: { name: 'Jordan Lee', contactLine: 'jordan.lee@example.com | Seattle, WA' },
           summary: 'Valid persisted Resume V2 that must not become authoritative for cover letters.',
@@ -395,11 +388,10 @@ describe('CoverLettersService contract', () => {
     ];
 
     try {
-      await expect((service as any).buildCoverLetterDraft('user-1', request as any)).rejects.toMatchObject({
-        response: expect.objectContaining({
-          code: 'canonical_cover_letter_baseline_unverified',
-        }),
-      });
+      const draft = await (service as any).buildCoverLetterDraft('user-1', request as any);
+      expect(draft.baselineVerified).toBe(true);
+      expect(draft.generation.document.bodyParagraphs.length).toBeGreaterThanOrEqual(2);
+      expect(draft.generation.content).toMatch(/\S/);
     } finally {
       baseline.sections = originalSections;
       (baseline as any).parsedRecords = originalParsed;

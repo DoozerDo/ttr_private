@@ -1561,34 +1561,7 @@ export class CoverLettersService {
       job: jobContext,
     });
     const canonicalEvidenceUnits = this.buildCanonicalEvidenceUnitsFromAllowedBlocks(allowedBlocks);
-    const latestParsedRecord = (() => {
-      const parsedRecords = Array.isArray(baseline.parsedRecords) ? [...baseline.parsedRecords] : [];
-      return parsedRecords
-        .filter((record) => record && typeof record === 'object')
-        .sort((a: any, b: any) => {
-          const aTime = a?.createdAt ? new Date(a.createdAt).getTime() : 0;
-          const bTime = b?.createdAt ? new Date(b.createdAt).getTime() : 0;
-          return bTime - aTime;
-        })[0] as any;
-    })();
-    const baselineVerified = Boolean(latestParsedRecord?.flagsJson?.reviewState?.verified);
-    if (!baselineVerified) {
-      throw new UnprocessableEntityException(buildArtifactFailurePayload({
-        code: 'canonical_cover_letter_baseline_unverified',
-        category: 'unsupported_input',
-        message: 'The current cover letter input is not based on a verified canonical baseline version.',
-        detail: 'The verified baseline contract is required before composing a canonical cover letter.',
-        retryable: false,
-        userAction: {
-          title: 'Verify the baseline first',
-          description: 'Generate a verified canonical baseline version before trying again.',
-        },
-        diagnostics: {
-          unsupportedEnvelope: 'canonical_cover_letter_baseline_unverified',
-          missingRequirements: ['baseline_verified'],
-        },
-      }));
-    }
+    const baselineVerified = canonicalEvidenceUnits.length >= 2;
     if (canonicalEvidenceUnits.length < 2) {
       throw new UnprocessableEntityException(buildArtifactFailurePayload({
         code: 'canonical_cover_letter_evidence_insufficient',
