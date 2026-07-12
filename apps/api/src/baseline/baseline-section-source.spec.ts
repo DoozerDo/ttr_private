@@ -45,7 +45,7 @@ describe('resolveBaselineSectionsForGeneration', () => {
       ],
     } as any;
 
-    const sections = resolveBaselineSectionsForGeneration(baseline, { preferRicherParsedBaseline: true });
+    const sections = resolveBaselineSectionsForGeneration(baseline);
 
     expect(sections.map((section) => section.id)).toEqual(['section-1', 'section-2']);
     expect(sections[0].title).toBe('Summary');
@@ -103,7 +103,7 @@ describe('resolveBaselineSectionsForGeneration', () => {
       ],
     } as any;
 
-    const sections = resolveBaselineSectionsForGeneration(baseline, { preferRicherParsedBaseline: true });
+    const sections = resolveBaselineSectionsForGeneration(baseline);
 
     expect(sections.map((section) => section.id)).toEqual(
       expect.arrayContaining(['legacy-summary', 'parsed-experience-0', 'parsed-experience-1']),
@@ -155,7 +155,7 @@ describe('resolveBaselineSectionsForGeneration', () => {
       ],
     } as any;
 
-    const sections = resolveBaselineSectionsForGeneration(baseline, { preferRicherParsedBaseline: true });
+    const sections = resolveBaselineSectionsForGeneration(baseline);
 
     expect(sections).toHaveLength(1);
     expect(sections[0].id).toBe('section-1');
@@ -205,7 +205,7 @@ describe('resolveBaselineSectionsForGeneration', () => {
       ],
     } as any;
 
-    const sections = resolveBaselineSectionsForGeneration(baseline, { preferRicherParsedBaseline: true });
+    const sections = resolveBaselineSectionsForGeneration(baseline);
 
     expect(sections.map((section) => section.id)).toEqual(
       expect.arrayContaining([
@@ -249,7 +249,7 @@ describe('resolveBaselineSectionsForGeneration', () => {
       ],
     } as any;
 
-    const sections = resolveBaselineSectionsForGeneration(baseline, { preferRicherParsedBaseline: true });
+    const sections = resolveBaselineSectionsForGeneration(baseline);
 
     expect(sections.map((section) => section.id)).toEqual(
       expect.arrayContaining(['parsed-experience-0', 'parsed-experience-1']),
@@ -293,7 +293,7 @@ describe('resolveBaselineSectionsForGeneration', () => {
       ],
     } as any;
 
-    const sections = resolveBaselineSectionsForGeneration(baseline, { preferRicherParsedBaseline: true });
+    const sections = resolveBaselineSectionsForGeneration(baseline);
 
     expect(sections.map((section) => section.id)).toEqual(
       expect.arrayContaining(['section-summary', 'parsed-experience-0']),
@@ -348,7 +348,7 @@ describe('resolveBaselineSectionsForGeneration', () => {
       ],
     } as any;
 
-    const sections = resolveBaselineSectionsForGeneration(baseline, { preferRicherParsedBaseline: true });
+    const sections = resolveBaselineSectionsForGeneration(baseline);
 
     expect(sections.map((section) => section.id)).toEqual(
       expect.arrayContaining(['section-summary', 'parsed-experience-0']),

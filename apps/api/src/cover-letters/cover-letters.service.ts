@@ -1532,9 +1532,7 @@ export class CoverLettersService {
     );
     const closingTemplate = resolveClosingTemplate(closingTemplateKey);
     const baselineFileVersionHash = baselineVersion.hash ?? null;
-    const canonicalBaselineSections = resolveBaselineSectionsForGeneration(baseline, {
-      preferRicherParsedBaseline: true,
-    });
+    const canonicalBaselineSections = resolveBaselineSectionsForGeneration(baseline);
     const canonicalStructuredBaseline = extractStructuredBaselineFromSections(canonicalBaselineSections as any);
     const sourceSections = canonicalBaselineSections;
     const sections = this.applyPoliciesToSections(sourceSections, policies);

@@ -9,15 +9,11 @@ import {
 
 export function resolveBaselineSectionsForGeneration(
   baseline: Pick<Baseline, 'id' | 'sections' | 'parsedRecords'>,
-  options: { preferRicherParsedBaseline?: boolean } = {},
 ): BaselineSection[] {
   const canonicalSections = (baseline.sections ?? []).slice().sort((a, b) => a.order - b.order);
   const structured = extractStructuredBaselineFromSections(canonicalSections as any);
   const canonicalExperienceCount = Array.isArray(structured.experience) ? structured.experience.length : 0;
   const latestParsedBaseline = getLatestParsedBaseline(baseline.parsedRecords);
-  if (!options.preferRicherParsedBaseline) {
-    return canonicalSections;
-  }
 
   const rawParsedExperienceCount = countParsedExperienceEntries(latestParsedBaseline);
   if (!rawParsedExperienceCount) {
