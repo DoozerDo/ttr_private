@@ -9,15 +9,29 @@ import {
 
 export function resolveBaselineSectionsForGeneration(
   baseline: Pick<Baseline, 'id' | 'sections' | 'parsedRecords'>,
+  options: { preferRicherParsedBaseline?: boolean } = {},
 ): BaselineSection[] {
   const canonicalSections = (baseline.sections ?? []).slice().sort((a, b) => a.order - b.order);
   const structured = extractStructuredBaselineFromSections(canonicalSections as any);
-  if (Array.isArray(structured.experience) && structured.experience.length > 0) {
+  const canonicalExperienceCount = Array.isArray(structured.experience) ? structured.experience.length : 0;
+  const latestParsedBaseline = getLatestParsedBaseline(baseline.parsedRecords);
+  if (!options.preferRicherParsedBaseline) {
     return canonicalSections;
   }
 
-  const latestParsedBaseline = getLatestParsedBaseline(baseline.parsedRecords);
-  const authoritativeResumeV2 = getAuthoritativeResumeV2(canonicalSections, latestParsedBaseline);
+  const rawParsedExperienceCount = countParsedExperienceEntries(latestParsedBaseline);
+  if (!rawParsedExperienceCount) {
+    return canonicalSections;
+  }
+  if (canonicalExperienceCount > 0 && canonicalExperienceCount >= rawParsedExperienceCount) {
+    return canonicalSections;
+  }
+
+  const nonExperienceCanonicalSections = canonicalSections.filter(
+    (section) => String(section.sectionType ?? section.type ?? '').toUpperCase() !== BaselineSectionType.EXPERIENCE,
+  );
+
+  const authoritativeResumeV2 = getAuthoritativeResumeV2(nonExperienceCanonicalSections, latestParsedBaseline);
   if (!authoritativeResumeV2) {
     return canonicalSections;
   }
@@ -33,9 +47,6 @@ export function resolveBaselineSectionsForGeneration(
   }
 
   const synthesizedSections = buildSectionsFromNormalizedResumeV2(baseline.id, normalized);
-  const nonExperienceCanonicalSections = canonicalSections.filter(
-    (section) => String(section.sectionType ?? section.type ?? '').toUpperCase() !== BaselineSectionType.EXPERIENCE,
-  );
   const experienceSections = synthesizedSections.filter(
     (section) => String(section.sectionType ?? section.type ?? '').toUpperCase() === BaselineSectionType.EXPERIENCE,
   );
@@ -74,6 +85,13 @@ function getLatestParsedBaseline(
     return at - bt;
   });
   return ((candidates[candidates.length - 1] as any).parsedJson ?? null) as Record<string, unknown> | null;
+}
+
+function countParsedExperienceEntries(parsedBaseline: Record<string, unknown> | null): number {
+  if (!parsedBaseline || typeof parsedBaseline !== 'object') return 0;
+  const experience = Array.isArray(parsedBaseline.experience) ? parsedBaseline.experience : [];
+  const workHistory = Array.isArray(parsedBaseline.work_history) ? parsedBaseline.work_history : [];
+  return Math.max(experience.length, workHistory.length);
 }
 
 function getAuthoritativeResumeV2(

@@ -348,7 +348,78 @@ const createCanonicalPersistedResumeV2Record = () =>
     },
   }) as any;
 
+const createRicherParsedBaselineRecord = () =>
+  ({
+    createdAt: new Date('2026-05-02T00:00:00.000Z'),
+    parsedJson: {
+      identity: { full_name: 'Jordan Lee' },
+      summary: 'Canonical parsed baseline summary.',
+      experience: [
+        {
+          company: 'Parsed Co',
+          role_title: 'Director of Support Operations',
+          details_text: 'Led support operations and exec updates.\nImproved incident routing and operating reviews.',
+        },
+        {
+          company: 'Parsed Co',
+          role_title: 'Support Operations Manager',
+          details_text: 'Built reporting and queue health dashboards.\nPartnered cross-functionally to reduce repeat escalations.',
+        },
+      ],
+    },
+    flagsJson: {
+      reviewState: { verified: true },
+    },
+    resumeV2Json: null,
+  }) as any;
+
 describe('CoverLettersService contract', () => {
+
+  it('prefers richer parsed baseline evidence over sparse legacy experience sections', async () => {
+    const { service } = buildService();
+    const buildAllowedBlocksSpy = jest.spyOn(service as any, 'buildAllowedBlocksFromStructuredBaseline');
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+
+    baseline.sections = [
+      {
+        id: 'legacy-summary',
+        title: 'Summary',
+        sectionType: BaselineSectionType.SUMMARY,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 0,
+        content: 'Operations leader focused on measurable improvements and reliable execution.',
+      } as any,
+      {
+        id: 'legacy-experience',
+        title: 'Experience',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 1,
+        content: 'Legacy Co | Director | 2020 - Present\n- Sparse legacy evidence.',
+      } as any,
+    ];
+    (baseline as any).parsedRecords = [createRicherParsedBaselineRecord()];
+
+    try {
+      const draft = await (service as any).buildCoverLetterDraft('user-1', request as any);
+      const allowedBlocks = draft.allowedBlocks ?? [];
+      const allowedBlockIds = allowedBlocks.map((block: any) => String(block.id ?? ''));
+      const paragraphEvidenceIds = (draft.generation.paragraphEvidence ?? []).flatMap((entry: any) => entry.sourceEvidenceIds ?? []);
+
+      expect(buildAllowedBlocksSpy).toHaveBeenCalled();
+      expect(allowedBlockIds).toEqual(expect.arrayContaining(['resume_v2_summary', 'parsed-experience-0', 'parsed-experience-1']));
+      expect(allowedBlockIds).not.toEqual(expect.arrayContaining(['legacy-experience']));
+      expect(allowedBlockIds.some((id: string) => id.startsWith('resume_v2_exp_'))).toBe(false);
+      expect(paragraphEvidenceIds.some((id: string) => id.startsWith('parsed-experience-'))).toBe(true);
+      expect(draft.generation.document.bodyParagraphs.length).toBeGreaterThanOrEqual(2);
+      expect(draft.generation.content).toMatch(/\S/);
+    } finally {
+      buildAllowedBlocksSpy.mockRestore();
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsed;
+    }
+  });
 
   it('resolves canonical parsed-experience sections and keeps them even when persisted Resume V2 exists', async () => {
     const { service } = buildService();
@@ -733,8 +804,8 @@ describe('CoverLettersService contract', () => {
       expect(buildAllowedBlocksSpy).toHaveBeenCalled();
       const structuredArg = buildAllowedBlocksSpy.mock.calls[0]?.[0]?.structured as any;
       expect(Array.isArray(structuredArg?.experience)).toBe(true);
-      expect(structuredArg.experience.length).toBe(1);
-      expect(JSON.stringify(structuredArg)).toContain('Canonical Co');
+      expect(structuredArg.experience.length).toBe(2);
+      expect(JSON.stringify(structuredArg)).toContain('Parsed Co');
       expect(JSON.stringify(structuredArg)).toContain('Director of Support Operations');
       expect(JSON.stringify(structuredArg)).not.toContain('Sparse Co');
     } finally {
