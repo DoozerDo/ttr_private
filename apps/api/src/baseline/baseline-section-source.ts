@@ -6,20 +6,24 @@ import {
   normalizeNormalizedResumeDocument,
   validateNormalizedResumeDocument,
 } from '../resume/resume-normalization';
+import {
+  extractEvidenceUnitsFromLogicalUnits,
+  reconstructLogicalTextUnits,
+} from '../resume/resume-draft-bullets';
 
 export function resolveBaselineSectionsForGeneration(
   baseline: Pick<Baseline, 'id' | 'sections' | 'parsedRecords'>,
 ): BaselineSection[] {
   const canonicalSections = (baseline.sections ?? []).slice().sort((a, b) => a.order - b.order);
   const structured = extractStructuredBaselineFromSections(canonicalSections as any);
-  const canonicalExperienceCount = Array.isArray(structured.experience) ? structured.experience.length : 0;
+  const canonicalEvidenceUnitCount = countCanonicalEvidenceUnits(canonicalSections);
   const latestParsedBaseline = getLatestParsedBaseline(baseline.parsedRecords);
 
   const rawParsedExperienceCount = countParsedExperienceEntries(latestParsedBaseline);
   if (!rawParsedExperienceCount) {
     return canonicalSections;
   }
-  if (canonicalExperienceCount > 0 && canonicalExperienceCount >= rawParsedExperienceCount) {
+  if (canonicalEvidenceUnitCount >= 2) {
     return canonicalSections;
   }
 
@@ -67,6 +71,18 @@ function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+function getSectionText(section: BaselineSection): string {
+  const content = (section as any)?.content;
+  if (typeof content === 'string') return content;
+  if (content && typeof content === 'object') {
+    const rawContent = (content as any)?.rawContent;
+    if (typeof rawContent === 'string') return rawContent;
+    const innerContent = (content as any)?.content;
+    if (typeof innerContent === 'string') return innerContent;
+  }
+  return '';
+}
+
 function getLatestParsedBaseline(
   parsedRecords: Baseline['parsedRecords'] | null | undefined,
 ): Record<string, unknown> | null {
@@ -88,6 +104,27 @@ function countParsedExperienceEntries(parsedBaseline: Record<string, unknown> | 
   const experience = Array.isArray(parsedBaseline.experience) ? parsedBaseline.experience : [];
   const workHistory = Array.isArray(parsedBaseline.work_history) ? parsedBaseline.work_history : [];
   return Math.max(experience.length, workHistory.length);
+}
+
+function countCanonicalEvidenceUnits(sections: BaselineSection[]): number {
+  let count = 0;
+  for (const section of sections) {
+    const sectionType = String(section.sectionType ?? section.type ?? '').toUpperCase();
+    const content = getSectionText(section);
+    if (!content) continue;
+
+    if (sectionType !== BaselineSectionType.EXPERIENCE) {
+      continue;
+    }
+
+    const logicalUnits = reconstructLogicalTextUnits(content);
+    const evidenceUnits = extractEvidenceUnitsFromLogicalUnits(String(section.id ?? section.title ?? 'section'), logicalUnits, {
+      allowImplicitBullets: true,
+    });
+    count += evidenceUnits.length;
+  }
+
+  return count;
 }
 
 function getAuthoritativeResumeV2(

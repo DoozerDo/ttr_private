@@ -325,6 +325,25 @@ const createCanonicalCoverLetterSections = () => [
   },
 ] as any;
 
+const createSparseCanonicalCoverLetterSections = () => [
+  {
+    id: 'summary-1',
+    title: 'Summary',
+    sectionType: BaselineSectionType.SUMMARY,
+    includePolicy: BaselineIncludePolicy.ALWAYS,
+    order: 0,
+    content: 'Operations leader focused on measurable improvements and reliable execution.',
+  },
+  {
+    id: 'parsed-experience-0',
+    title: 'Experience',
+    sectionType: BaselineSectionType.EXPERIENCE,
+    includePolicy: BaselineIncludePolicy.ALWAYS,
+    order: 1,
+    content: 'Sparse Co | Director, Customer Experience | Jan 2024 - Present',
+  },
+] as any;
+
 const createCanonicalPersistedResumeV2Record = () =>
   ({
     createdAt: new Date('2026-05-01T00:00:00.000Z'),
@@ -804,14 +823,41 @@ describe('CoverLettersService contract', () => {
       expect(buildAllowedBlocksSpy).toHaveBeenCalled();
       const structuredArg = buildAllowedBlocksSpy.mock.calls[0]?.[0]?.structured as any;
       expect(Array.isArray(structuredArg?.experience)).toBe(true);
-      expect(structuredArg.experience.length).toBe(2);
-      expect(JSON.stringify(structuredArg)).toContain('Parsed Co');
+      expect(JSON.stringify(structuredArg)).toContain('Canonical Co');
       expect(JSON.stringify(structuredArg)).toContain('Director of Support Operations');
       expect(JSON.stringify(structuredArg)).not.toContain('Sparse Co');
     } finally {
       baseline.sections = originalSections;
       (baseline as any).parsedRecords = originalParsed;
       buildAllowedBlocksSpy.mockRestore();
+    }
+  });
+
+  it('hydrates cover letter generation from richer parsed experience when canonical experience sections are sparse', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+
+    baseline.sections = createSparseCanonicalCoverLetterSections();
+    (baseline as any).parsedRecords = [createRicherParsedBaselineRecord()];
+
+    try {
+      const draft = await (service as any).buildCoverLetterDraft('user-1', request as any);
+      const allowedBlockIds = (draft.allowedBlocks ?? []).map((block: any) => String(block.id ?? ''));
+      const paragraphEvidenceIds = (draft.generation.paragraphEvidence ?? []).flatMap((entry: any) =>
+        Array.isArray(entry.sourceEvidenceIds) ? entry.sourceEvidenceIds : [],
+      );
+
+      expect(allowedBlockIds).toEqual(
+        expect.arrayContaining(['resume_v2_summary', 'parsed-experience-0', 'parsed-experience-1']),
+      );
+      expect(allowedBlockIds.some((id: string) => id.startsWith('resume_v2_exp_'))).toBe(false);
+      expect(paragraphEvidenceIds.some((id: string) => id.startsWith('parsed-experience-'))).toBe(true);
+      expect(draft.generation.document.bodyParagraphs.length).toBeGreaterThanOrEqual(2);
+      expect(draft.generation.content).toMatch(/Program Manager/i);
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsed;
     }
   });
 
