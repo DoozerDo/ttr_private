@@ -134,6 +134,11 @@ export function resolveBaselineSectionsForGeneration(
   const directExperienceSections = directSections.filter(
     (section) => String(section.sectionType ?? '').toUpperCase() === 'EXPERIENCE',
   );
+  const directHasRawArtifact = directSections.some(
+    (section) =>
+      String(section.sectionType ?? '').toUpperCase() === 'RAW' ||
+      /\braw\b/i.test(String(section.title ?? '')),
+  );
 
   const parsed = ((baseline.parsedRecords ?? []) as ParsedRecordLike[])
     .slice()
@@ -155,30 +160,37 @@ export function resolveBaselineSectionsForGeneration(
       sections: resumeV2Sections.sections,
       priority: 2,
       experienceCount: resumeV2Sections.experienceEntryCount,
-      totalLength: resumeV2Sections.sections.reduce((score, section) => score + toStringValue(section.content).length, 0),
+      score:
+        resumeV2Sections.experienceEntryCount * 100000 +
+        resumeV2Sections.sections.reduce((score, section) => score + toStringValue(section.content).length, 0),
     },
     {
       sections: parsedJsonSections.sections,
       priority: 1,
       experienceCount: parsedJsonSections.experienceEntryCount,
-      totalLength: parsedJsonSections.sections.reduce((score, section) => score + toStringValue(section.content).length, 0),
+      score:
+        parsedJsonSections.experienceEntryCount * 100000 +
+        parsedJsonSections.sections.reduce((score, section) => score + toStringValue(section.content).length, 0),
     },
     {
       sections: directExperienceSections,
       priority: 0,
       experienceCount: directExperienceSections.length,
-      totalLength: directExperienceSections.reduce((score, section) => score + toStringValue(section.content).length, 0),
+      score:
+        directExperienceSections.length * 100000 +
+        directExperienceSections.reduce((score, section) => score + toStringValue(section.content).length, 0) -
+        (directHasRawArtifact ? 1000000 : 0),
     },
   ];
 
   const selected = candidateScores
     .filter((candidate) => candidate.sections.length > 0)
     .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
       if (right.experienceCount !== left.experienceCount) {
         return right.experienceCount - left.experienceCount;
-      }
-      if (right.totalLength !== left.totalLength) {
-        return right.totalLength - left.totalLength;
       }
       return right.priority - left.priority;
     })[0];
