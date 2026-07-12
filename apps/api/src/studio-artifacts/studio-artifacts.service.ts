@@ -2382,14 +2382,21 @@ export class StudioArtifactsService {
       metadata && typeof metadata === 'object' ? (metadata as any)?.auditId ?? null : null;
     const interpretedEvidenceAudit = extractInterpretedEvidenceAuditFromResponseBody(rawResponseBody);
     const minimalArtifact = artifact === 'resume' ? detectMinimalResumeArtifact(rawResponseBody).minimal : false;
-    const artifactCurrent = inputsHashMatches && !minimalArtifact;
+    const legacyFallbackMetadata =
+      Boolean((rawResponseBody as any)?.generationAuthority === 'fallback') ||
+      Boolean((rawResponseBody as any)?.bypassedTemplateHardBlockWithInterpretedEvidence) ||
+      Boolean((interpretedEvidenceAudit as any)?.bypassedTemplateHardBlockWithInterpretedEvidence);
+    const artifactCurrent = inputsHashMatches && !minimalArtifact && !legacyFallbackMetadata;
     const resumeRenderablePreviewModel =
       artifact === 'resume' ? extractCanonicalResumePreviewModel(rawResponseBody, content) : null;
     const resumePersistedAuthority = artifact === 'resume' && artifactCurrent && Boolean(resumeRenderablePreviewModel);
     const usableCurrent =
       artifact === 'resume'
         ? Boolean(resumePersistedAuthority)
-        : status === StudioArtifactLifecycleStatus.COMPLETED && Boolean(rawResponseBody) && artifactCurrent;
+        : status === StudioArtifactLifecycleStatus.COMPLETED &&
+          Boolean(rawResponseBody) &&
+          artifactCurrent &&
+          !legacyFallbackMetadata;
     const normalizedStatus =
       artifact === 'resume' && resumePersistedAuthority
         ? StudioArtifactLifecycleStatus.COMPLETED

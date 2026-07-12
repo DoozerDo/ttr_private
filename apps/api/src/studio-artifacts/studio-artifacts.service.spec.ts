@@ -79,6 +79,40 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     expect(result.exports).toEqual({ docx: true, pdf: true });
   });
 
+  it('quarantines cover-letter artifacts that still advertise fallback generation authority', () => {
+    const service = Object.create(StudioArtifactsService.prototype) as any;
+    const result = service.buildArtifactRecord(
+      {
+        id: 'artifact-1',
+        createdAt: new Date('2026-06-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-03T00:01:00.000Z'),
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterInputsHash: 'hash-1',
+        coverLetterResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: false,
+          generationAuthority: 'fallback',
+          bypassedTemplateHardBlockWithInterpretedEvidence: true,
+          preview: { coverLetter: { paragraphs: ['Legacy artifact'] } },
+        },
+        coverLetterContent: 'Legacy artifact',
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: null,
+        coverLetterFailedAt: null,
+        coverLetterMetadata: { auditId: 'cover-audit-1' },
+      } as any,
+      'cover_letter',
+      'hash-1',
+    );
+
+    expect(result.artifactCurrent).toBe(false);
+    expect(result.usableCurrent).toBe(false);
+    expect(result.status).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+  });
+
   it('keeps a renderable resume preview visible when export is ineligible and qualityGate is absent', async () => {
     const studioArtifactRepository = {
       findOne: jest.fn().mockResolvedValue({
@@ -159,7 +193,34 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
             baseline_preserveFromCleanup: false,
           },
         ]),
-        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+        getOne: jest.fn().mockResolvedValue({
+          id: 'base-1',
+          userId: 'u-1',
+          sections: [
+            {
+              id: 'section-summary',
+              baselineId: 'base-1',
+              sectionType: 'SUMMARY',
+              title: 'Summary',
+              content: 'Customer operations leader focused on measurable improvements and execution cadence.',
+              includePolicy: 'OPTIONAL',
+              order: 0,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+            {
+              id: 'section-experience',
+              baselineId: 'base-1',
+              sectionType: 'EXPERIENCE',
+              title: 'Professional Experience',
+              content: ['Canonical Co | Director of Operations | Jan 2020 - Present', '- Led operations.'].join('\n'),
+              includePolicy: 'ALWAYS',
+              order: 1,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          ],
+        }),
       }),
     } as any;
     const baselineVersionRepository = {
@@ -262,7 +323,34 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([{ baseline_id: 'base-1', baseline_userId: 'u-1', baseline_version: 0, baseline_versionNumber: 1, baseline_originalFilename: 'resume.pdf', baseline_mimeType: 'application/pdf', baseline_storagePath: '/tmp/resume.pdf', baseline_hash: null, baseline_status: 'ACTIVE', baseline_isActive: true, baseline_archivedAt: null, baseline_originalBaselineScore: null, baseline_latestBaselineScore: null, baseline_latestAssessmentId: null, baseline_firstAnalyzedAt: null, baseline_lastAnalyzedAt: null, baseline_isSynthetic: false, baseline_syntheticScenarioKey: null, baseline_syntheticRunId: null, baseline_syntheticCreatedAt: null, baseline_preserveFromCleanup: false }]),
-        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+        getOne: jest.fn().mockResolvedValue({
+          id: 'base-1',
+          userId: 'u-1',
+          sections: [
+            {
+              id: 'section-summary',
+              baselineId: 'base-1',
+              sectionType: 'SUMMARY',
+              title: 'Summary',
+              content: 'Senior operations leader.',
+              includePolicy: 'OPTIONAL',
+              order: 0,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+            {
+              id: 'section-experience',
+              baselineId: 'base-1',
+              sectionType: 'EXPERIENCE',
+              title: 'Professional Experience',
+              content: ['Canonical Co | Director of Operations | Jan 2020 - Present', '- Led operations.'].join('\n'),
+              includePolicy: 'ALWAYS',
+              order: 1,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          ],
+        }),
       }),
     } as any;
     const baselineVersionRepository = {
@@ -3538,6 +3626,18 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
             sections_order: 0,
             sections_createdAt: new Date(),
             sections_updatedAt: new Date(),
+            sections_id: 'section-experience',
+            sections_baselineId: 'base-1',
+            sections_sectionType: 'EXPERIENCE',
+            sections_title: 'Professional Experience',
+            sections_content: [
+              'Canonical Co | Director of Operations | Jan 2020 - Present',
+              '- Led operations.',
+            ].join('\n'),
+            sections_includePolicy: 'ALWAYS',
+            sections_order: 1,
+            sections_createdAt: new Date(),
+            sections_updatedAt: new Date(),
             parsedRecords_id: 'parsed-1',
             parsedRecords_baselineId: 'base-1',
             parsedRecords_sourceFileId: 'source-1',
@@ -3916,6 +4016,18 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
             sections_content: 'Senior operations leader.',
             sections_includePolicy: 'OPTIONAL',
             sections_order: 0,
+            sections_createdAt: new Date(),
+            sections_updatedAt: new Date(),
+            sections_id: 'section-experience',
+            sections_baselineId: 'base-1',
+            sections_sectionType: 'EXPERIENCE',
+            sections_title: 'Professional Experience',
+            sections_content: [
+              'Canonical Co | Director of Operations | Jan 2020 - Present',
+              '- Led operations.',
+            ].join('\n'),
+            sections_includePolicy: 'ALWAYS',
+            sections_order: 1,
             sections_createdAt: new Date(),
             sections_updatedAt: new Date(),
             parsedRecords_id: 'parsed-1',
