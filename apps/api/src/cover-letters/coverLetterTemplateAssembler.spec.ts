@@ -28,7 +28,7 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
   } as any;
 
   const allowedBlocks = structured.experience.map((entry: any, index: number) => ({
-    id: `resume_v2_exp_${index}`,
+    id: `parsed-experience-${index}`,
     title: `${entry.company} - ${entry.roleTitle}`,
     content: [
       [entry.company, entry.roleTitle, entry.dates].filter(Boolean).join(' | '),
@@ -110,7 +110,7 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
           sectionType: 'EXPERIENCE',
         },
         {
-          id: 'resume_v2_exp_1',
+          id: 'parsed-experience-1',
           title: 'Acme - Support Workflow Lead',
           content:
             'Acme | Support Workflow Lead | 2020 - 2022\n- Standardized runbooks and escalation paths to reduce execution friction.\n- Partnered with engineering leaders to align priorities and timelines.',
@@ -147,7 +147,7 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
       companyName: 'ExampleCo',
       allowedBlocks: [
         {
-          id: 'resume_v2_exp_0',
+          id: 'parsed-experience-0',
           title: 'Acme - Director of Support',
           content:
             'Acme | Director of Support | 2022 - Present\n- Led support operations programs.',

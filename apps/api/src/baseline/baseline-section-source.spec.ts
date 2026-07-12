@@ -39,6 +39,7 @@ describe('resolveBaselineSectionsForGeneration', () => {
     const sections = resolveBaselineSectionsForGeneration(baseline);
 
     expect(sections).toHaveLength(1);
+    expect(sections[0].id).toBe('parsed-experience-0');
     expect(sections[0].sectionType).toBe(BaselineSectionType.EXPERIENCE);
     expect(sections[0].content).toContain('Example Co');
     expect(sections[0].content).toContain('Director');
@@ -92,6 +93,7 @@ describe('resolveBaselineSectionsForGeneration', () => {
     const sections = resolveBaselineSectionsForGeneration(baseline);
 
     expect(sections).toHaveLength(1);
+    expect(sections[0].id).toBe('parsed-experience-0');
     expect(sections[0].content).toContain('Example Co');
     expect(sections[0].content).toContain('Acme Corp');
     expect(sections[0].content).toContain('Customer Operations Manager');
