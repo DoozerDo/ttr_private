@@ -562,7 +562,7 @@ describe('AuthService', () => {
     });
   });
 
-  it('returns access code required when no assigned code can be auto-redeemed', async () => {
+  it('returns access code required when a verified normal user has no access code', async () => {
     const payload: LoginDto = {
       email: 'member2@example.com',
       password: 'Password123',
@@ -615,6 +615,7 @@ describe('AuthService', () => {
 
     await expect(service.login(payload)).rejects.toThrow('Access code required');
 
+    expect(adminUsersService.isAdmin).toHaveBeenCalledWith(savedUser.id);
     expect(accessCodesService.userHasActiveAccess).toHaveBeenCalledWith(savedUser.id);
     expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
   });
@@ -802,6 +803,154 @@ describe('AuthService', () => {
       subscriptionTier: SubscriptionTier.PRO,
     });
     expect(result.user.entitlements.effectiveTier).toEqual(SubscriptionTier.PRO);
+  });
+
+  it('allows a persisted admin account to log in without access code and resolves admin/pro claims', async () => {
+    const payload: LoginDto = {
+      email: 'admin-operator@example.com',
+      password: 'Password123',
+    };
+    const passwordHash = await bcrypt.hash(payload.password, 10);
+    const savedUser: User = {
+      id: 'admin-operator-user-id',
+      email: payload.email,
+      firstName: 'Admin',
+      lastName: 'Operator',
+      emailConfirmed: true,
+      passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    usersService.findByEmail.mockResolvedValue(savedUser);
+    adminUsersService.isAdmin.mockResolvedValue(true);
+
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'REQUIRE_ACCESS_CODE') return 'true';
+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'false';
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'APP_PUBLIC_WEB_URL') return 'http://localhost:3000';
+      if (key === 'JWT_SECRET') return 'test-jwt-secret';
+      return undefined;
+    });
+
+    accessCodesService.userHasActiveAccess.mockResolvedValue(false);
+    accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(false);
+
+    const result = await service.login(payload);
+
+    expect(adminUsersService.isAdmin).toHaveBeenCalledWith(savedUser.id);
+    expect(accessCodesService.userHasActiveAccess).not.toHaveBeenCalled();
+    expect(accessCodesService.redeemAssignedCodeForUser).not.toHaveBeenCalled();
+    expect(result.user).toMatchObject({
+      id: savedUser.id,
+      role: 'admin',
+      subscriptionTier: SubscriptionTier.PRO,
+    });
+    expect(result.user.entitlements.effectiveTier).toEqual(SubscriptionTier.PRO);
+  });
+
+  it('keeps an unverified founder/admin account blocked until email confirmation completes', async () => {
+    const payload: LoginDto = {
+      email: 'unverified-admin@example.com',
+      password: 'Password123',
+    };
+    const passwordHash = await bcrypt.hash(payload.password, 10);
+    const savedUser: User = {
+      id: 'unverified-admin-user-id',
+      email: payload.email,
+      firstName: 'Unverified',
+      lastName: 'Admin',
+      emailConfirmed: false,
+      passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    usersService.findByEmail.mockResolvedValue(savedUser);
+    adminUsersService.isAdmin.mockResolvedValue(true);
+
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'REQUIRE_ACCESS_CODE') return 'true';
+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'true';
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'APP_PUBLIC_WEB_URL') return 'http://localhost:3000';
+      if (key === 'JWT_SECRET') return 'test-jwt-secret';
+      return undefined;
+    });
+
+    await expect(service.login(payload)).rejects.toThrow(
+      'Please confirm your email before logging in.',
+    );
+    expect(adminUsersService.isAdmin).not.toHaveBeenCalled();
+  });
+
+  it('does not grant privileged login claims from a mutable user role alone', async () => {
+    const payload: LoginDto = {
+      email: 'role-only-admin@example.com',
+      password: 'Password123',
+    };
+    const passwordHash = await bcrypt.hash(payload.password, 10);
+    const savedUser: User = {
+      id: 'role-only-admin-user-id',
+      email: payload.email,
+      firstName: 'Role',
+      lastName: 'Only',
+      emailConfirmed: true,
+      passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'admin',
+      subscriptionTier: SubscriptionTier.PRO,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    usersService.findByEmail.mockResolvedValue(savedUser);
+    adminUsersService.isAdmin.mockResolvedValue(false);
+
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'REQUIRE_ACCESS_CODE') return 'true';
+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'false';
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'APP_PUBLIC_WEB_URL') return 'http://localhost:3000';
+      if (key === 'JWT_SECRET') return 'test-jwt-secret';
+      return undefined;
+    });
+
+    accessCodesService.userHasActiveAccess.mockResolvedValue(false);
+    accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(false);
+
+    await expect(service.login(payload)).rejects.toThrow('Access code required');
+    expect(adminUsersService.isAdmin).toHaveBeenCalledWith(savedUser.id);
+    expect(accessCodesService.userHasActiveAccess).toHaveBeenCalledWith(savedUser.id);
+    expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
   });
 
   it('uses configured public web URL and support email in confirmation email content', async () => {

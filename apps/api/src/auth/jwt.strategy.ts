@@ -7,8 +7,9 @@ import { getEntitlementsForUser } from '../features/feature-gates';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 import type { AuthUserDto } from './dto/auth-response.dto';
 import type { Request } from 'express';
-import { isFounderEmail } from './founder-access';
 import { AccessCodesService } from '../access-codes/access-codes.service';
+import { AdminUsersService } from '../admin-users/admin-users.service';
+import { resolveAccountPrivileges } from './account-privileges';
 
 type JwtPayload = {
   sub: string;
@@ -67,6 +68,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly configService: ConfigService,
     private readonly usersService: UsersService,
     private readonly accessCodesService: AccessCodesService,
+    private readonly adminUsersService: AdminUsersService,
   ) {
     const jwtSecret = configService.get<string>('JWT_SECRET');
 
@@ -92,12 +94,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('User not found');
     }
 
-    const isFounder = isFounderEmail(
-      user.email,
-      this.configService.get<string>('FOUNDER_EMAILS'),
-    );
+    const privileges = await resolveAccountPrivileges({
+      email: user.email,
+      userId: user.id,
+      founderEmailsRaw: this.configService.get<string>('FOUNDER_EMAILS'),
+      isAdminUser: (userId) => this.adminUsersService.isAdmin(userId),
+    });
 
-    const betaAccessApproved = isFounder
+    const betaAccessApproved = privileges.isPrivileged
       ? true
       : user?.id
         ? await this.accessCodesService.resolveBetaAccessApproved({
@@ -107,11 +111,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         : Boolean(user.betaAccessApproved);
 
     const entitlements = getEntitlementsForUser({
-      subscriptionTier: isFounder ? SubscriptionTier.PRO : user.subscriptionTier,
+      subscriptionTier: privileges.isPrivileged
+        ? SubscriptionTier.PRO
+        : user.subscriptionTier,
       betaAccessApproved,
     });
     const resolvedTier = entitlements.effectiveTier;
-    const resolvedRole = isFounder ? 'admin' : user.role;
+    const resolvedRole = privileges.isPrivileged ? 'admin' : user.role;
 
     const { passwordHash, ...sanitizedUser } = user;
 

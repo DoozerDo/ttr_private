@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AccessCodesService } from '../../access-codes/access-codes.service';
-import { isFounderEmail } from '../founder-access';
+import { AdminUsersService } from '../../admin-users/admin-users.service';
+import { resolveAccountPrivileges } from '../account-privileges';
 import { isPublicRoute } from './public-routes';
 
 @Injectable()
@@ -14,6 +15,7 @@ export class AccessGuard implements CanActivate {
   constructor(
     private readonly accessCodesService: AccessCodesService,
     private readonly configService: ConfigService,
+    private readonly adminUsersService: AdminUsersService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -39,12 +41,15 @@ export class AccessGuard implements CanActivate {
       '';
     const email = request?.user?.email?.trim() || '';
 
-    if (
-      isFounderEmail(
-        email,
-        this.configService.get<string>('FOUNDER_EMAILS'),
-      )
-    ) {
+    const privileges = await resolveAccountPrivileges({
+      email,
+      userId,
+      founderEmailsRaw: this.configService.get<string>('FOUNDER_EMAILS'),
+      isAdminUser: (candidateUserId) =>
+        this.adminUsersService.isAdmin(candidateUserId),
+    });
+
+    if (privileges.isPrivileged) {
       return true;
     }
 

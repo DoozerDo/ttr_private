@@ -28,7 +28,7 @@ import type { AuthResponseDto } from './dto/auth-response.dto';
 import { UserToken } from './user-token.entity';
 import { AccessCodesService } from '../access-codes/access-codes.service';
 import { AdminUsersService } from '../admin-users/admin-users.service';
-import { isFounderEmail } from './founder-access';
+import { resolveAccountPrivileges } from './account-privileges';
 import {
   buildConfirmationUrl,
   resolvePublicWebBaseUrl,
@@ -177,15 +177,18 @@ export class AuthService {
         `Login user lookup + password validation passed userId=${user.id ?? 'unknown'}`,
       );
 
-      const isFounder = this.isFounder(user.email);
-      if (isFounder) {
+      const privileges = await this.resolveLoginPrivileges(user);
+      if (privileges.isFounder) {
         this.logger.log(`Founder override applied for ${user.email}`);
+      }
+      if (privileges.isAdmin) {
+        this.logger.log(`Admin capability override applied for ${user.email}`);
       }
 
       this.logger.log(
-        `Login access code enforcement check requireAccessCode=${this.requireAccessCode} isFounder=${isFounder}`,
+        `Login access code enforcement check requireAccessCode=${this.requireAccessCode} isFounder=${privileges.isFounder} isAdmin=${privileges.isAdmin}`,
       );
-      if (this.requireAccessCode && !isFounder) {
+      if (this.requireAccessCode && !privileges.isPrivileged) {
         if (!user?.id) {
           throw new ForbiddenException('Access code required');
         }
@@ -204,7 +207,7 @@ export class AuthService {
       }
 
       this.logger.log(`Login token generation starting userId=${user.id}`);
-      return await this.buildAuthResponse(user);
+      return await this.buildAuthResponse(user, privileges);
     } catch (error) {
       if (error instanceof HttpException) {
         this.logger.warn(
@@ -632,12 +635,20 @@ export class AuthService {
     }
   }
 
-  private async buildAuthResponse(user: User): Promise<AuthResponseDto> {
-    const isFounder = this.isFounder(user.email);
+  private async buildAuthResponse(
+    user: User,
+    privileges?: {
+      isFounder: boolean;
+      isAdmin: boolean;
+      isPrivileged: boolean;
+    },
+  ): Promise<AuthResponseDto> {
+    const resolvedPrivileges =
+      privileges ?? (await this.resolveLoginPrivileges(user));
 
     // Canonical rule: beta-approved users resolve to PRO even without a paid tier.
     // Beta approval is sourced from either the durable user flag or an active redeemed access code.
-    const betaAccessApproved = isFounder
+    const betaAccessApproved = resolvedPrivileges.isPrivileged
       ? true
       : user?.id
         ? await this.accessCodesService.resolveBetaAccessApproved({
@@ -647,11 +658,13 @@ export class AuthService {
         : Boolean(user.betaAccessApproved);
 
     const entitlements = getEntitlementsForUser({
-      subscriptionTier: isFounder ? SubscriptionTier.PRO : user.subscriptionTier,
+      subscriptionTier: resolvedPrivileges.isPrivileged
+        ? SubscriptionTier.PRO
+        : user.subscriptionTier,
       betaAccessApproved,
     });
     const resolvedTier = entitlements.effectiveTier;
-    const resolvedRole = isFounder ? 'admin' : user.role;
+    const resolvedRole = resolvedPrivileges.isPrivileged ? 'admin' : user.role;
 
     const payload = {
       sub: user.id,
@@ -693,10 +706,12 @@ export class AuthService {
     };
   }
 
-  private isFounder(email?: string | null): boolean {
-    return isFounderEmail(
-      email,
-      this.configService.get<string>('FOUNDER_EMAILS'),
-    );
+  private async resolveLoginPrivileges(user: Pick<User, 'id' | 'email'>) {
+    return resolveAccountPrivileges({
+      email: user.email,
+      userId: user.id,
+      founderEmailsRaw: this.configService.get<string>('FOUNDER_EMAILS'),
+      isAdminUser: (userId) => this.adminUsersService.isAdmin(userId),
+    });
   }
 }
