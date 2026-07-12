@@ -414,6 +414,74 @@ describe('CoverLettersService contract', () => {
     }
   });
 
+  it('hydrates canonical parsed-experience sections from persisted Resume V2 when baseline sections are absent', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+
+    baseline.sections = [];
+    (baseline as any).parsedRecords = [
+      {
+        createdAt: new Date('2026-05-01T00:00:00.000Z'),
+        parsedJson: {
+          identity: { full_name: 'Jordan Lee' },
+        },
+        resumeV2Json: {
+          heading: { name: 'Jordan Lee', contactLine: 'jordan.lee@example.com | Seattle, WA' },
+          summary: 'Canonical persisted Resume V2 summary.',
+          competencies: ['Support Operations'],
+          experience: [
+            {
+              company: 'Parsed Co',
+              roleTitle: 'Director of Support Operations',
+              dateRange: '2021 - Present',
+              bullets: [
+                'Led support operations and exec updates.',
+                'Improved incident routing and operating reviews.',
+              ],
+            },
+            {
+              company: 'Parsed Co',
+              roleTitle: 'Support Operations Manager',
+              dateRange: '2018 - 2021',
+              bullets: [
+                'Built reporting and queue health dashboards.',
+                'Partnered cross-functionally to reduce repeat escalations.',
+              ],
+            },
+          ],
+        },
+      } as any,
+    ];
+
+    try {
+      const draft = await (service as any).buildCoverLetterDraft('user-1', request as any);
+      const allowedBlockIds = (draft.allowedBlocks ?? []).map((block: any) => block.id);
+      const paragraphEvidenceIds = (draft.generation.paragraphEvidence ?? []).flatMap((entry: any) =>
+        Array.isArray(entry.sourceEvidenceIds) ? entry.sourceEvidenceIds : [],
+      );
+
+      expect(allowedBlockIds).toEqual(
+        expect.arrayContaining([
+          'resume_v2_summary',
+          'resume_v2_skills',
+          'parsed-experience-0',
+          'parsed-experience-1',
+        ]),
+      );
+      expect(allowedBlockIds.some((id: string) => String(id ?? '').startsWith('resume_v2_exp_'))).toBe(false);
+      expect(paragraphEvidenceIds.some((id: string) => String(id ?? '').startsWith('parsed-experience-'))).toBe(true);
+      expect(paragraphEvidenceIds.some((id: string) => String(id ?? '').startsWith('resume_v2_exp_'))).toBe(false);
+      expect(draft.generation.document.bodyParagraphs.length).toBeGreaterThanOrEqual(2);
+      expect(draft.generation.content).toMatch(/Program Manager/i);
+      expect(draft.generation.content).toMatch(/Example Co/i);
+      expect(draft.baselineVerified).toBe(true);
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsed;
+    }
+  });
+
   it('fails explicitly when verified canonical sections do not contain enough evidence', async () => {
     const { service } = buildService();
     const originalSections = baseline.sections;

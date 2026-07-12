@@ -102,4 +102,73 @@ describe('resolveBaselineSectionsForGeneration', () => {
     expect(sections[0].content).not.toContain('Parsed Co');
     expect(sections[0].content).not.toContain('Resume V2 Co');
   });
+
+  it('derives canonical parsed-experience sections from the latest valid persisted Resume V2 when baseline sections are absent', () => {
+    const baseline = {
+      id: 'baseline-1',
+      sections: [],
+      parsedRecords: [
+        {
+          createdAt: new Date('2026-04-01T00:00:00.000Z'),
+          resumeV2Json: {
+            heading: { name: 'Old Candidate', contactLine: '' },
+            summary: 'Should be surfaced canonically.',
+            competencies: ['Operations', 'Leadership'],
+            experience: [
+              {
+                company: 'Older Co',
+                roleTitle: 'Earlier Role',
+                dateRange: '2019 - 2021',
+                bullets: ['Legacy experience should not win.'],
+              },
+            ],
+          },
+        },
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          resumeV2Json: {
+            heading: { name: 'Jordan Lee', contactLine: 'jordan.lee@example.com | Seattle, WA' },
+            summary: 'Canonical persisted Resume V2 summary.',
+            competencies: ['Support Operations'],
+            experience: [
+              {
+                company: 'Parsed Co',
+                roleTitle: 'Director of Support Operations',
+                dateRange: '2021 - Present',
+                bullets: [
+                  'Led support operations and exec updates.',
+                  'Improved incident routing and operating reviews.',
+                ],
+              },
+              {
+                company: 'Parsed Co',
+                roleTitle: 'Support Operations Manager',
+                dateRange: '2018 - 2021',
+                bullets: [
+                  'Built reporting and queue health dashboards.',
+                  'Partnered cross-functionally to reduce repeat escalations.',
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    } as any;
+
+    const sections = resolveBaselineSectionsForGeneration(baseline);
+
+    expect(sections.map((section) => section.id)).toEqual(
+      expect.arrayContaining([
+        'baseline-1:resume-v2:summary',
+        'baseline-1:resume-v2:skills',
+        'parsed-experience-0',
+        'parsed-experience-1',
+      ]),
+    );
+    expect(sections.filter((section) => section.sectionType === BaselineSectionType.EXPERIENCE)).toHaveLength(2);
+    expect(sections.find((section) => section.id === 'parsed-experience-0')?.content).toContain('Parsed Co');
+    expect(sections.find((section) => section.id === 'parsed-experience-1')?.content).toContain('Support Operations Manager');
+    expect(sections.some((section) => String(section.id ?? '').startsWith('resume_v2_exp_'))).toBe(false);
+    expect(sections.some((section) => String(section.content ?? '').includes('Legacy experience should not win.'))).toBe(false);
+  });
 });
