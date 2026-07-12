@@ -27,6 +27,20 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
     ],
   } as any;
 
+  const allowedBlocks = structured.experience.map((entry: any, index: number) => ({
+    id: `resume_v2_exp_${index}`,
+    title: `${entry.company} - ${entry.roleTitle}`,
+    content: [
+      [entry.company, entry.roleTitle, entry.dates].filter(Boolean).join(' | '),
+      ...(entry.bullets ?? []).map((bullet: string) => `- ${bullet}`),
+    ]
+      .join('\n')
+      .trim(),
+    includePolicy: 'OPTIONAL',
+    order: index * 1000,
+    sectionType: 'EXPERIENCE',
+  }));
+
   it('passes the canonical composer output and paragraph anchors through the adapter', () => {
     const assembly = assembleCoverLetterFromStructuredBaseline({
       structured,
@@ -34,6 +48,7 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
       senderContactLine: 'alex@example.com',
       jobTitle: 'Director of Support Operations',
       companyName: 'Example SaaS',
+      allowedBlocks,
     });
 
     expect(assembly.document.salutation).toBe('Dear Hiring Team,');
@@ -84,6 +99,26 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
       senderContactLine: 'alex@example.com',
       jobTitle: 'Director of Support',
       companyName: 'ExampleCo',
+      allowedBlocks: [
+        {
+          id: 'resume_v2_exp_0',
+          title: 'Acme - Director of Support',
+          content:
+            'Acme | Director of Support | 2022 - Present\n- Led support operations programs and reduced escalation churn through clear handoffs.\n- Built operating reviews that kept queue health and service quality visible.',
+          includePolicy: 'OPTIONAL',
+          order: 0,
+          sectionType: 'EXPERIENCE',
+        },
+        {
+          id: 'resume_v2_exp_1',
+          title: 'Acme - Support Workflow Lead',
+          content:
+            'Acme | Support Workflow Lead | 2020 - 2022\n- Standardized runbooks and escalation paths to reduce execution friction.\n- Partnered with engineering leaders to align priorities and timelines.',
+          includePolicy: 'OPTIONAL',
+          order: 1000,
+          sectionType: 'EXPERIENCE',
+        },
+      ] as any,
     });
 
     expect(assembly.document.salutation).toBe('Dear Hiring Team,');
@@ -110,10 +145,21 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
       senderName: 'Alex Candidate',
       jobTitle: 'Director of Support',
       companyName: 'ExampleCo',
+      allowedBlocks: [
+        {
+          id: 'resume_v2_exp_0',
+          title: 'Acme - Director of Support',
+          content:
+            'Acme | Director of Support | 2022 - Present\n- Led support operations programs.',
+          includePolicy: 'OPTIONAL',
+          order: 0,
+          sectionType: 'EXPERIENCE',
+        },
+      ] as any,
     });
 
     expect(assembly.document.opening).toContain('Service delivery and incident operations leader.');
     expect(assembly.document.opening).toContain('Director of Support');
-    expect(assembly.document.bodyParagraphs.length).toBe(2);
+    expect(assembly.document.bodyParagraphs.length).toBe(1);
   });
 });

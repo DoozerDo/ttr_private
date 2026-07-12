@@ -19,6 +19,31 @@ const createRepo = (value: unknown) => ({
   remove: jest.fn(async (payload: unknown) => payload),
 });
 
+function toCanonicalEvidenceUnits(
+  sections: Array<{ id: string; content?: string; sectionType?: string }>,
+) {
+  return sections
+    .filter((section) => String(section.sectionType ?? '').toUpperCase() === 'EXPERIENCE')
+    .map((section) => {
+      const lines = String(section.content ?? '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const text = lines.find((line) => /[.!?]$/.test(line)) ?? lines[0] ?? '';
+      return {
+        id: section.id,
+        text,
+        sourceBlockId: section.id,
+        sourceSectionType: 'EXPERIENCE',
+        classification: 'accomplishment' as const,
+        verificationState: 'verified' as const,
+        eligibleForNarrativeComposition: true as const,
+        extractedEvidenceCount: 1,
+      };
+    })
+    .filter((unit) => Boolean(unit.text));
+}
+
 function buildService() {
   const bundle = listSyntheticGenerationScenarioBundles().find(
     (entry) => entry.scenario.id === 'support-ops-director-strong-fit',
@@ -124,6 +149,9 @@ describe('cover letter post-processing', () => {
     });
 
     const generator = new TemplateCoverLetterGenerator();
+    const evidenceUnits = toCanonicalEvidenceUnits(
+      bundle.baseline.sections as Array<{ id: string; content?: string; sectionType?: string }>,
+    );
     const assembly = assembleCoverLetterFromStructuredBaseline({
       structured: {
         summary: 'Support operations leader with incident response and workflow ownership.',
@@ -192,6 +220,7 @@ describe('cover letter post-processing', () => {
         requirements: bundle.job.normalizedRequirements,
       },
       'Synthetic Runner',
+      evidenceUnits,
     );
 
     // Post-processing validates the final rendered letter; it must not pad missing structure.
@@ -254,6 +283,28 @@ describe('cover letter post-processing', () => {
       generation,
       jobContext,
       'Synthetic Runner',
+      [
+        {
+          id: 'e1',
+          text: 'I owned support operations across tooling, analytics, and cross-functional delivery.',
+          sourceBlockId: 'e1',
+          sourceSectionType: 'EXPERIENCE',
+          classification: 'accomplishment',
+          verificationState: 'verified',
+          eligibleForNarrativeComposition: true,
+          extractedEvidenceCount: 1,
+        },
+        {
+          id: 'e2',
+          text: 'I have hands-on experience with Kubernetes and Terraform and I focus on operational rigor, measurable outcomes, and clear stakeholder communication.',
+          sourceBlockId: 'e2',
+          sourceSectionType: 'EXPERIENCE',
+          classification: 'accomplishment',
+          verificationState: 'verified',
+          eligibleForNarrativeComposition: true,
+          extractedEvidenceCount: 1,
+        },
+      ],
     );
 
     expect(postProcessed.flags).not.toContain('keyword_echo_overuse');
@@ -310,6 +361,18 @@ describe('cover letter post-processing', () => {
         requirements: ['Operational rigor', 'Stakeholder management'],
       },
       'Core Loop Candidate',
+      [
+        {
+          id: 'section-1',
+          text: 'I owned support operations across tooling, analytics, and cross-functional delivery.',
+          sourceBlockId: 'section-1',
+          sourceSectionType: 'EXPERIENCE',
+          classification: 'accomplishment',
+          verificationState: 'verified',
+          eligibleForNarrativeComposition: true,
+          extractedEvidenceCount: 1,
+        },
+      ],
     );
 
     // Post-processing is a validator, not a padding layer.
@@ -366,6 +429,28 @@ describe('cover letter post-processing', () => {
       generation,
       jobContext,
       'Synthetic Runner',
+      [
+        {
+          id: 'e1',
+          text: 'I have led support operations, incident response, and queue health improvements with clear operating rhythms.',
+          sourceBlockId: 'e1',
+          sourceSectionType: 'EXPERIENCE',
+          classification: 'accomplishment',
+          verificationState: 'verified',
+          eligibleForNarrativeComposition: true,
+          extractedEvidenceCount: 1,
+        },
+        {
+          id: 'e2',
+          text: 'My work has partnered product and engineering teams on service quality, workflow clarity, and stakeholder updates.',
+          sourceBlockId: 'e2',
+          sourceSectionType: 'EXPERIENCE',
+          classification: 'accomplishment',
+          verificationState: 'verified',
+          eligibleForNarrativeComposition: true,
+          extractedEvidenceCount: 1,
+        },
+      ],
     );
 
     expect(postProcessed.flags).not.toContain('keyword_stuffing');
@@ -409,6 +494,18 @@ describe('cover letter post-processing', () => {
       generation,
       jobContext,
       'Synthetic Runner',
+      [
+        {
+          id: 'e1',
+          text: 'I am applying for the Platform Operations Manager role at Example Co.',
+          sourceBlockId: 'e1',
+          sourceSectionType: 'EXPERIENCE',
+          classification: 'accomplishment',
+          verificationState: 'verified',
+          eligibleForNarrativeComposition: true,
+          extractedEvidenceCount: 1,
+        },
+      ],
     );
 
     expect(postProcessed.flags).toEqual(

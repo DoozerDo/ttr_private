@@ -890,6 +890,74 @@ describe('CoverLettersService contract', () => {
     }
   });
 
+  it('does not generate resume_v2_plain_text fallback evidence or metadata fragments from structured blocks', () => {
+    const { service } = buildService();
+    const blocks = (service as any).buildAllowedBlocksFromStructuredBaseline({
+      structured: {
+        summary: 'Support operations leader with incident response and workflow ownership.',
+        experience: [
+          {
+            company: 'Example Co',
+            roleTitle: 'Senior Manager, Technology Operations Excellence',
+            dates: 'Apr 2020 - Mar 2022',
+            bullets: [
+              'Improved workflow tooling and reporting across support and engineering.',
+              'Reduced repeat incidents by 25% through triage and automation.',
+            ],
+          },
+        ],
+      },
+      job: {
+        title: 'Director of Support Operations',
+        company: 'Example Co',
+        responsibilities: ['Own incident management and escalation workflows'],
+        requirements: ['Operational rigor'],
+      },
+    });
+
+    expect(blocks.some((block: any) => String(block.id ?? '') === 'resume_v2_plain_text')).toBe(false);
+
+    const evidenceUnits = (service as any).buildCanonicalEvidenceUnitsFromAllowedBlocks(blocks);
+    expect(evidenceUnits).toHaveLength(2);
+    expect(evidenceUnits[0]).toMatchObject({
+      id: expect.any(String),
+      sourceBlockId: expect.any(String),
+      sourceSectionType: 'EXPERIENCE',
+      verificationState: 'verified',
+      eligibleForNarrativeComposition: true,
+    });
+    expect(String(evidenceUnits[0].text)).not.toContain('Senior Manager, Technology Operations Excellence');
+    expect(String(evidenceUnits[0].text)).not.toContain('Apr 2020 - Mar 2022');
+  });
+
+  it('fails closed when the canonical evidence set is too sparse for two grounded lanes', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+
+    baseline.sections = [
+      {
+        title: 'Experience',
+        sectionType: 'EXPERIENCE',
+        content:
+          'Example Co | Senior Manager, Technology Operations Excellence | Apr 2020 - Mar 2022\n' +
+          '- Improved workflow tooling and reporting across support and engineering.',
+      } as any,
+    ];
+    (baseline as any).parsedRecords = [];
+
+    try {
+      await expect(service.generateCoverLetter('user-1', request as any)).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'canonical_cover_letter_evidence_insufficient',
+        }),
+      });
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsed;
+    }
+  });
+
   it('Dalen regression: malformed headers + real technical evidence yields interpreted-evidence audit when traceable', async () => {
     const { service } = buildService();
     const original = baseline.sections?.[0]?.content ?? '';

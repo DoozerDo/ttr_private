@@ -126,7 +126,10 @@ import {
   buildEvidenceDetailsMapFromTraceMap,
 } from '../generation/interpreted-evidence-artifact-support';
 import { resolveEvidenceReadinessFromSummary } from '../evidence/readiness-thresholds';
-import { assembleCoverLetterFromStructuredBaseline } from './coverLetterTemplateAssembler';
+import {
+  assembleCoverLetterFromStructuredBaseline,
+  toCanonicalEvidenceUnits,
+} from './coverLetterTemplateAssembler';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { resolveSyntheticCandidateName } from './candidate-name.util';
 import { TargetRolePositioningResolver } from '../positioning/target-role-positioning.resolver';
@@ -1781,6 +1784,7 @@ export class CoverLettersService {
       resumeV2PlainText,
       job: jobContext,
     });
+    const canonicalEvidenceUnits = this.buildCanonicalEvidenceUnitsFromAllowedBlocks(allowedBlocks);
     const hasArtifactReadyEvidenceBlocks = allowedBlocks.length > 0 || templateReadiness.canGenerateCoverLetter;
     if (
       canonicalTextInsufficiency &&
@@ -1911,65 +1915,35 @@ export class CoverLettersService {
         });
       }
 
-      if (templateReadiness.canGenerateCoverLetter) {
-        const composition = assembleCoverLetterFromStructuredBaseline({
-          structured: structuredBaseline as any,
-          senderName: candidateName || 'Candidate',
-          senderContactLine: null,
-          jobTitle: job?.title ?? null,
-          companyName: job?.company ?? null,
-          allowedBlocks,
-        });
-        const document = composition.document;
-        const paragraphs = [
-          document.opening,
-          ...(document.bodyParagraphs ?? []),
-          document.closingParagraph,
-        ].map((p) => String(p ?? '').trim()).filter(Boolean);
-        const content = paragraphs.join('\n\n');
-        const wordCount = content.split(/\s+/).filter(Boolean).length;
-        generation = {
-          document,
-          content,
-          wordCount,
-          greeting: document.salutation,
-          paragraphs,
-          closingParagraphs: [document.closingParagraph].filter(Boolean),
-          salutation: document.salutation,
-          closing: `${document.signoff}\n${document.signatureName}`,
-          traceMap: {},
-          paragraphEvidence: composition.paragraphEvidence,
-        };
-      } else {
-        const composition = assembleCoverLetterFromStructuredBaseline({
-          structured: structuredBaseline as any,
-          senderName: candidateName || 'Candidate',
-          senderContactLine: null,
-          jobTitle: job?.title ?? null,
-          companyName: job?.company ?? null,
-          allowedBlocks,
-        });
-        const document = composition.document;
-        const paragraphs = [
-          document.opening,
-          ...(document.bodyParagraphs ?? []),
-          document.closingParagraph,
-        ].map((p) => String(p ?? '').trim()).filter(Boolean);
-        const content = paragraphs.join('\n\n');
-        const wordCount = content.split(/\s+/).filter(Boolean).length;
-        generation = {
-          document,
-          content,
-          wordCount,
-          greeting: document.salutation,
-          paragraphs,
-          closingParagraphs: [document.closingParagraph].filter(Boolean),
-          salutation: document.salutation,
-          closing: `${document.signoff}\n${document.signatureName}`,
-          traceMap: {},
-          paragraphEvidence: composition.paragraphEvidence,
-        };
-      }
+      const composition = assembleCoverLetterFromStructuredBaseline({
+        structured: structuredBaseline as any,
+        senderName: candidateName || 'Candidate',
+        senderContactLine: null,
+        jobTitle: job?.title ?? null,
+        companyName: job?.company ?? null,
+        allowedBlocks,
+        evidenceUnits: canonicalEvidenceUnits,
+      });
+      const document = composition.document;
+      const paragraphs = [
+        document.opening,
+        ...(document.bodyParagraphs ?? []),
+        document.closingParagraph,
+      ].map((p) => String(p ?? '').trim()).filter(Boolean);
+      const content = paragraphs.join('\n\n');
+      const wordCount = content.split(/\s+/).filter(Boolean).length;
+      generation = {
+        document,
+        content,
+        wordCount,
+        greeting: document.salutation,
+        paragraphs,
+        closingParagraphs: [document.closingParagraph].filter(Boolean),
+        salutation: document.salutation,
+        closing: `${document.signoff}\n${document.signatureName}`,
+        traceMap: {},
+        paragraphEvidence: composition.paragraphEvidence,
+      };
     } catch (error) {
       if (error instanceof Error) {
         try {
@@ -3159,6 +3133,12 @@ export class CoverLettersService {
     return evidenceById;
   }
 
+  private buildCanonicalEvidenceUnitsFromAllowedBlocks(
+    allowedBlocks: AllowedBaselineBlock[],
+  ): ReturnType<typeof toCanonicalEvidenceUnits> {
+    return toCanonicalEvidenceUnits({ allowedBlocks });
+  }
+
   private normalizeForAnchorMatch(value: string): string {
     return this.cleanText(value)
       .toLowerCase()
@@ -3591,19 +3571,6 @@ export class CoverLettersService {
         sectionType: BaselineSectionType.EXPERIENCE,
       });
       order += 1000;
-    }
-
-    // Legacy plain-text recovery remains available only as a last resort for sparse baselines,
-    // but evidence extraction must still filter out header/contact fragments.
-    if (blocks.filter((b) => b.sectionType === BaselineSectionType.EXPERIENCE).length === 0) {
-      blocks.push({
-        id: 'resume_v2_plain_text',
-        title: 'ResumeV2',
-        content: this.normalizeResumeV2BlockContent(input.resumeV2PlainText),
-        includePolicy: BaselineIncludePolicy.ALWAYS,
-        order: order,
-        sectionType: BaselineSectionType.EXPERIENCE,
-      });
     }
 
     return blocks;
