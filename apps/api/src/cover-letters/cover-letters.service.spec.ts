@@ -32,7 +32,18 @@ const baseline: Partial<Baseline> = {
       sectionType: BaselineSectionType.EXPERIENCE,
     },
   ],
-  parsedRecords: [],
+  parsedRecords: [
+    {
+      createdAt: new Date('2026-05-01T00:00:00.000Z'),
+      parsedJson: {
+        identity: { full_name: 'Jordan Lee' },
+      },
+      flagsJson: {
+        reviewState: { verified: true },
+      },
+      resumeV2Json: null,
+    } as any,
+  ],
 };
 
 const baselineVersion: Partial<BaselineVersion> = {
@@ -304,6 +315,9 @@ const createCanonicalPersistedResumeV2Record = () =>
     parsedJson: {
       identity: { full_name: 'Jordan Lee' },
     },
+    flagsJson: {
+      reviewState: { verified: true },
+    },
     resumeV2Json: {
       heading: { name: 'Jordan Lee', contactLine: 'jordan.lee@example.com | Seattle, WA' },
       summary: 'Sparse persisted Resume V2 that should not outrank canonical parsed sections.',
@@ -347,7 +361,7 @@ describe('CoverLettersService contract', () => {
     }
   });
 
-  it('fails explicitly when canonical baseline evidence is missing or structurally invalid and does not fall back to persisted Resume V2', async () => {
+  it('fails explicitly when the canonical baseline is unverified and does not fall back to persisted Resume V2', async () => {
     const { service } = buildService();
     const originalSections = baseline.sections;
     const originalParsed = baseline.parsedRecords;
@@ -383,6 +397,46 @@ describe('CoverLettersService contract', () => {
     try {
       await expect((service as any).buildCoverLetterDraft('user-1', request as any)).rejects.toMatchObject({
         response: expect.objectContaining({
+          code: 'canonical_cover_letter_baseline_unverified',
+        }),
+      });
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsed;
+    }
+  });
+
+  it('fails explicitly when verified canonical sections do not contain enough evidence', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+
+    baseline.sections = [
+      {
+        id: 'summary-1',
+        title: 'Summary',
+        sectionType: BaselineSectionType.SUMMARY,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 0,
+        content: 'Operations leader focused on measurable improvements and reliable execution.',
+      } as any,
+    ] as any;
+    (baseline as any).parsedRecords = [
+      {
+        createdAt: new Date('2026-05-01T00:00:00.000Z'),
+        parsedJson: {
+          identity: { full_name: 'Jordan Lee' },
+        },
+        flagsJson: {
+          reviewState: { verified: true },
+        },
+        resumeV2Json: null,
+      } as any,
+    ];
+
+    try {
+      await expect((service as any).buildCoverLetterDraft('user-1', request as any)).rejects.toMatchObject({
+        response: expect.objectContaining({
           code: 'canonical_cover_letter_evidence_insufficient',
         }),
       });
@@ -392,152 +446,6 @@ describe('CoverLettersService contract', () => {
     }
   });
 
-  it('treats a valid persisted Resume V2 as usable even when readiness.usable is false', async () => {
-    const { service } = buildService();
-    (service as any).throwCoverLetterQualityError = jest.fn();
-    const originalSections = baseline.sections;
-    const originalParsed = baseline.parsedRecords;
-
-    try {
-      baseline.sections = createCanonicalCoverLetterSections();
-      (baseline as any).parsedRecords = [
-        {
-          createdAt: new Date('2026-05-01T00:00:00.000Z'),
-          parsedJson: { identity: { full_name: 'Jordan Lee' } },
-          resumeV2Json: {
-            heading: { name: 'Test User', contactLine: 'test@example.com' },
-            summary:
-              'Operations leader with verified impact across support, technology operations, and cloud delivery. ' +
-              'Built repeatable operating rhythms, escalations, and service reliability programs that improved execution clarity. ' +
-              'Additional verified baseline context '.repeat(12),
-            readiness: { usable: false },
-            experience: [
-              {
-                company: 'SentinelOne',
-                roleTitle: 'Senior Manager, Customer Operations',
-                startDate: '2021-01',
-                endDate: '2024-01',
-                bullets: [
-                  'Led support operations across global teams.',
-                  'Improved escalation readiness, incident response quality, and operating review consistency.',
-                ],
-              },
-              {
-                company: 'Starbucks',
-                roleTitle: 'Senior Manager, Technology Operations',
-                startDate: '2018-01',
-                endDate: '2021-01',
-                bullets: [
-                  'Improved incident handling through clear triage, routing, and stakeholder communication.',
-                  'Built operational cadences that reduced repeat escalations and improved service reliability.',
-                ],
-              },
-              {
-                company: 'CenturyLink',
-                roleTitle: 'Director, Cloud Development and Support',
-                startDate: '2014-01',
-                endDate: '2018-01',
-                bullets: [
-                  'Owned cloud support delivery and cross-functional incident response.',
-                  'Improved service reliability and delivery coordination across teams.',
-                ],
-              },
-              {
-                company: 'Microsoft',
-                roleTitle: 'Senior Service Engineering Manager',
-                startDate: '2010-01',
-                endDate: '2014-01',
-                bullets: [
-                  'Improved service operations with repeatable processes and clear accountability.',
-                  'Partnered across teams to strengthen operational execution under pressure.',
-                ],
-              },
-            ],
-            education: [],
-            competencies: ['Support Operations', 'Incident Response', 'Cloud Delivery', 'Program Management'],
-          },
-        } as any,
-      ];
-
-      const result = await service.generateCoverLetter('user-1', request as any);
-      expect(result.status).toBe('success');
-      expect(result.generationAuthority).toBe('baseline_file');
-      expect(result.baselineFileUsable).toBe(true);
-      expect(result.exportReady).toBe(false);
-    } finally {
-      baseline.sections = originalSections;
-      (baseline as any).parsedRecords = originalParsed;
-    }
-  });
-
-  it('backfills persisted Resume V2 before resolving cover-letter authority when the loaded baseline record is missing it', async () => {
-    const { service, baselineResumeV2BackfillService } = buildService();
-    const originalSections = baseline.sections;
-    const originalParsed = baseline.parsedRecords;
-
-    baseline.sections = createCanonicalCoverLetterSections();
-    baseline.parsedRecords = [
-      {
-        id: 'parsed-1',
-        baselineId: 'baseline-1',
-        sourceFileId: 'source-file-1',
-        schemaVersion: '1',
-        sourceFormat: 'docx',
-        ingestedAt: new Date(),
-        parsedJson: { identity: { full_name: 'Jordan Lee' } },
-        resumeV2Json: null,
-        flagsJson: {},
-        createdAt: new Date(),
-      } as any,
-    ];
-
-    (baselineResumeV2BackfillService.backfillLatestIfMissing as jest.Mock).mockResolvedValue({
-      id: 'parsed-1',
-      baselineId: 'baseline-1',
-      resumeV2Json: {
-        heading: { name: 'Alex Candidate', contactLine: 'Seattle, WA' },
-        summary: 'Support leader with verified impact.',
-        experience: [
-          {
-            company: 'Example SaaS',
-            roleTitle: 'Support Operations Director',
-            dates: '2019 - 2022',
-            bullets: [
-              'Owned the support operations operating model and support workflow design for a high-volume SaaS support team.',
-              'Built dashboards and KPIs for executive communication and weekly operating reviews.',
-            ],
-          },
-          {
-            company: 'Northwind',
-            roleTitle: 'Operations Manager',
-            dates: '2016 - 2019',
-            bullets: [
-              'Improved escalation routing and queue health through clearer operating cadences.',
-              'Partnered across teams to reduce recurring issues and tighten ownership.',
-              'Created weekly reviews that improved visibility into support trends and throughput.',
-            ],
-          },
-        ],
-        education: [], 
-        certifications: [], 
-        skills: ['Support Operations'],
-      },
-    } as any);
-
-    try {
-      const result = await service.generateCoverLetter('user-1', request as any);
-      expect(baselineResumeV2BackfillService.backfillLatestIfMissing).toHaveBeenCalledWith({
-        baselineId: 'baseline-1',
-      });
-      expect(result.status).toBe('success');
-      expect(result.generationAuthority).toBe('baseline_file');
-      expect(result.baselineFileUsable).toBe(true);
-      expect(result.exportReady).toBe(false);
-    } finally {
-      baseline.sections = originalSections;
-      (baseline as any).parsedRecords = originalParsed;
-    }
-  });
   it('does not complete a successful cover letter generation when Studio artifact persistence fails', async () => {
     const { service, studioArtifactsService } = buildService();
     const originalSections = baseline.sections;
@@ -708,6 +616,9 @@ describe('CoverLettersService contract', () => {
             },
           ],
         },
+        flagsJson: {
+          reviewState: { verified: true },
+        },
         resumeV2Json: {
           heading: { name: 'Test Candidate', contactLine: '' },
           summary: 'Sparse ResumeV2 summary.',
@@ -853,7 +764,7 @@ describe('CoverLettersService contract', () => {
       jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
       closingTemplateKey: 'default',
       generationInputsHash: 'hash',
-      generationAuthority: 'baseline_file',
+      generationAuthority: 'canonical',
       baselineVerified: true,
       baselineFileUsable: true,
       baselineFileVersionHash: 'hash-1',
@@ -1098,6 +1009,9 @@ describe('CoverLettersService contract', () => {
               },
             ],
           },
+          flagsJson: {
+            reviewState: { verified: true },
+          },
         } as any,
       ];
 
@@ -1105,7 +1019,8 @@ describe('CoverLettersService contract', () => {
       expect(result.status).toBe('success');
       expect(result.exportReady).toBe(true);
       expect((result as any).content).toMatch(/\S/);
-      expect(result.generationAuthority).toBe('baseline_file');
+      expect(result.generationAuthority).toBe('canonical');
+      expect(result.baselineVerified).toBe(true);
       expect((result as any).baselineFileUsable).toBe(true);
     } finally {
       baseline.sections = originalSections;
@@ -1237,7 +1152,8 @@ describe('CoverLettersService contract', () => {
           oneTap: true,
         } as any),
       ).resolves.toMatchObject({
-        generationAuthority: 'baseline_file',
+        generationAuthority: 'canonical',
+        baselineVerified: true,
         baselineFileUsable: true,
       });
     } finally {

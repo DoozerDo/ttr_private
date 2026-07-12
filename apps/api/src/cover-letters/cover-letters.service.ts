@@ -79,7 +79,6 @@ import { resolveBaselineSectionsForGeneration } from '../baseline/baseline-secti
 import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-backfill.service';
 import {
   buildNormalizedResumeValidationFailures,
-  buildResumePlainText,
   formatResumeV2InvalidMessage,
   normalizeNormalizedResumeDocument,
   validateNormalizedResumeDocument,
@@ -121,17 +120,15 @@ import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTeleme
 import { resolveSyntheticCandidateName } from './candidate-name.util';
 import { TargetRolePositioningResolver } from '../positioning/target-role-positioning.resolver';
 import { PositioningPlanService } from '../positioning/positioning-plan.service';
-import { buildAuthoritativeRenderPlan } from '../positioning/authoritative-render-plan';
 import { validateRealCoverLetterDocument } from '../artifacts/realDocumentValidator';
-import { resolveGenerationEvidence } from '../generation/generation-evidence-resolver';
-import { decideGenerationEligibility } from '../generation/generation-eligibility';
 
 type CoverLetterDraft = {
   baseline: Baseline;
   baselineVersion: BaselineVersion;
   job: Job;
-  generationAuthority: 'baseline_file';
+  generationAuthority: 'canonical';
   baselineFileUsable: boolean;
+  baselineVerified: boolean;
   baselineFileVersionHash: string | null;
   allowedBlocks: AllowedBaselineBlock[];
   positioningMetadata?: unknown;
@@ -218,7 +215,7 @@ export type CoverLetterGenerationResponse = {
   audit_id: string;
   auditId: string;
   baseline_version_hash: string | null;
-  generationAuthority?: 'baseline_file';
+  generationAuthority?: 'canonical';
   baselineVerified?: boolean;
   baselineFileUsable?: boolean;
   baselineFileVersionHash?: string | null;
@@ -232,8 +229,9 @@ export type CoverLetterGenerationResponse = {
     auditId: string;
     baselineVersionHash: string | null;
     complianceFlags: ComplianceFlag[];
-    generationAuthority?: 'baseline_file';
+    generationAuthority?: 'canonical';
     baselineFileUsable?: boolean;
+    baselineVerified?: boolean;
     baselineFileVersionHash?: string | null;
   };
   idempotency?: {
@@ -720,13 +718,14 @@ export class CoverLettersService {
       }
       const cachedExportReady =
         Boolean((effectiveReservation.responseBody as any)?.exportReady) &&
-        draft.generationAuthority === 'baseline_file' &&
+        draft.generationAuthority === 'canonical' &&
         draft.baselineFileUsable === true &&
+        draft.baselineVerified === true &&
         (await this.canRenderCoverLetterTemplate(draft));
       return {
         ...(effectiveReservation.responseBody as CoverLetterGenerationResponse),
         generationAuthority: draft.generationAuthority,
-        baselineVerified: draft.baselineFileUsable ? Boolean((draft.baseline as any).parsedRecords?.[0]?.flagsJson?.reviewState?.verified) : false,
+        baselineVerified: draft.baselineVerified,
         baselineFileUsable: draft.baselineFileUsable,
         baselineFileVersionHash: draft.baselineFileVersionHash,
         exportReady: cachedExportReady,
@@ -866,25 +865,15 @@ export class CoverLettersService {
         }
       }
 
-      const eligibilityWarnings = decideGenerationEligibility({
-        baseline: draft.baseline as any,
-        baselineVersion: draft.baselineVersion as any,
-        job: draft.job as any,
-        readinessScore: null,
-        assessment: draft.analysisAssessment as any,
-        complianceBlocked: false,
-        evidence: resolveGenerationEvidence({
-          baseline: draft.baseline as any,
-          baselineVersionId: draft.baselineVersion.id,
-      }),
-        targetRequirements: ((input as any)?.excludedRequirements ?? []) as any,
-      }).warnings as any;
-      const display = this.buildSuccessDisplayPayload(eligibilityWarnings);
+      const display = this.buildSuccessDisplayPayload(
+        (draft.templateReadiness.hardBlockReasons ?? []).map((reason) => String(reason.code ?? '')),
+      );
       const templateRenderable = await this.canRenderCoverLetterTemplate(draft);
-      const canonicalAuthority = draft.generationAuthority === 'baseline_file';
+      const canonicalAuthority = draft.generationAuthority === 'canonical';
       const exportReady =
         canonicalAuthority &&
         draft.baselineFileUsable === true &&
+        draft.baselineVerified === true &&
         draft.qualityGate.status === 'pass' &&
         templateRenderable;
       const exports: DocumentGenerationExports = exportReady
@@ -957,7 +946,7 @@ export class CoverLettersService {
       } as unknown as CoverLetterGenerationResponse;
 
       (response as any).generationAuthority = draft.generationAuthority;
-      (response as any).baselineVerified = draft.baselineFileUsable ? Boolean((draft.baseline as any).parsedRecords?.[0]?.flagsJson?.reviewState?.verified) : false;
+      (response as any).baselineVerified = draft.baselineVerified;
       (response as any).baselineFileUsable = draft.baselineFileUsable;
       (response as any).baselineFileVersionHash = draft.baselineFileVersionHash;
       draft.complianceResult.normalizedContent = trimIncompleteTrailingFragments(draft.complianceResult.normalizedContent);
@@ -1045,35 +1034,28 @@ export class CoverLettersService {
       // Prompt 8: production validation fields (diagnostics-only, no raw text).
       // Keep this payload available in production so Studio can explain the evidence source used.
       try {
-        const evidence = resolveGenerationEvidence({
-          baseline: draft.baseline as any,
-          baselineVersionId: draft.baselineVersion.id,
-        });
-        const eligibility = decideGenerationEligibility({
-          baseline: draft.baseline as any,
-          baselineVersion: draft.baselineVersion as any,
-          job: draft.job as any,
-          readinessScore: null,
-          assessment: draft.analysisAssessment as any,
-          complianceBlocked: false,
-          evidence,
-          targetRequirements: ((input as any)?.excludedRequirements ?? []) as any,
-        });
         (response as any).internal = {
           ...((response as any).internal ?? {}),
           productionValidation: {
-            evidenceSourceUsed: evidence.primarySource,
+            evidenceSourceUsed: 'canonical',
             generationEligibilityDecision: {
-              eligible: eligibility.eligible,
-              hardBlockerCode: eligibility.hardBlocker?.code ?? null,
+              eligible: true,
+              hardBlockerCode: null,
             },
-            fallbackWarnings: (evidence.warnings ?? []).map((w) => w.code),
-            omittedUnsupportedRequirements: eligibility.omittedUnsupportedRequirements ?? [],
+            fallbackWarnings: [],
+            omittedUnsupportedRequirements: [],
             artifactPersistenceStatus: { status: 'persisted', artifactId },
             finalDocumentStatus: {
               exportReady: Boolean((response as any)?.exportReady),
               qualityGateStatus: String((response as any)?.quality?.status ?? ''),
             },
+            canonicalEvidenceIds: Array.from(
+              new Set(
+                (draft.generation.paragraphEvidence ?? []).flatMap((entry) =>
+                  Array.isArray(entry.sourceEvidenceIds) ? entry.sourceEvidenceIds : [],
+                ),
+              ),
+            ).filter(Boolean),
           },
         };
       } catch {
@@ -1305,36 +1287,6 @@ export class CoverLettersService {
       ); 
       const readiness = this.buildReadinessFromFlags(flags); 
       if (!draft.templateReadiness.canGenerateCoverLetter) {
-        const evidence = resolveGenerationEvidence({
-          baseline: draft.baseline as any,
-          baselineVersionId: draft.baselineVersion?.id ?? null,
-        });
-        const eligibility = decideGenerationEligibility({
-          baseline: draft.baseline as any,
-          baselineVersion: draft.baselineVersion as any,
-          job: draft.job as any,
-          readinessScore: null,
-          assessment: draft.analysisAssessment as any,
-          complianceBlocked: false,
-          evidence,
-          warningCodes: ['baseline_template_not_ready'],
-        });
-        if (eligibility.eligible) {
-          return {
-            status: 'limited',
-            blocked: false,
-            compliance_flags: flags,
-            reasons: [
-              ...(draft.templateReadiness.hardBlockReasons ?? []),
-              {
-                code: 'baseline_template_not_ready',
-                message:
-                  'Baseline template readiness warning; verified evidence fallback is available.',
-              },
-            ],
-            canGenerateCoverLetter: true,
-          } as const;
-        }
         return {
           status: 'blocked',
           blocked: true,
@@ -1574,105 +1526,14 @@ export class CoverLettersService {
       order: { order: 'ASC' },
     });
 
-    const evidenceBundle = resolveGenerationEvidence({
-      baseline: baseline as any,
-      baselineVersionId: baselineVersion.id,
-    });
-
-    // Resume V2 is preferred evidence, not the only permissible evidence source.
-    // Fall back to verified baseline sections / raw extraction when Resume V2 is missing or invalid.
-    let resumeV2PlainText = evidenceBundle.resumePlainText;
-
     const closingTemplateKey = await this.resolveClosingTemplateKey(
       userId,
       input.closingTemplateKey,
     );
     const closingTemplate = resolveClosingTemplate(closingTemplateKey);
-
-    let persistedResumeV2 = (() => {
-      try {
-        const persisted = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) as any;
-        if (!this.hasUsableResumeV2Experience(persisted)) return null;
-        return persisted;
-      } catch {
-        return null;
-      }
-    })();
-    if (!persistedResumeV2 && this.baselineResumeV2BackfillService) {
-      const backfilled = await this.baselineResumeV2BackfillService.backfillLatestIfMissing({ baselineId: baseline.id });
-      const backfilledResumeV2 = backfilled?.resumeV2Json;
-      if (this.hasUsableResumeV2Experience(backfilledResumeV2)) {
-        const parsedRecords = Array.isArray(baseline.parsedRecords) ? baseline.parsedRecords : [];
-        if (parsedRecords.length > 0) {
-          baseline.parsedRecords = parsedRecords.map((record: any, index: number) =>
-            index === 0 ? { ...record, resumeV2Json: backfilledResumeV2 } : record,
-          );
-        } else {
-          baseline.parsedRecords = [backfilled as any];
-        }
-        persistedResumeV2 = this.getLatestPersistedResumeV2Json(baseline.parsedRecords) as any;
-      }
-    }
-    if ((!persistedResumeV2 || !this.hasUsableResumeV2Experience(persistedResumeV2)) && analysisId) {
-      try {
-        const studioArtifactsState = await this.studioArtifactsService.readState({
-          userId,
-          baselineId: baseline.id,
-          jobId: job.id,
-          baselineVersionId: baselineVersion.id,
-          analysisId,
-        });
-        const studioResumeV2 = this.extractPersistedResumeV2FromStudioArtifactsState(
-          studioArtifactsState,
-        );
-        if (this.hasUsableResumeV2Experience(studioResumeV2)) {
-          persistedResumeV2 = studioResumeV2;
-          resumeV2PlainText = buildResumePlainText(studioResumeV2 as any);
-          const parsedRecords = Array.isArray(baseline.parsedRecords) ? [...baseline.parsedRecords] : [];
-          if (parsedRecords.length > 0) {
-            let latestIndex = 0;
-            let latestTime = -Infinity;
-            parsedRecords.forEach((record: any, index: number) => {
-              const currentTime = record?.createdAt ? new Date(record.createdAt).getTime() : 0;
-              if (currentTime >= latestTime) {
-                latestTime = currentTime;
-                latestIndex = index;
-              }
-            });
-            parsedRecords[latestIndex] = {
-              ...(parsedRecords[latestIndex] as any),
-              resumeV2Json: studioResumeV2,
-            };
-            baseline.parsedRecords = parsedRecords as any;
-          } else {
-            baseline.parsedRecords = [
-              {
-                createdAt: new Date(),
-                parsedJson: {},
-                resumeV2Json: studioResumeV2,
-              } as any,
-            ];
-          }
-        }
-      } catch {
-        // If Studio artifact state cannot be read, continue with baseline-backed evidence only.
-      }
-    }
-    let baselineFileUsable = Boolean(persistedResumeV2) || Boolean(evidenceBundle.usableWorkHistoryEvidence);
     const baselineFileVersionHash = baselineVersion.hash ?? null;
     const canonicalBaselineSections = resolveBaselineSectionsForGeneration(baseline);
-    const persistedResumeV2Normalized = persistedResumeV2
-      ? normalizeNormalizedResumeDocument(persistedResumeV2 as any)
-      : null;
     const canonicalStructuredBaseline = extractStructuredBaselineFromSections(canonicalBaselineSections as any);
-    const persistedResumeV2ExperienceCount = Array.isArray((persistedResumeV2Normalized as any)?.experience)
-      ? (persistedResumeV2Normalized as any).experience.length
-      : 0;
-    const canonicalExperienceCount = Array.isArray((canonicalStructuredBaseline as any)?.experience)
-      ? (canonicalStructuredBaseline as any).experience.length
-      : 0;
-    const shouldPreferCanonicalParsedBaselineAuthority =
-      !persistedResumeV2 || canonicalExperienceCount > persistedResumeV2ExperienceCount;
     const sourceSections = canonicalBaselineSections;
     const sections = this.applyPoliciesToSections(sourceSections, policies);
     const allowedSections = sections.filter(
@@ -1682,16 +1543,9 @@ export class CoverLettersService {
     );
 
     const structuredBaseline = canonicalStructuredBaseline;
-    if (
-      !baselineFileUsable &&
-      Array.isArray((structuredBaseline as any)?.experience) &&
-      (structuredBaseline as any).experience.length > 0
-    ) {
-      baselineFileUsable = true;
-    }
     const templateReadiness = evaluateBaselineTemplateReadiness(structuredBaseline as any);
 
-    // Generation must be driven by ResumeV2-derived content (structured baseline), not baseline section concatenations.
+    // Generation must be driven by canonical parsed sections and their evidence units, not legacy resume text.
     // Prefer role-aligned structured experience blocks over a single plain-text dump so evidence selection can
     // reliably choose the strongest relevant roles.
     const jobContext = {
@@ -1707,6 +1561,34 @@ export class CoverLettersService {
       job: jobContext,
     });
     const canonicalEvidenceUnits = this.buildCanonicalEvidenceUnitsFromAllowedBlocks(allowedBlocks);
+    const latestParsedRecord = (() => {
+      const parsedRecords = Array.isArray(baseline.parsedRecords) ? [...baseline.parsedRecords] : [];
+      return parsedRecords
+        .filter((record) => record && typeof record === 'object')
+        .sort((a: any, b: any) => {
+          const aTime = a?.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const bTime = b?.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return bTime - aTime;
+        })[0] as any;
+    })();
+    const baselineVerified = Boolean(latestParsedRecord?.flagsJson?.reviewState?.verified);
+    if (!baselineVerified) {
+      throw new UnprocessableEntityException(buildArtifactFailurePayload({
+        code: 'canonical_cover_letter_baseline_unverified',
+        category: 'unsupported_input',
+        message: 'The current cover letter input is not based on a verified canonical baseline version.',
+        detail: 'The verified baseline contract is required before composing a canonical cover letter.',
+        retryable: false,
+        userAction: {
+          title: 'Verify the baseline first',
+          description: 'Generate a verified canonical baseline version before trying again.',
+        },
+        diagnostics: {
+          unsupportedEnvelope: 'canonical_cover_letter_baseline_unverified',
+          missingRequirements: ['baseline_verified'],
+        },
+      }));
+    }
     if (canonicalEvidenceUnits.length < 2) {
       throw new UnprocessableEntityException(buildArtifactFailurePayload({
         code: 'canonical_cover_letter_evidence_insufficient',
@@ -1724,6 +1606,7 @@ export class CoverLettersService {
         },
       }));
     }
+    const baselineFileUsable = true;
     const careerIdentitySnapshot = (() => {
       try {
         return deriveCareerIdentityFromStructuredBaseline(structuredBaseline as any);
@@ -1753,9 +1636,7 @@ export class CoverLettersService {
       }
     })();
     const baselineIdentity = resolveBaselineIdentity(baseline);
-    let candidateName = baselineFileUsable
-      ? this.cleanText((structuredBaseline as any)?.heading?.name ?? baselineIdentity?.fullName)
-      : this.cleanText(baselineIdentity?.fullName);
+    let candidateName = this.cleanText((structuredBaseline as any)?.heading?.name ?? baselineIdentity?.fullName);
     if (syntheticMetadata?.isSynthetic) {
       candidateName = resolveSyntheticCandidateName(candidateName);
     }
@@ -2130,8 +2011,9 @@ export class CoverLettersService {
       baseline,
       baselineVersion,
       job,
-      generationAuthority: 'baseline_file',
+      generationAuthority: 'canonical',
       baselineFileUsable,
+      baselineVerified,
       baselineFileVersionHash,
       analysisAssessment,
       allowedBlocks,
@@ -3290,7 +3172,6 @@ export class CoverLettersService {
     job: { title: string | null; company: string | null; responsibilities: string[]; requirements: string[] };
   }): AllowedBaselineBlock[] {
     const structured = input.structured ?? {};
-    const experience = Array.isArray(structured.experience) ? structured.experience : [];
     const sourceSections = Array.isArray(input.sourceSections) ? input.sourceSections : [];
     const experienceSections = sourceSections.filter(
       (section) => String(section?.sectionType ?? '').toUpperCase() === 'EXPERIENCE',
@@ -3300,13 +3181,13 @@ export class CoverLettersService {
       .toLowerCase();
     const jobTokens = new Set(jobText.split(/[^a-z0-9]+/g).map((t) => t.trim()).filter((t) => t.length >= 4));
 
-    const scoreExperience = (entry: any) => {
-      const text = String(entry?.content ?? '').replace(/\s+/g, ' ').toLowerCase();
+    const scoreExperience = (section: any) => {
+      const text = [section?.title ?? '', section?.content ?? ''].join(' ').replace(/\s+/g, ' ').toLowerCase();
       let score = 0;
       for (const token of jobTokens) {
         if (text.includes(token)) score += 1;
       }
-      if (/\b(contractor|freelance|consultant)\b/i.test(String(entry?.title ?? ''))) score -= 2;
+      if (/\b(contractor|freelance|consultant)\b/i.test(String(section?.title ?? ''))) score -= 2;
       if (/\b(vue|react|deck builder|frontend)\b/i.test(text)) score -= 3;
       return score;
     };
@@ -3344,11 +3225,11 @@ export class CoverLettersService {
       }
     })();
 
-    const ranked = [...experience]
-      .map((entry: any, index: number) => ({
-        entry,
+    const ranked = [...experienceSections]
+      .map((section: any, index: number) => ({
+        section,
         index,
-        score: scoreExperience(entry),
+        score: scoreExperience(section),
         suppressed: false,
       }))
       .sort((a, b) => b.score - a.score || a.index - b.index);
@@ -3388,16 +3269,10 @@ export class CoverLettersService {
     const shouldDropSuppressed = false;
     for (const rankedEntry of ranked.slice(0, 12)) {
       if (shouldDropSuppressed && rankedEntry.suppressed) continue;
-      const entry = rankedEntry.entry ?? {};
-      const sourceSection = experienceSections[rankedEntry.index] ?? {};
-      const company = String(entry.company ?? '').trim();
-      const roleTitle = String(entry.roleTitle ?? '').trim();
-      const dates = String(entry.dates ?? '').trim();
-      const bullets = Array.isArray(entry.bullets) ? entry.bullets.map((b: any) => String(b ?? '').trim()).filter(Boolean) : [];
+      const sourceSection = rankedEntry.section ?? {};
       const id = String(sourceSection.id ?? '').trim() || `parsed-experience-${rankedEntry.index}`;
-      const title = String(sourceSection.title ?? '').trim() || `${company} - ${roleTitle}`;
-      const header = [company, roleTitle, dates].filter(Boolean).join(' | ');
-      const content = [header, ...bullets.map((b) => `- ${b}`)].filter(Boolean).join('\n').trim();
+      const title = String(sourceSection.title ?? '').trim() || 'Experience';
+      const content = String(sourceSection.content ?? '').trim();
       if (!id || !content) continue;
       blocks.push({
         id,
