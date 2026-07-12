@@ -3392,6 +3392,20 @@ export class CoverLettersService {
       });
     }
 
+    const skills = Array.isArray(structured.skills)
+      ? structured.skills.map((skill: any) => this.cleanText(skill)).filter(Boolean)
+      : [];
+    if (skills.length > 0) {
+      blocks.push({
+        id: 'resume_v2_skills',
+        title: 'Skills',
+        content: skills.join(', '),
+        includePolicy: BaselineIncludePolicy.OPTIONAL,
+        order: 950,
+        sectionType: BaselineSectionType.SKILLS,
+      });
+    }
+
     let order = 1000;
     const nonSuppressedCount = ranked.filter((r) => !r.suppressed).length;
     const shouldDropSuppressed = nonSuppressedCount >= 2;

@@ -67,7 +67,10 @@ export function toCanonicalEvidenceUnits(input: {
 
   const allowedBlocks = input.allowedBlocks ?? [];
   const canonicalBlocks = Array.isArray(allowedBlocks)
-    ? allowedBlocks.filter((block) => String(block?.sectionType ?? '').toUpperCase() === 'EXPERIENCE')
+    ? allowedBlocks.filter((block) => {
+        const sectionType = String(block?.sectionType ?? '').toUpperCase();
+        return ['EXPERIENCE', 'SUMMARY', 'SKILLS', 'PROJECT'].includes(sectionType);
+      })
     : [];
 
   const units: CanonicalEvidenceUnit[] = [];
@@ -76,6 +79,26 @@ export function toCanonicalEvidenceUnits(input: {
     const blockId = String(block?.id ?? '').trim();
     const content = trimToText(block?.content ?? '');
     if (!blockId || !content) continue;
+
+    if (String(block?.sectionType ?? '').toUpperCase() === 'SKILLS') {
+      content
+        .split(/(?:\r?\n|,|;|•|\u2022)+/)
+        .map((piece) => trimToText(piece))
+        .filter(Boolean)
+        .filter((piece) => !looksLikeMetadataFragment(piece))
+        .forEach((piece, pieceIndex) => {
+          units.push({
+            id: `${blockId}:evidence:0:${pieceIndex}`,
+            text: piece,
+            sourceBlockId: blockId,
+            sourceSectionType: block.sectionType,
+            classification: classifyEvidenceText(piece),
+            verificationState: 'verified' as const,
+            eligibleForNarrativeComposition: true,
+          });
+        });
+      continue;
+    }
 
     const logicalUnits = reconstructLogicalTextUnits(block.content ?? '');
     const extractedUnits = extractEvidenceUnitsFromLogicalUnits(blockId, logicalUnits, {

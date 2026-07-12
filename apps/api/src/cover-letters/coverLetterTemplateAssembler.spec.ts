@@ -162,4 +162,61 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
     expect(assembly.document.opening).toContain('Director of Support');
     expect(assembly.document.bodyParagraphs.length).toBe(1);
   });
+
+  it('derives canonical evidence from summary, skills, and experience blocks without legacy plain text', () => {
+    const assembly = assembleCoverLetterFromStructuredBaseline({
+      structured: {
+        summary: 'Support operations leader focused on execution cadence and measurable outcomes.',
+        skills: ['ServiceNow', 'Jira Service Management', 'Incident Response'],
+        experience: [
+          {
+            id: 'exp-1',
+            company: 'Acme',
+            roleTitle: 'Director of Support',
+            dates: '2022 - Present',
+            bullets: [
+              'Led support operations programs and reduced escalation churn through clear handoffs.',
+              'Built operating reviews that kept queue health and service quality visible.',
+            ],
+          } as any,
+        ],
+      } as any,
+      senderName: 'Alex Candidate',
+      jobTitle: 'Director of Support',
+      companyName: 'ExampleCo',
+      allowedBlocks: [
+        {
+          id: 'resume_v2_summary',
+          title: 'Summary',
+          content: 'Support operations leader focused on execution cadence and measurable outcomes.',
+          includePolicy: 'optional',
+          order: 0,
+          sectionType: 'SUMMARY',
+        },
+        {
+          id: 'resume_v2_skills',
+          title: 'Skills',
+          content: 'ServiceNow, Jira Service Management, Incident Response',
+          includePolicy: 'optional',
+          order: 950,
+          sectionType: 'SKILLS',
+        },
+        {
+          id: 'resume_v2_exp_0',
+          title: 'Acme - Director of Support',
+          content:
+            'Acme | Director of Support | 2022 - Present\n- Led support operations programs and reduced escalation churn through clear handoffs.\n- Built operating reviews that kept queue health and service quality visible.',
+          includePolicy: 'optional',
+          order: 1000,
+          sectionType: 'EXPERIENCE',
+        },
+      ] as any,
+    });
+
+    expect(assembly.document.bodyParagraphs.length).toBe(2);
+    const sourceEvidenceIds = assembly.paragraphEvidence.flatMap((entry) => entry.sourceEvidenceIds);
+    expect(sourceEvidenceIds.some((id) => id.startsWith('resume_v2_summary:evidence:0'))).toBe(true);
+    expect(sourceEvidenceIds.some((id) => id.startsWith('resume_v2_skills:evidence:0'))).toBe(true);
+    expect(assembly.paragraphEvidence.every((entry) => entry.sourceEvidenceIds.every((id) => !id.includes('resume_v2_plain_text')))).toBe(true);
+  });
 });

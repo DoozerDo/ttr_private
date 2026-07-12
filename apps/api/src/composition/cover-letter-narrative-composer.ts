@@ -157,32 +157,25 @@ function buildParagraphText(args: {
     .map((snippet) => sentenceFromSnippet(snippet.text))
     .filter(Boolean);
   if (evidenceSentences.length > 0) {
-    sentenceParts.push(...evidenceSentences);
+    sentenceParts.push(...evidenceSentences.slice(0, 2));
   }
 
   const secondSnippet = snippets[1];
   if (secondSnippet) {
-    sentenceParts.push(ensureSentence(`For example, ${compactSnippet(secondSnippet.text, 50)}`));
+    sentenceParts.push(ensureSentence(`For example, ${compactSnippet(secondSnippet.text, 38)}`));
   }
-
   const context = jobContextSentence(jobTitle, jobCompany);
   if (context) {
-    sentenceParts.push(
-      ensureSentence(
-        `It keeps the work grounded in the ${trimToText(jobTitle ?? 'target')} role${jobCompany ? ` at ${trimToText(jobCompany)}` : ''}.`,
-      ),
-    );
+    sentenceParts.push(context);
   }
 
   if (snippets.length > 0) {
     sentenceParts.push(
       ensureSentence(
-        'Together, those details keep the work anchored to concrete outcomes, clear ownership, and steady follow through.',
+        'Those details keep the work anchored to concrete outcomes, clear ownership, and steady follow through.',
       ),
     );
-    sentenceParts.push(
-      ensureSentence('This gives the hiring team a direct line from the evidence to the role fit.'),
-    );
+    sentenceParts.push(ensureSentence('This gives the hiring team a direct line from the evidence to the role fit.'));
   }
 
   const impact = varyImpactSentence(`${snippets.map((snippet) => snippet.text).join(' ')} ${paragraphIndex}`).replace(/[.!?]\s*$/, '');

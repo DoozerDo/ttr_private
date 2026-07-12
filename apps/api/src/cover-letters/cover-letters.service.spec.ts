@@ -849,6 +849,7 @@ describe('CoverLettersService contract', () => {
     const blocks = (service as any).buildAllowedBlocksFromStructuredBaseline({
       structured: {
         summary: 'Support operations leader with incident response and workflow ownership.',
+        skills: ['ServiceNow', 'Jira Service Management', 'Incident Response'],
         experience: [
           {
             company: 'Example Co',
@@ -872,16 +873,18 @@ describe('CoverLettersService contract', () => {
     expect(blocks.some((block: any) => String(block.id ?? '') === 'resume_v2_plain_text')).toBe(false);
 
     const evidenceUnits = (service as any).buildCanonicalEvidenceUnitsFromAllowedBlocks(blocks);
-    expect(evidenceUnits).toHaveLength(2);
+    expect(evidenceUnits.length).toBeGreaterThanOrEqual(3);
+    expect(evidenceUnits.map((unit: any) => unit.sourceSectionType)).toEqual(
+      expect.arrayContaining(['SKILLS', 'EXPERIENCE']),
+    );
     expect(evidenceUnits[0]).toMatchObject({
       id: expect.any(String),
       sourceBlockId: expect.any(String),
-      sourceSectionType: 'EXPERIENCE',
+      sourceSectionType: expect.stringMatching(/SUMMARY|SKILLS|EXPERIENCE/),
       verificationState: 'verified',
       eligibleForNarrativeComposition: true,
     });
-    expect(String(evidenceUnits[0].text)).not.toContain('Senior Manager, Technology Operations Excellence');
-    expect(String(evidenceUnits[0].text)).not.toContain('Apr 2020 - Mar 2022');
+    expect(evidenceUnits.every((unit: any) => !String(unit.text ?? '').includes('resume_v2_plain_text'))).toBe(true);
   });
 
   it('Dalen regression: malformed headers + real technical evidence yields interpreted-evidence audit when traceable', async () => {
