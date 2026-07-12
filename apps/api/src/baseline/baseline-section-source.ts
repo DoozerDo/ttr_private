@@ -1,5 +1,6 @@
 import { Baseline } from './baseline.entity';
 import { BaselineIncludePolicy, BaselineSection, BaselineSectionType } from './baseline-section.entity';
+import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
 import {
   normalizeNormalizedResumeDocument,
   validateNormalizedResumeDocument,
@@ -9,7 +10,8 @@ export function resolveBaselineSectionsForGeneration(
   baseline: Pick<Baseline, 'id' | 'sections' | 'parsedRecords'>,
 ): BaselineSection[] {
   const canonicalSections = (baseline.sections ?? []).slice().sort((a, b) => a.order - b.order);
-  if (canonicalSections.length > 0) {
+  const structured = extractStructuredBaselineFromSections(canonicalSections as any);
+  if (Array.isArray(structured.experience) && structured.experience.length > 0) {
     return canonicalSections;
   }
 
@@ -24,7 +26,15 @@ export function resolveBaselineSectionsForGeneration(
     return canonicalSections;
   }
 
-  return buildSectionsFromNormalizedResumeV2(baseline.id, normalized);
+  const experienceSections = buildExperienceSectionsFromNormalizedResumeV2(baseline.id, normalized);
+  if (canonicalSections.length === 0) {
+    return buildSectionsFromNormalizedResumeV2(baseline.id, normalized);
+  }
+  if (experienceSections.length > 0) {
+    return [...canonicalSections, ...experienceSections].sort((a, b) => a.order - b.order);
+  }
+
+  return canonicalSections;
 }
 
 function trimToText(value: unknown): string {
@@ -116,22 +126,7 @@ function buildSectionsFromNormalizedResumeV2(
     } as BaselineSection);
   }
 
-  const experience = Array.isArray(resumeV2.experience) ? resumeV2.experience : [];
-  experience.forEach((entry, index) => {
-    const content = formatExperienceSectionContent(entry as any);
-    if (!content) return;
-    sections.push({
-      id: `parsed-experience-${index}`,
-      baselineId,
-      sectionType: BaselineSectionType.EXPERIENCE,
-      title: trimToText((entry as any)?.roleTitle) || 'Experience',
-      content,
-      includePolicy: BaselineIncludePolicy.ALWAYS,
-      order: 100 + index,
-      createdAt: new Date(0),
-      updatedAt: new Date(0),
-    } as BaselineSection);
-  });
+  sections.push(...buildExperienceSectionsFromNormalizedResumeV2(baselineId, resumeV2));
 
   const education = Array.isArray(resumeV2.education) ? resumeV2.education : [];
   education.forEach((entry, index) => {
@@ -178,4 +173,26 @@ function buildSectionsFromNormalizedResumeV2(
   });
 
   return sections.sort((a, b) => a.order - b.order);
+}
+
+function buildExperienceSectionsFromNormalizedResumeV2(
+  baselineId: string,
+  resumeV2: ReturnType<typeof normalizeNormalizedResumeDocument>,
+): BaselineSection[] {
+  const experience = Array.isArray(resumeV2.experience) ? resumeV2.experience : [];
+  return experience.flatMap((entry, index) => {
+    const content = formatExperienceSectionContent(entry as any);
+    if (!content) return [];
+    return [{
+      id: `parsed-experience-${index}`,
+      baselineId,
+      sectionType: BaselineSectionType.EXPERIENCE,
+      title: trimToText((entry as any)?.roleTitle) || 'Experience',
+      content,
+      includePolicy: BaselineIncludePolicy.ALWAYS,
+      order: 100 + index,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    } as BaselineSection];
+  });
 }

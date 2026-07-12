@@ -171,4 +171,50 @@ describe('resolveBaselineSectionsForGeneration', () => {
     expect(sections.some((section) => String(section.id ?? '').startsWith('resume_v2_exp_'))).toBe(false);
     expect(sections.some((section) => String(section.content ?? '').includes('Legacy experience should not win.'))).toBe(false);
   });
+
+  it('appends canonical parsed-experience sections when existing baseline sections do not already include experience', () => {
+    const baseline = {
+      id: 'baseline-1',
+      sections: [
+        {
+          id: 'section-summary',
+          baselineId: 'baseline-1',
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          content: 'Customer operations leader.',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+      parsedRecords: [
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          resumeV2Json: {
+            heading: { name: 'Jordan Lee', contactLine: 'jordan.lee@example.com | Seattle, WA' },
+            summary: 'Canonical persisted Resume V2 summary.',
+            competencies: ['Support Operations'],
+            experience: [
+              {
+                company: 'Parsed Co',
+                roleTitle: 'Director of Support Operations',
+                dateRange: '2021 - Present',
+                bullets: ['Led support operations and exec updates.'],
+              },
+            ],
+          },
+        },
+      ],
+    } as any;
+
+    const sections = resolveBaselineSectionsForGeneration(baseline);
+
+    expect(sections.map((section) => section.id)).toEqual(
+      expect.arrayContaining(['section-summary', 'parsed-experience-0']),
+    );
+    expect(sections.filter((section) => section.sectionType === BaselineSectionType.EXPERIENCE)).toHaveLength(1);
+    expect(sections.find((section) => section.id === 'parsed-experience-0')?.content).toContain('Parsed Co');
+    expect(sections.some((section) => String(section.id ?? '').startsWith('resume_v2_exp_'))).toBe(false);
+  });
 });
