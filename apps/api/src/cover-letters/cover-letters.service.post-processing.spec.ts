@@ -235,6 +235,121 @@ describe('cover letter post-processing', () => {
     expect(postProcessed.flags).not.toEqual(expect.arrayContaining(['too_short', 'too_few_body_paragraphs', 'too_few_content_paragraphs', 'missing_role_or_company_context', 'paragraph_anchor_validation_failed']));
   });
 
+  it('recognizes normalized production-shaped role titles during post-processing validation', () => {
+    const { bundle, service } = buildService();
+    const evidenceUnits = toCanonicalEvidenceUnits(
+      bundle.baseline.sections as Array<{ id: string; content?: string; sectionType?: string }>,
+    );
+    const plan = buildDocumentStrategyPlan({
+      fitScore: 87,
+      jobTitle: bundle.job.title,
+      jobCompany: bundle.job.company,
+      jobDescription: bundle.job.rawDescription,
+      jobRequirements: bundle.job.normalizedRequirements,
+      jobResponsibilities: bundle.job.normalizedResponsibilities,
+      analysisSummary: 'Support operations leader with incident response and workflow ownership.',
+      analysisStrengths: ['support operations rigor', 'service reliability', 'incident response'],
+      analysisGaps: [],
+      analysisRecommendedActions: [],
+      baselineSections: bundle.baseline.sections,
+    });
+
+    const generator = new TemplateCoverLetterGenerator();
+    const assembly = assembleCoverLetterFromStructuredBaseline({
+      structured: {
+        summary: 'Support operations leader with incident response and workflow ownership.',
+        experience: bundle.baseline.sections
+          .filter((section) => section.sectionType === 'EXPERIENCE')
+          .map((section) => {
+            const lines = String(section.content ?? '')
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter(Boolean);
+            return {
+              id: section.id,
+              company: bundle.job.company,
+              roleTitle: lines[0] ?? section.title,
+              dates: lines[1] ?? null,
+              bullets: lines.slice(2).map((line) => line.replace(/^-+\s*/, '')),
+            };
+          }),
+      } as any,
+      senderName: 'Synthetic Runner',
+      senderContactLine: 'runner@example.com',
+      jobTitle: bundle.job.title,
+      companyName: bundle.job.company,
+      allowedBlocks: bundle.baseline.sections.map((section, order) => ({
+        id: section.id,
+        title: section.title,
+        content: section.content,
+        includePolicy: 'ALWAYS' as never,
+        order,
+        sectionType: section.sectionType as never,
+      })) as never,
+    });
+    const baseGeneration = generator.generate({
+      document: assembly.document,
+      baselineId: bundle.baseline.id,
+      jobId: bundle.job.id,
+      candidateName: 'Synthetic Runner',
+      closingTemplate: resolveClosingTemplate(DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY),
+      job: {
+        id: bundle.job.id,
+        title: bundle.job.title,
+        company: bundle.job.company,
+        responsibilities: bundle.job.normalizedResponsibilities,
+        requirements: bundle.job.normalizedRequirements,
+      },
+      allowedBaselineBlocks: bundle.baseline.sections.map((section, order) => ({
+        id: section.id,
+        title: section.title,
+        content: section.content,
+        includePolicy: 'ALWAYS' as never,
+        order,
+        sectionType: section.sectionType as never,
+      })) as never,
+      safeMode: false,
+      documentStrategyPlan: plan,
+      maxWords: 280,
+      paragraphEvidence: assembly.paragraphEvidence,
+    });
+    const productionTitle = 'Director of Support Operations - Date Less Fixture';
+    const normalizedOpening =
+      'I am focused on the Director of Support Operations Date Less Fixture role at Example SaaS because ' +
+      baseGeneration.document.opening;
+    const generation = {
+      ...baseGeneration,
+      document: {
+        ...baseGeneration.document,
+        opening: normalizedOpening,
+      },
+      content: baseGeneration.content.replace(baseGeneration.document.opening, normalizedOpening),
+      paragraphs: [normalizedOpening, ...(baseGeneration.paragraphs ?? []).slice(1)],
+      paragraphEvidence: [
+        {
+          ...(baseGeneration.paragraphEvidence?.[0] as any),
+          paragraphKey: 'opening',
+          sourceEvidenceIds: [evidenceUnits[0]?.id].filter(Boolean),
+        },
+        ...(baseGeneration.paragraphEvidence ?? []).filter((entry: any) => entry.paragraphKey !== 'opening'),
+      ],
+    } as any;
+
+    const postProcessed = (service as any).applyCoverLetterPostProcessing(
+      generation,
+      {
+        title: productionTitle,
+        company: bundle.job.company,
+        responsibilities: bundle.job.normalizedResponsibilities,
+        requirements: bundle.job.normalizedRequirements,
+      },
+      'Synthetic Runner',
+      evidenceUnits,
+    );
+
+    expect(postProcessed.flags).not.toContain('missing_role_or_company_context');
+  });
+
   it('does not flag keyword_echo_overuse when JD keywords appear naturally once', () => {
     const { service } = buildService();
     const jobContext = {

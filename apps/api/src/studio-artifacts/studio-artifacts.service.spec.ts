@@ -1097,7 +1097,14 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
         values: jest.fn().mockReturnThis(),
         onConflict: jest.fn().mockReturnThis(),
         returning: jest.fn().mockReturnThis(),
-        execute: jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-2' }] }),
+        execute: jest.fn().mockResolvedValue({
+          identifiers: [{ id: 'artifact-2' }],
+          raw: [{
+            id: 'artifact-2',
+            resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+            coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+          }],
+        }),
         update: jest.fn().mockReturnThis(),
         set: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
@@ -2216,9 +2223,23 @@ describe('StudioArtifactsService (unit): studio artifact scope upsert is idempot
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
     // First call: insert wins.
-    insertExecute.mockResolvedValueOnce({ raw: [{ id: 'artifact-1' }] });
-    // Second call: insert does nothing, then update path runs.
-    insertExecute.mockResolvedValueOnce({ raw: [] });
+    insertExecute.mockResolvedValueOnce({
+      identifiers: [{ id: 'artifact-1' }],
+      raw: [{
+        id: 'artifact-1',
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+      }],
+    });
+    // Second call: insert is not authoritative, so update path runs.
+    insertExecute.mockResolvedValueOnce({
+      identifiers: [],
+      raw: [{
+        id: 'artifact-1',
+        resumeStatus: StudioArtifactLifecycleStatus.IN_PROGRESS,
+        coverLetterStatus: StudioArtifactLifecycleStatus.IN_PROGRESS,
+      }],
+    });
 
     // Swap to update builder for the update call.
     createQueryBuilder.mockImplementationOnce(() => insertBuilder as any);
@@ -2270,7 +2291,14 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
   }
 
   it('persists a canonical resume artifact row with baseline/job/analysis context and payload metadata', async () => {
-    const insertExecute = jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-resume-1' }] });
+    const insertExecute = jest.fn().mockResolvedValue({
+      identifiers: [{ id: 'artifact-resume-1' }],
+      raw: [{
+        id: 'artifact-resume-1',
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+      }],
+    });
     const createQueryBuilder = jest.fn(() => ({
       insert: () => createQueryBuilder.mock.results[0].value,
       into: () => createQueryBuilder.mock.results[0].value,
@@ -2336,7 +2364,14 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
   it('updates the existing authoritative resume artifact row in place when a successful shell_auto resume generation persists against the same scope', async () => {
     const insertExecute = jest.fn()
       .mockResolvedValueOnce({ raw: [] })
-      .mockResolvedValueOnce({ raw: [{ id: 'artifact-resume-9' }] });
+      .mockResolvedValueOnce({
+        identifiers: [{ id: 'artifact-resume-9' }],
+        raw: [{
+          id: 'artifact-resume-9',
+          resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+          coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        }],
+      });
     const updateExecute = jest.fn().mockResolvedValue({ affected: 1 });
     const findOne = jest.fn().mockResolvedValue({
       id: 'artifact-resume-9',
@@ -2409,7 +2444,14 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
   });
 
   it('persists a canonical cover letter artifact row with baseline/job/analysis context and payload metadata', async () => {
-    const insertExecute = jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-cover-1' }] });
+    const insertExecute = jest.fn().mockResolvedValue({
+      identifiers: [{ id: 'artifact-cover-1' }],
+      raw: [{
+        id: 'artifact-cover-1',
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+      }],
+    });
     const createQueryBuilder = jest.fn(() => ({
       insert: () => createQueryBuilder.mock.results[0].value,
       into: () => createQueryBuilder.mock.results[0].value,
@@ -2656,7 +2698,14 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
   });
 
   it('accepts cover letter evidence when canonical internalTrace and paragraphEvidence are present', async () => {
-    const insertExecute = jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-cover-2' }] });
+    const insertExecute = jest.fn().mockResolvedValue({
+      identifiers: [{ id: 'artifact-cover-2' }],
+      raw: [{
+        id: 'artifact-cover-2',
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+      }],
+    });
     const createQueryBuilder = jest.fn(() => ({
       insert: () => createQueryBuilder.mock.results[0].value,
       into: () => createQueryBuilder.mock.results[0].value,
@@ -2706,8 +2755,18 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
 
   it('persists resume and cover letter into the same canonical row for the same baseline/job/analysis context', async () => {
     const insertExecute = jest.fn()
-      .mockResolvedValueOnce({ raw: [{ id: 'artifact-1' }] })
-      .mockResolvedValueOnce({ raw: [] });
+      .mockResolvedValueOnce({
+        identifiers: [{ id: 'artifact-1' }],
+        raw: [{
+          id: 'artifact-1',
+          resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+          coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        }],
+      })
+      .mockResolvedValueOnce({
+        identifiers: [],
+        raw: [],
+      });
     const updateExecute = jest.fn().mockResolvedValue({ affected: 1 });
     const findOne = jest
       .fn()
@@ -2896,7 +2955,14 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
       }),
       onConflict: () => createQueryBuilder.mock.results[0].value,
       returning: () => createQueryBuilder.mock.results[0].value,
-      execute: jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-1' }] }),
+      execute: jest.fn().mockResolvedValue({
+        identifiers: [{ id: 'artifact-1' }],
+        raw: [{
+          id: 'artifact-1',
+          resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+          coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        }],
+      }),
       update: () => createQueryBuilder.mock.results[0].value,
       set: () => createQueryBuilder.mock.results[0].value,
       where: () => createQueryBuilder.mock.results[0].value,
@@ -2978,7 +3044,14 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
   });
 
   it('persists evidence-backed resume and cover letter artifacts when the evidence contract passes', async () => {
-    const insertExecute = jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-1' }] });
+    const insertExecute = jest.fn().mockResolvedValue({
+      identifiers: [{ id: 'artifact-1' }],
+      raw: [{
+        id: 'artifact-1',
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+      }],
+    });
     const createQueryBuilder = jest.fn(() => ({
       insert: () => createQueryBuilder.mock.results[0].value,
       into: () => createQueryBuilder.mock.results[0].value,
@@ -3050,7 +3123,14 @@ describe('StudioArtifactsService (unit): canonical generated artifact persistenc
   });
 
   it('removes unevidenced resume bullets before contract evaluation when at least one evidence-backed bullet remains', async () => {
-    const insertExecute = jest.fn().mockResolvedValue({ raw: [{ id: 'artifact-2' }] });
+    const insertExecute = jest.fn().mockResolvedValue({
+      identifiers: [{ id: 'artifact-2' }],
+      raw: [{
+        id: 'artifact-2',
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+      }],
+    });
     const createQueryBuilder = jest.fn(() => ({
       insert: () => createQueryBuilder.mock.results[0].value,
       into: () => createQueryBuilder.mock.results[0].value,

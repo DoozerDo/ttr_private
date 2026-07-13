@@ -163,6 +163,14 @@ function trimToText(value: unknown): string {
   return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
 }
 
+function normalizeComparisonText(value: string): string {
+  return trimToText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -511,12 +519,13 @@ export function validateCoverLetterArtifactQuality(
   }
 
   const reasons: string[] = [];
-  const company = trimToText(context?.company ?? '');
-  const roleTitle = trimToText(context?.roleTitle ?? '');
-  if (company && !new RegExp(`\\b${escapeRegExp(company)}\\b`, 'i').test(fullText)) {
+  const normalizedFullText = normalizeComparisonText(fullText);
+  const company = normalizeComparisonText(context?.company ?? '');
+  const roleTitle = normalizeComparisonText(context?.roleTitle ?? '');
+  if (company && !normalizedFullText.includes(company)) {
     reasons.push('missing_company_reference');
   }
-  if (roleTitle && !new RegExp(`\\b${escapeRegExp(roleTitle)}\\b`, 'i').test(fullText)) {
+  if (roleTitle && !normalizedFullText.includes(roleTitle)) {
     reasons.push('missing_role_reference');
   }
   const requiredEvidence = Array.isArray(context?.requiredEvidenceSnippets)

@@ -9,6 +9,14 @@ function trimToText(value: unknown): string {
   return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+function normalizeComparisonText(value: string): string {
+  return trimToText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function countSentences(text: string): number {
   const normalized = trimToText(text);
   if (!normalized) return 0;
@@ -103,12 +111,13 @@ export function validateRealCoverLetterDocument(input: {
   const fullText = paragraphs.join('\n');
   if (paragraphs.length < 3) reasons.push('cover_contract:missing_structure');
 
-  const company = trimToText(input.companyName);
-  const roleTitle = trimToText(input.jobTitle);
-  if (company && !new RegExp(`\\b${company.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'i').test(fullText)) {
+  const normalizedFullText = normalizeComparisonText(fullText);
+  const company = normalizeComparisonText(input.companyName ?? '');
+  const roleTitle = normalizeComparisonText(input.jobTitle ?? '');
+  if (company && !normalizedFullText.includes(company)) {
     reasons.push('cover_contract:missing_company');
   }
-  if (roleTitle && !new RegExp(`\\b${roleTitle.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'i').test(fullText)) {
+  if (roleTitle && !normalizedFullText.includes(roleTitle)) {
     reasons.push('cover_contract:missing_role');
   }
 

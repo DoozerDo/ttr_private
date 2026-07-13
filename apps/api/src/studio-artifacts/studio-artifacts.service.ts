@@ -759,11 +759,7 @@ export class StudioArtifactsService {
         input.baselineId,
       ),
       this.studioArtifactRepository.findOne({
-        where: {
-          userId: input.userId,
-          baselineId: input.baselineId,
-          jobId: input.jobId,
-        },
+        where: { userId: input.userId, baselineId: input.baselineId, jobId: input.jobId },
       }),
     ]);
 
@@ -2513,8 +2509,17 @@ export class StudioArtifactsService {
         .returning(['id'])
         .execute();
 
-      const insertedId = insertResult?.raw?.[0]?.id ?? null;
-      if (insertedId) {
+      const insertedRow = Array.isArray(insertResult?.raw) ? (insertResult.raw[0] as Record<string, unknown> | undefined) : undefined;
+      const insertedId = insertedRow?.id ?? insertResult?.identifiers?.[0]?.id ?? null;
+      const insertedStatus =
+        artifactTypeForLog === 'resume'
+          ? String(insertedRow?.resumeStatus ?? '')
+          : String(insertedRow?.coverLetterStatus ?? '');
+      const desiredStatus =
+        artifactTypeForLog === 'resume'
+          ? String(patch.resumeStatus ?? '')
+          : String(patch.coverLetterStatus ?? '');
+      if (insertedId && insertedStatus === desiredStatus) {
         // eslint-disable-next-line no-console
         console.info('[studio-artifacts][persist_decision]', {
           scopeKey,

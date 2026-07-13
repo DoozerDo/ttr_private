@@ -467,6 +467,145 @@ describe('CoverLettersService contract', () => {
     }
   });
 
+  it('keeps a rich canonical experience set intact when it is already sufficient for generation', async () => {
+    const { service } = buildService();
+    const buildAllowedBlocksSpy = jest.spyOn(service as any, 'buildAllowedBlocksFromStructuredBaseline');
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+
+    baseline.sections = [
+      {
+        id: 'summary-1',
+        title: 'Summary',
+        sectionType: BaselineSectionType.SUMMARY,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 0,
+        content: 'Operations leader focused on measurable improvements and reliable execution.',
+      } as any,
+      {
+        id: 'section-experience-0',
+        title: 'Experience',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 1,
+        content: [
+          'SentinelOne | Senior Director, Customer Experience | 2024 - Present',
+          '- Led a cross-functional CX program spanning support and product.',
+          '- Improved escalation handling through triage, routing, and operating reviews.',
+        ].join('\n'),
+      } as any,
+      {
+        id: 'section-experience-1',
+        title: 'Experience',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 2,
+        content: [
+          'Starbucks | Senior Manager, Technology Operations | 2020 - 2024',
+          '- Built queue health dashboards and reporting to improve response time.',
+          '- Partnered cross-functionally to reduce repeat escalations and strengthen RCA follow through.',
+        ].join('\n'),
+      } as any,
+      {
+        id: 'section-experience-2',
+        title: 'Experience',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 3,
+        content: [
+          'iStreamPlanet | Director, Service Operations | 2018 - 2020',
+          '- Standardized service operations and incident communication.',
+          '- Drove clearer ownership across support and engineering handoffs.',
+        ].join('\n'),
+      } as any,
+      {
+        id: 'section-experience-3',
+        title: 'Experience',
+        sectionType: BaselineSectionType.EXPERIENCE,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 4,
+        content: [
+          'CenturyLink | Operations Manager | 2015 - 2018',
+          '- Led operational reporting and process improvement.',
+          '- Improved response consistency across escalations and release coordination.',
+        ].join('\n'),
+      } as any,
+    ];
+    (baseline as any).parsedRecords = [
+      {
+        createdAt: new Date('2026-05-01T00:00:00.000Z'),
+        parsedJson: {
+          identity: { full_name: 'Jordan Lee' },
+        },
+        flagsJson: {
+          reviewState: { verified: true },
+        },
+        resumeV2Json: null,
+      } as any,
+    ];
+
+    try {
+      const draft = await (service as any).buildCoverLetterDraft('user-1', request as any);
+      const allowedBlocks = draft.allowedBlocks ?? [];
+      const allowedBlockIds = allowedBlocks.map((block: any) => String(block.id ?? ''));
+      const paragraphEvidenceIds = (draft.generation.paragraphEvidence ?? []).flatMap((entry: any) =>
+        Array.isArray(entry.sourceEvidenceIds) ? entry.sourceEvidenceIds : [],
+      );
+
+      expect(buildAllowedBlocksSpy).toHaveBeenCalled();
+      expect(allowedBlockIds).toEqual(
+        expect.arrayContaining([
+          'resume_v2_summary',
+          'parsed-experience-0',
+          'parsed-experience-1',
+          'parsed-experience-2',
+        ]),
+      );
+      expect(allowedBlockIds.some((id: string) => id.startsWith('resume_v2_exp_'))).toBe(false);
+      expect(allowedBlockIds.some((id: string) => id.startsWith('resume_v2_plain_text'))).toBe(false);
+      expect(allowedBlockIds.some((id: string) => id.startsWith('interpreted:'))).toBe(false);
+      expect(paragraphEvidenceIds.some((id: string) => id.startsWith('resume_v2_exp_'))).toBe(false);
+      expect(draft.generation.document.bodyParagraphs.length).toBeGreaterThanOrEqual(2);
+      expect(draft.generation.content).toMatch(/\S/);
+      expect(draft.baselineVerified).toBe(true);
+    } finally {
+      buildAllowedBlocksSpy.mockRestore();
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsed;
+    }
+  });
+
+  it('fails explicitly when the sparse canonical experience set cannot be promoted into two grounded units', async () => {
+    const { service } = buildService();
+    const originalSections = baseline.sections;
+    const originalParsed = baseline.parsedRecords;
+
+    baseline.sections = createSparseCanonicalCoverLetterSections();
+    (baseline as any).parsedRecords = [
+      {
+        createdAt: new Date('2026-05-01T00:00:00.000Z'),
+        parsedJson: {
+          identity: { full_name: 'Jordan Lee' },
+        },
+        flagsJson: {
+          reviewState: { verified: true },
+        },
+        resumeV2Json: null,
+      } as any,
+    ];
+
+    try {
+      await expect((service as any).buildCoverLetterDraft('user-1', request as any)).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'canonical_cover_letter_evidence_insufficient',
+        }),
+      });
+    } finally {
+      baseline.sections = originalSections;
+      (baseline as any).parsedRecords = originalParsed;
+    }
+  });
+
   it('treats canonical structured evidence as authoritative even when parsed verification flags are absent', async () => {
     const { service } = buildService();
     const originalSections = baseline.sections;
@@ -853,6 +992,9 @@ describe('CoverLettersService contract', () => {
       );
       expect(allowedBlockIds.some((id: string) => id.startsWith('resume_v2_exp_'))).toBe(false);
       expect(paragraphEvidenceIds.some((id: string) => id.startsWith('parsed-experience-'))).toBe(true);
+      expect(Array.isArray(draft.generation.internalTrace?.usedEvidenceIds)).toBe(true);
+      expect((draft.generation.internalTrace?.usedEvidenceIds ?? []).some((id: string) => id.startsWith('parsed-experience-'))).toBe(true);
+      expect((draft.generation.internalTrace?.usedEvidenceIds ?? []).some((id: string) => id.startsWith('resume_v2_exp_'))).toBe(false);
       expect(draft.generation.document.bodyParagraphs.length).toBeGreaterThanOrEqual(2);
       expect(draft.generation.content).toMatch(/Program Manager/i);
     } finally {
@@ -1682,7 +1824,7 @@ describe('CoverLettersService contract', () => {
     expect(readiness.reasons[0]?.code).toBe('verified_only_generation'); 
   }); 
 
-  it('falls back to verified-only generation for score >= 70 when readiness is BLOCKED', async () => { 
+  it('falls back to verified-only generation for score >= 30 when readiness is BLOCKED', async () => { 
     const { service, coverRepo } = buildService({ 
       complianceFlags: [ 
         {

@@ -115,6 +115,110 @@ describe('resolveBaselineSectionsForGeneration', () => {
     expect(sections.find((section) => section.id === 'parsed-experience-1')?.content).toContain('Support Operations Manager');
   });
 
+  it('keeps a rich canonical experience section set intact when it is already sufficient', () => {
+    const baseline = {
+      id: 'baseline-1',
+      sections: [
+        {
+          id: 'section-summary',
+          baselineId: 'baseline-1',
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          content: 'Customer operations leader focused on measurable improvements.',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: 'section-experience-0',
+          baselineId: 'baseline-1',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: [
+            'SentinelOne | Senior Director, Customer Experience | 2024 - Present',
+            '- Led a cross-functional CX program spanning support and product.',
+            '- Improved escalation handling through triage, routing, and operating reviews.',
+          ].join('\n'),
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: 'section-experience-1',
+          baselineId: 'baseline-1',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: [
+            'Starbucks | Senior Manager, Technology Operations | 2020 - 2024',
+            '- Built queue health dashboards and reporting to improve response time.',
+            '- Partnered cross-functionally to reduce repeat escalations and strengthen RCA follow through.',
+          ].join('\n'),
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 2,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: 'section-experience-2',
+          baselineId: 'baseline-1',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: [
+            'iStreamPlanet | Director, Service Operations | 2018 - 2020',
+            '- Standardized service operations and incident communication.',
+            '- Drove clearer ownership across support and engineering handoffs.',
+          ].join('\n'),
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 3,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: 'section-experience-3',
+          baselineId: 'baseline-1',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: [
+            'CenturyLink | Operations Manager | 2015 - 2018',
+            '- Led operational reporting and process improvement.',
+            '- Improved response consistency across escalations and release coordination.',
+          ].join('\n'),
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 4,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+      parsedRecords: [
+        {
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          parsedJson: {
+            identity: { full_name: 'Jordan Lee' },
+          },
+          resumeV2Json: null,
+        },
+      ],
+    } as any;
+
+    const sections = resolveBaselineSectionsForGeneration(baseline);
+
+    expect(sections.map((section) => section.id)).toEqual(
+      expect.arrayContaining([
+        'section-summary',
+        'section-experience-0',
+        'section-experience-1',
+        'section-experience-2',
+        'section-experience-3',
+      ]),
+    );
+    expect(sections.some((section) => String(section.id ?? '').startsWith('resume_v2_exp_'))).toBe(false);
+    expect(sections.filter((section) => section.sectionType === BaselineSectionType.EXPERIENCE)).toHaveLength(4);
+    expect(sections.find((section) => section.id === 'section-experience-0')?.content).toContain('SentinelOne');
+    expect(sections.find((section) => section.id === 'section-experience-3')?.content).toContain('CenturyLink');
+  });
+
   it('prefers richer parsed baseline experience when explicitly requested', () => {
     const baseline = {
       id: 'baseline-1',

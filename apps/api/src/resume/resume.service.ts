@@ -5902,6 +5902,32 @@ export class ResumeService {
             ? ((response as any).internalTrace.usedEvidenceIds as unknown[]).filter(Boolean)
             : Object.values(resumeTraceAudit.traceMap).flat().filter(Boolean),
       } as any;
+
+      const finalPreviewQualityGate = validateResumeArtifactQuality(
+        this.toTextOnlyResumeDocument(response.preview.resume as NormalizedResumeDocument),
+      );
+      if (finalPreviewQualityGate.status === 'pass') {
+        qualityGate = finalPreviewQualityGate;
+      }
+      const finalQualityGateStatus = String((qualityGate as any)?.status ?? '').trim();
+      const finalExportReady = Boolean(
+        (exportable || isResumeV2) &&
+          finalQualityGateStatus === 'pass' &&
+          (!structuredBaselineTemplateDegradedToBaselineOnly || canonicalResumeV2AuthorityIsUsable) &&
+          (!tailoringLimitations || canonicalResumeV2AuthorityIsUsable),
+      );
+      response.exportReady = finalExportReady;
+      response.exports = finalExportReady
+        ? exports
+        : ({ docx: false, pdf: false } as DocumentGenerationExports);
+      response.actions = {
+        ...(response.actions ?? {}),
+        canExport: finalExportReady,
+      };
+      response.qualityGate =
+        finalQualityGateStatus === 'pass'
+          ? { status: 'pass', reasons: [] }
+          : qualityGate;
     }
 
     const persistedContent = trimIncompleteTrailingFragments(
@@ -5943,7 +5969,8 @@ export class ResumeService {
         }
       })();
       return Math.max(resumeV2ExperienceCount, structuredExperienceCount);
-    })();
+      })();
+    const hasAuthoritativeExperienceForGuard = authoritativeExperienceCountForGuard > 0;
     const hasMinimalSummarySection = (() => {
       try {
         const sections = (response as any)?.preview?.resume?.sections;
@@ -5982,10 +6009,11 @@ export class ResumeService {
       }
     })();
     if (
-      (isMinimalFallbackRuntime && isStudioEligibleLaneForPersistence) ||
+      (isMinimalFallbackRuntime && isStudioEligibleLaneForPersistence && !hasAuthoritativeExperienceForGuard) ||
       (!isInternalStudioVerifiedOnlyFallbackCall &&
         !isStudioEligibleLaneForPersistence &&
-        isMinimalFallbackRuntime)
+        isMinimalFallbackRuntime &&
+        !hasAuthoritativeExperienceForGuard)
     ) {
       if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
         (response as any).internal = {

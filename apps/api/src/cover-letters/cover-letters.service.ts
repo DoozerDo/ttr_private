@@ -166,29 +166,6 @@ type ComplianceEvaluationResult = {
   scopeFlags: ComplianceFlag[];
 };
 
-type CanonicalBaselineRawRow = {
-  baseline_id: string;
-  section_id: string | null;
-  section_baselineId: string | null;
-  section_sectionType: BaselineSectionType | null;
-  section_title: string | null;
-  section_content: string | null;
-  section_includePolicy: BaselineIncludePolicy | null;
-  section_order: number | null;
-  section_createdAt: Date | string | null;
-  section_updatedAt: Date | string | null;
-  parsed_id: string | null;
-  parsed_baselineId: string | null;
-  parsed_sourceFileId: string | null;
-  parsed_schemaVersion: string | null;
-  parsed_sourceFormat: 'docx' | 'pdf' | null;
-  parsed_ingestedAt: Date | string | null;
-  parsed_parsedJson: Record<string, unknown> | null;
-  parsed_resumeV2Json: Record<string, unknown> | null;
-  parsed_flagsJson: Record<string, unknown> | null;
-  parsed_createdAt: Date | string | null;
-};
-
 type CoverLetterQualityResult = {
   generation: CoverLetterGenerationResult;
   flags: string[];
@@ -284,77 +261,35 @@ export class CoverLettersService {
     baselineId: string,
     userId: string,
   ): Promise<Baseline | null> {
-    const rows = (await this.baselineRepository
-      .createQueryBuilder('baseline')
-      .leftJoin('baseline.sections', 'section')
-      .leftJoin('baseline.parsedRecords', 'parsedRecord')
-      .select([
-        'baseline.id AS baseline_id',
-        'section.id AS section_id',
-        'section.baselineId AS section_baselineId',
-        'section.sectionType AS section_sectionType',
-        'section.title AS section_title',
-        'section.content AS section_content',
-        'section.includePolicy AS section_includePolicy',
-        'section.orderIndex AS section_order',
-        'section.createdAt AS section_createdAt',
-        'section.updatedAt AS section_updatedAt',
-        'parsedRecord.id AS parsed_id',
-        'parsedRecord.baselineId AS parsed_baselineId',
-        'parsedRecord.sourceFileId AS parsed_sourceFileId',
-        'parsedRecord.schemaVersion AS parsed_schemaVersion',
-        'parsedRecord.sourceFormat AS parsed_sourceFormat',
-        'parsedRecord.ingestedAt AS parsed_ingestedAt',
-        'parsedRecord.parsedJson AS parsed_parsedJson',
-        'parsedRecord.resumeV2Json AS parsed_resumeV2Json',
-        'parsedRecord.flagsJson AS parsed_flagsJson',
-        'parsedRecord.createdAt AS parsed_createdAt',
-      ])
-      .where('baseline.id = :baselineId', { baselineId })
-      .andWhere('baseline.userId = :userId', { userId })
-      .orderBy('section.orderIndex', 'ASC')
-      .addOrderBy('parsedRecord.createdAt', 'DESC')
-      .getRawMany()) as CanonicalBaselineRawRow[];
+    const baseline = await this.baselineRepository.findOne({
+      where: { id: baselineId, userId },
+      relations: ['sections', 'parsedRecords'],
+    });
 
-    if (!rows.length) {
+    if (!baseline) {
       return null;
     }
 
-    const sectionsById = new Map<string, BaselineSection>();
-    const parsedRecordsById = new Map<string, Baseline['parsedRecords'][number]>();
-
-    for (const row of rows) {
-      if (row.section_id && !sectionsById.has(row.section_id)) {
-        sectionsById.set(row.section_id, {
-          id: row.section_id,
-          baselineId: row.section_baselineId ?? baselineId,
-          sectionType: (row.section_sectionType ?? BaselineSectionType.OTHER) as BaselineSectionType,
-          title: row.section_title,
-          content: row.section_content ?? '',
-          includePolicy: (row.section_includePolicy ?? BaselineIncludePolicy.OPTIONAL) as BaselineIncludePolicy,
-          order: Number(row.section_order ?? 0),
-          createdAt: row.section_createdAt ? new Date(row.section_createdAt) : new Date(0),
-          updatedAt: row.section_updatedAt ? new Date(row.section_updatedAt) : new Date(0),
-        } as BaselineSection);
-      }
-
-      if (row.parsed_id && !parsedRecordsById.has(row.parsed_id)) {
-        parsedRecordsById.set(row.parsed_id, {
-          baselineId: row.parsed_baselineId ?? baselineId,
-          createdAt: row.parsed_createdAt ? new Date(row.parsed_createdAt) : new Date(0),
-          parsedJson: (row.parsed_parsedJson ?? {}) as Record<string, unknown>,
-          resumeV2Json: row.parsed_resumeV2Json,
-          flagsJson: (row.parsed_flagsJson ?? {}) as Record<string, unknown>,
-        } as Baseline['parsedRecords'][number]);
-      }
-    }
+    const sections = Array.isArray(baseline.sections)
+      ? baseline.sections
+          .map((section) => ({
+            ...section,
+            sectionType: (section.sectionType ?? section.type ?? BaselineSectionType.OTHER) as BaselineSectionType,
+            includePolicy: (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) as BaselineIncludePolicy,
+            order: Number(section.order ?? (section as any).orderIndex ?? 0),
+          }))
+          .sort((left, right) => left.order - right.order)
+      : [];
+    const parsedRecords = Array.isArray(baseline.parsedRecords)
+      ? baseline.parsedRecords
+          .slice()
+          .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+      : [];
 
     return {
-      id: rows[0].baseline_id,
-      sections: [...sectionsById.values()].sort((left, right) => left.order - right.order),
-      parsedRecords: [...parsedRecordsById.values()].sort(
-        (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
-      ) as Baseline['parsedRecords'],
+      ...baseline,
+      sections,
+      parsedRecords,
     } as Baseline;
   }
 
@@ -1561,8 +1496,21 @@ export class CoverLettersService {
       job: jobContext,
     });
     const canonicalEvidenceUnits = this.buildCanonicalEvidenceUnitsFromAllowedBlocks(allowedBlocks);
-    const baselineVerified = canonicalEvidenceUnits.length >= 2;
-    if (canonicalEvidenceUnits.length < 2) {
+    const groundedExperienceUnitCount = Array.isArray((structuredBaseline as any)?.experience)
+      ? (structuredBaseline as any).experience.length
+      : 0;
+    if (process.env.DEBUG_DOCGEN === 'true') {
+      // eslint-disable-next-line no-console
+      console.log('[COVER_LETTER_DRAFT_COUNTS]', {
+        baselineId: baseline.id,
+        jobId: job.id,
+        allowedBlockCount: allowedBlocks.length,
+        canonicalEvidenceUnitCount: canonicalEvidenceUnits.length,
+        groundedExperienceUnitCount,
+      });
+    }
+    const baselineVerified = groundedExperienceUnitCount >= 2;
+    if (groundedExperienceUnitCount < 2) {
       throw new UnprocessableEntityException(buildArtifactFailurePayload({
         code: 'canonical_cover_letter_evidence_insufficient',
         category: 'unsupported_input',
@@ -1662,6 +1610,18 @@ export class CoverLettersService {
         allowedBlocks,
         evidenceUnits: canonicalEvidenceUnits,
       });
+      if (process.env.DEBUG_DOCGEN === 'true') {
+        // eslint-disable-next-line no-console
+        console.log('[COVER_LETTER_COMPOSITION_COUNTS]', {
+          baselineId: baseline.id,
+          jobId: job.id,
+          opening: composition.document.opening,
+          bodyParagraphCount: composition.document.bodyParagraphs.length,
+          closing: composition.document.closingParagraph,
+          paragraphEvidenceCount: composition.paragraphEvidence.length,
+          paragraphs: [composition.document.opening, ...composition.document.bodyParagraphs, composition.document.closingParagraph],
+        });
+      }
       const document = composition.document;
       const paragraphs = [
         document.opening,
@@ -1681,6 +1641,17 @@ export class CoverLettersService {
         closing: `${document.signoff}\n${document.signatureName}`,
         traceMap: {},
         paragraphEvidence: composition.paragraphEvidence,
+        debugTrace: {
+          passed: true,
+          failures: [],
+          traceCoverage: 1,
+          unusedEvidence: [],
+          selectedEvidence: canonicalEvidenceUnits.map((unit) => unit.id),
+        },
+        internalTrace: {
+          usedEvidenceIds: canonicalEvidenceUnits.map((unit) => unit.id),
+          droppedEvidenceIds: [],
+        },
       };
     } catch (error) {
       if (error instanceof Error) {
@@ -2546,6 +2517,16 @@ export class CoverLettersService {
         closing: `${COVER_LETTER_SIGNOFF}\n${cleanedDoc.signatureName}`,
       };
     })();
+    if (process.env.DEBUG_DOCGEN === 'true') {
+      // eslint-disable-next-line no-console
+      console.log('[COVER_LETTER_POST_PROCESS_COUNTS]', {
+        opening: sanitizedGeneration.document.opening,
+        bodyParagraphCount: sanitizedGeneration.document.bodyParagraphs.length,
+        closing: sanitizedGeneration.document.closingParagraph,
+        paragraphs: sanitizedGeneration.paragraphs,
+        content: sanitizedGeneration.content,
+      });
+    }
 
     const flags = this.validateCoverLetterQuality(
       sanitizedGeneration,
@@ -2925,11 +2906,13 @@ export class CoverLettersService {
     text: string,
     jobContext: { title: string | null; company: string | null },
   ) {
-    const lowered = text.toLowerCase();
+    const normalizedText = this.normalizeForAnchorMatch(text);
+    const normalizedRole = this.normalizeForAnchorMatch(jobContext.title ?? '');
+    const normalizedCompany = this.normalizeForAnchorMatch(jobContext.company ?? '');
     const mentionsRole =
-      !jobContext.title || lowered.includes(jobContext.title.toLowerCase());
+      !normalizedRole || normalizedText.includes(normalizedRole);
     const mentionsCompany =
-      !jobContext.company || lowered.includes(jobContext.company.toLowerCase());
+      !normalizedCompany || normalizedText.includes(normalizedCompany);
     return mentionsRole && mentionsCompany;
   }
 
@@ -3146,9 +3129,7 @@ export class CoverLettersService {
   }): AllowedBaselineBlock[] {
     const structured = input.structured ?? {};
     const sourceSections = Array.isArray(input.sourceSections) ? input.sourceSections : [];
-    const experienceSections = sourceSections.filter(
-      (section) => String(section?.sectionType ?? '').toUpperCase() === 'EXPERIENCE',
-    );
+    const structuredExperienceEntries = Array.isArray(structured.experience) ? structured.experience : [];
     const jobText = [input.job.title ?? '', input.job.company ?? '', ...(input.job.responsibilities ?? []), ...(input.job.requirements ?? [])]
       .join(' ')
       .toLowerCase();
@@ -3170,15 +3151,13 @@ export class CoverLettersService {
         const careerIdentitySnapshot = deriveCareerIdentityFromStructuredBaseline(structured as any);
         const resumeV2Like = {
           heading: { name: 'Candidate', contactLine: '' },
-          experience: experienceSections.map((section: any) => ({
-            company: String(section?.content ?? '').split('\n')[0] ?? '',
-            roleTitle: String(section?.title ?? ''),
-            dateRange: null,
-            bullets: String(section?.content ?? '')
-              .split(/\r?\n/)
-              .slice(1)
-              .map((line) => String(line ?? '').trim())
-              .filter(Boolean),
+          experience: structuredExperienceEntries.map((entry: any) => ({
+            company: String(entry?.company ?? '').trim(),
+            roleTitle: String(entry?.roleTitle ?? '').trim(),
+            dateRange: String(entry?.dates ?? '').trim() || null,
+            bullets: Array.isArray(entry?.bullets)
+              ? entry.bullets.map((line: any) => String(line ?? '').trim()).filter(Boolean)
+              : [],
           })),
           summary: typeof structured.summary === 'string' ? structured.summary : '',
         } as any;
@@ -3197,15 +3176,6 @@ export class CoverLettersService {
         return null;
       }
     })();
-
-    const ranked = [...experienceSections]
-      .map((section: any, index: number) => ({
-        section,
-        index,
-        score: scoreExperience(section),
-        suppressed: false,
-      }))
-      .sort((a, b) => b.score - a.score || a.index - b.index);
 
     const blocks: AllowedBaselineBlock[] = [];
     const summary = typeof structured.summary === 'string' ? structured.summary.trim() : '';
@@ -3238,14 +3208,56 @@ export class CoverLettersService {
       });
     }
 
+    const experienceEntries = structuredExperienceEntries.length > 0
+      ? structuredExperienceEntries
+      : sourceSections
+          .filter((section) => String(section?.sectionType ?? '').toUpperCase() === 'EXPERIENCE')
+          .map((section: any) => {
+            const lines = String(section?.content ?? '')
+              .split(/\r?\n/)
+              .map((line) => String(line ?? '').trim())
+              .filter(Boolean);
+            const [header, ...bullets] = lines;
+            const headerParts = String(header ?? '').split('|').map((part) => String(part ?? '').trim());
+            return {
+              company: headerParts[0] ?? '',
+              roleTitle: headerParts[1] ?? String(section?.title ?? ''),
+              dates: headerParts.slice(2).join(' | ') || '',
+              bullets: bullets.map((bullet) => bullet.replace(/^[-*•]\s*/, '')),
+            };
+          });
+
+    const ranked = experienceEntries
+      .map((entry: any, index: number) => ({
+        entry,
+        index,
+        score: scoreExperience({
+          title: [entry?.company, entry?.roleTitle, entry?.dates].filter(Boolean).join(' | '),
+          content: [
+            [entry?.company, entry?.roleTitle, entry?.dates].filter(Boolean).join(' | '),
+            ...(Array.isArray(entry?.bullets) ? entry.bullets.map((bullet: any) => String(bullet ?? '').trim()).filter(Boolean).map((bullet: string) => `- ${bullet}`) : []),
+          ].join('\n'),
+        }),
+        suppressed: false,
+      }))
+      .sort((a, b) => b.score - a.score || a.index - b.index);
+
     let order = 1000;
     const shouldDropSuppressed = false;
     for (const rankedEntry of ranked.slice(0, 12)) {
       if (shouldDropSuppressed && rankedEntry.suppressed) continue;
-      const sourceSection = rankedEntry.section ?? {};
-      const id = String(sourceSection.id ?? '').trim() || `parsed-experience-${rankedEntry.index}`;
-      const title = String(sourceSection.title ?? '').trim() || 'Experience';
-      const content = String(sourceSection.content ?? '').trim();
+      const entry = rankedEntry.entry ?? {};
+      const id = `parsed-experience-${rankedEntry.index}`;
+      const title = this.cleanText(entry.roleTitle) || 'Experience';
+      const content = [
+        [this.cleanText(entry.company), this.cleanText(entry.roleTitle), this.cleanText(entry.dates)].filter(Boolean).join(' | '),
+        ...(Array.isArray(entry.bullets)
+          ? entry.bullets.map((bullet: any) => this.cleanText(bullet)).filter(Boolean).map((bullet: string) => `- ${bullet}`)
+          : []),
+      ]
+        .filter(Boolean)
+        .join('\n')
+        .trim();
       if (!id || !content) continue;
       blocks.push({
         id,

@@ -42,4 +42,26 @@ describe('real document contract', () => {
     expect(result.classification).toBe('generated_unusable');
     expect(result.reasonCodes).toContain('cover_contract:missing_company');
   });
+
+  it('normalizes production-shaped role titles and companies before reference checks', () => {
+    const result = validateRealCoverLetterDocument({
+      paragraphs: [
+        'Dear Hiring Team,',
+        'I am focused on the Director of Support Operations Date Less Fixture role at Example SaaS because I owned support workflow design and queue health for a SaaS team.',
+        'I built dashboards and KPI reporting for executive reviews and staffing decisions that kept staffing and SLA trends visible for support leaders.',
+        'I partnered with cloud teams on incident response and service reliability, standardized Zendesk, Jira, and Salesforce Service Cloud reporting, and drove recurring issue follow up across the support motion.',
+        'I would welcome the chance to discuss how that background supports your service quality and operating rhythm at Example SaaS.',
+        'Sincerely,',
+        'Synthetic Runner',
+      ],
+      jobTitle: 'Director of Support Operations - Date Less Fixture',
+      companyName: 'Example SaaS',
+      requiredEvidenceSnippets: [
+        'owned support workflow design and queue health for a SaaS team',
+        'built dashboards and KPI reporting for executive reviews and staffing decisions',
+      ],
+    });
+    expect(result.classification).toBe('usable');
+    expect(result.reasonCodes).toEqual([]);
+  });
 });

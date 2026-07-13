@@ -101,6 +101,30 @@ describe('artifactQualityValidator', () => {
     expect(repairedGate.status).toBe('needs_refinement');
   });
 
+  it('normalizes production-shaped role titles and companies before reference checks', () => {
+    const paragraphs = [
+      'Dear Hiring Team,',
+      'I am focused on the Director of Support Operations Date Less Fixture role at Example SaaS because I owned support workflow design and queue health for a SaaS team.',
+      'I built dashboards and KPI reporting for executive reviews and staffing decisions that kept staffing and SLA trends visible for support leaders.',
+      'I partnered with cloud teams on incident response and service reliability, standardized Zendesk, Jira, and Salesforce Service Cloud reporting, and drove recurring issue follow up across the support motion.',
+      'I would welcome the chance to discuss how that background supports your service quality and operating rhythm at Example SaaS.',
+      'Sincerely,',
+      'Synthetic Runner',
+    ];
+
+    const gate = validateCoverLetterArtifactQuality(paragraphs, {
+      company: 'Example SaaS',
+      roleTitle: 'Director of Support Operations - Date Less Fixture',
+      requiredEvidenceSnippets: [
+        'owned support workflow design and queue health for a SaaS team',
+        'built dashboards and KPI reporting for executive reviews and staffing decisions',
+      ],
+    });
+
+    expect(gate.reasons).not.toContain('missing_company_reference');
+    expect(gate.reasons).not.toContain('missing_role_reference');
+  });
+
   it('double failure remains flagged', () => {
     const paragraphs = ['operating context The'];
     const gate = validateCoverLetterArtifactQuality(paragraphs);

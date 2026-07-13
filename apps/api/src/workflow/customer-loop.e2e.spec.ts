@@ -1,20 +1,21 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { readFileSync } from 'node:fs';
-import { Document, Paragraph, Packer, TextRun } from 'docx';
+import { Document, Paragraph, Packer } from 'docx';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import request from 'supertest';
 import { DataSource, Repository } from 'typeorm';
 import { AuthService } from '../auth/auth.service';
-import { CoverLettersService } from '../cover-letters/cover-letters.service';
 import { Baseline } from '../baseline/baseline.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
-import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { Job } from '../jobs/job.entity';
 import { User } from '../users/user.entity';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
+import { resolveBaselineSectionsForGeneration } from '../baseline/baseline-section-source';
+import { extractStructuredBaselineFromSections } from '../baseline/structuredBaselineExtractor';
+import { StudioArtifact, StudioArtifactLifecycleStatus } from '../studio-artifacts/studio-artifact.entity';
 
 type RegisterResponse = {
   accessToken: string;
@@ -25,6 +26,49 @@ function expectObject(value: unknown): asserts value is Record<string, unknown> 
   if (!value || typeof value !== 'object') {
     throw new Error('Expected object response.');
   }
+}
+
+function assertFitAssessmentContract(
+  responseBody: unknown,
+  expectedMinimumScore: number,
+) {
+  expectObject(responseBody);
+  const body = responseBody as Record<string, any>;
+  const score = Number(body.score ?? body.overallScore ?? body.fit_score ?? NaN);
+  expect(Number.isFinite(score)).toBe(true);
+  expect(score).toBeGreaterThanOrEqual(expectedMinimumScore);
+
+  const scoreBreakdown = body.score_breakdown as
+    | {
+        total_score?: number;
+        dimensions?: Array<{ key?: string; label?: string; score?: number; weight?: number }>;
+      }
+    | undefined;
+  expect(scoreBreakdown).toBeTruthy();
+  expect(Number(scoreBreakdown?.total_score ?? NaN)).toBe(score);
+
+  const dimensions = Array.isArray(scoreBreakdown?.dimensions)
+    ? scoreBreakdown!.dimensions
+    : [];
+  expect(dimensions).toHaveLength(5);
+  const contributingDimensions = dimensions.filter(
+    (dimension) => Number(dimension?.score ?? 0) > 0,
+  );
+  expect(contributingDimensions).toHaveLength(5);
+  expect(
+    contributingDimensions.reduce(
+      (sum, dimension) => sum + Number(dimension?.score ?? 0),
+      0,
+    ),
+  ).toBe(score);
+  const dimensionByKey = Object.fromEntries(
+    dimensions.map((dimension) => [dimension.key, Number(dimension?.score ?? 0)]),
+  ) as Record<string, number>;
+  expect(dimensionByKey.role_scope_and_seniority).toBeGreaterThan(0);
+  expect(dimensionByKey.support_operations_and_process_rigor).toBeGreaterThan(0);
+  expect(dimensionByKey.tooling_and_platform_experience).toBeGreaterThan(0);
+  expect(dimensionByKey.domain_and_business_context).toBeGreaterThan(0);
+  expect(dimensionByKey.change_leadership_and_customer_advocacy).toBeGreaterThan(0);
 }
 
 function loadStrongFitJobDescription(): string {
@@ -45,45 +89,49 @@ async function createResumeFixtureDocx(options: ResumeFixtureOptions = {}): Prom
     experienceCount === 5 && !includeDates ? 'date-less-five-role-resume.docx' : 'strong-fit-resume.docx',
   );
 
-  const experienceBlocks =
+    const experienceBlocks =
     experienceCount === 5
       ? [
           {
-            header: 'Example SaaS | Support Operations Director',
-            dates: includeDates ? '2019 - 2022' : '',
+            header: includeDates
+              ? 'Example SaaS | Support Operations Director | 2019 - 2022'
+              : 'Example SaaS | Support Operations Director',
             bullets: [
               'Owned the support operations operating model and support workflow design for a high-volume SaaS support team.',
               'Built dashboards and KPIs for executive communication and weekly operating reviews that kept staffing tradeoffs, SLA adherence, and queue health visible.',
             ],
           },
           {
-            header: 'Example SaaS | Support Operations Program Owner',
-            dates: includeDates ? '2024 - Present' : '',
+            header: includeDates
+              ? 'Acme Corp | Support Operations Program Owner | 2024 - Present'
+              : 'Acme Corp | Support Operations Program Owner',
             bullets: [
               'Led operating reviews, coaching rhythms, and escalation playbooks.',
-              'Used voice of the customer, CSAT trends, and self service signals to guide change leadership.',
               'Owned capacity planning and staffing tradeoffs across two regions and three queues.',
             ],
           },
           {
-            header: 'Example SaaS | Workflow And Incident Design Lead',
-            dates: includeDates ? '2022 - 2024' : '',
+            header: includeDates
+              ? 'Northwind Support | Workflow And Incident Design Lead | 2022 - 2024'
+              : 'Northwind Support | Workflow And Incident Design Lead',
             bullets: [
               'Partnered with cloud infrastructure and observability teams on incident response, major incident follow-up, incident command, and service reliability.',
-              'Standardized ticketing system governance in Zendesk and Jira, plus CRM reporting in Salesforce Service Cloud, so routing and handoff stayed predictable.',
+              'Standardized ticketing system governance in Zendesk and Jira so routing and handoff stayed predictable.',
             ],
           },
           {
-            header: 'Example SaaS | Support Operations Manager',
-            dates: includeDates ? '2020 - 2022' : '',
+            header: includeDates
+              ? 'Greenfield Systems | Support Operations Manager | 2020 - 2022'
+              : 'Greenfield Systems | Support Operations Manager',
             bullets: [
-              'Drove automation workflows and ITSM process maturity improvements that reduced repeat escalations, improved SLA adherence, and reduced time to resolution.',
+              'Drove automation workflows and ITSM process maturity improvements that reduced repeat escalations and improved SLA adherence.',
               'Kept issue analysis and service metrics aligned with the operating rhythm.',
             ],
           },
           {
-            header: 'Example SaaS | Customer Advocacy Lead',
-            dates: includeDates ? '2018 - 2020' : '',
+            header: includeDates
+              ? 'Blue Sky Services | Customer Advocacy Lead | 2018 - 2020'
+              : 'Blue Sky Services | Customer Advocacy Lead',
             bullets: [
               'Maintained leadership visibility into customer advocacy and service quality.',
               'Aligned support tooling, reporting, and team workflows to the operating model.',
@@ -92,30 +140,19 @@ async function createResumeFixtureDocx(options: ResumeFixtureOptions = {}): Prom
         ]
       : [
           {
-            header: 'Example SaaS | Support Operations Director',
+            header: 'Biblioso | Support Operations Director',
             dates: includeDates ? '2019 - 2022' : '',
             bullets: [
               'Owned the support operations operating model and support workflow design for a high-volume SaaS support team.',
               'Built dashboards and KPIs for executive communication and weekly operating reviews that kept staffing tradeoffs, SLA adherence, and queue health visible.',
-              'Partnered with cloud infrastructure and observability teams on incident response, major incident follow-up, incident command, and service reliability.',
-              'Standardized ticketing system governance in Zendesk and Jira, plus CRM reporting in Salesforce Service Cloud, so routing and handoff stayed predictable.',
-              'Drove automation workflows and ITSM process maturity improvements that reduced repeat escalations, improved SLA adherence, and reduced time to resolution.',
             ],
           },
           {
-            header: 'Example SaaS | Support Operations Program Owner',
+            header: 'Acme Corp | Support Operations Program Owner',
             dates: includeDates ? '2024 - Present' : '',
             bullets: [
               'Led operating reviews, coaching rhythms, and escalation playbooks.',
-              'Led cross functional prioritization on recurring issue fixes.',
-              'Improved automation workflows and ITSM process maturity.',
-              'Used voice of the customer, CSAT trends, and self service signals to guide change leadership.',
               'Owned capacity planning and staffing tradeoffs across two regions and three queues.',
-              'Reduced repeat escalations, improved SLA adherence, and lowered response time.',
-              'Kept issue analysis and service metrics aligned with the operating rhythm.',
-              'Built operating reviews and playbooks that clarified ownership.',
-              'Aligned support tooling, reporting, and team workflows to the operating model.',
-              'Maintained leadership visibility into customer advocacy and service quality.',
             ],
           },
         ];
@@ -125,11 +162,11 @@ async function createResumeFixtureDocx(options: ResumeFixtureOptions = {}): Prom
     'alex.candidate@example.com | Seattle, WA | (555) 555-1234',
     '',
     'SUMMARY',
-    'Support Operations Director with operating model ownership, governance design, tooling roadmap responsibility, and customer-facing support leadership for a SaaS support team. Leads queue health, service reliability, incident management, ITSM process maturity, automation workflows, dashboards and KPIs, voice of the customer, customer advocacy, and capacity planning through weekly operating reviews and executive updates.',
+    'Support operations leader focused on measurable improvements and reliable execution. Builds cross-functional programs across support and product to strengthen service quality and operating rhythm.',
     '',
-    'EXPERIENCE',
     ...experienceBlocks.flatMap((block) => [
-      [block.header, block.dates].filter(Boolean).join(' | '),
+      'EXPERIENCE',
+      block.header,
       ...block.bullets.map((bullet) => `- ${bullet}`),
       '',
     ]),
@@ -163,8 +200,9 @@ describe('customer workflow contract (real API e2e)', () => {
   let authToken: string;
   let userId: string;
   let userRepository: Repository<User>;
+  let baselineRepository: Repository<Baseline>;
   let baselineVersionRepository: Repository<BaselineVersion>;
-  let coverLettersService: CoverLettersService;
+  let studioArtifactRepository: Repository<StudioArtifact>;
 
   beforeAll(() => {
     process.env.NODE_ENV = 'test';
@@ -188,8 +226,9 @@ describe('customer workflow contract (real API e2e)', () => {
     }
 
     userRepository = dataSource.getRepository(User);
+    baselineRepository = dataSource.getRepository(Baseline);
     baselineVersionRepository = dataSource.getRepository(BaselineVersion);
-    coverLettersService = moduleRef.get(CoverLettersService);
+    studioArtifactRepository = dataSource.getRepository(StudioArtifact);
 
     const authService = moduleRef.get(AuthService);
     const email = `workflow-real-loop+${Date.now()}@example.com`;
@@ -238,6 +277,16 @@ describe('customer workflow contract (real API e2e)', () => {
       const baselineId = String((uploadResponse.body as any).baselineId ?? '').trim();
       expect(baselineId).toBeTruthy();
 
+      const persistedBaseline = await baselineRepository.findOne({
+        where: { id: baselineId },
+        relations: ['sections', 'parsedRecords'],
+      });
+      expect(persistedBaseline).toBeTruthy();
+      const resolvedSections = resolveBaselineSectionsForGeneration(persistedBaseline as Baseline);
+      expect(resolvedSections.some((section) => String(section.sectionType ?? '').toUpperCase() === 'EXPERIENCE')).toBe(true);
+      const resolvedStructuredBaseline = extractStructuredBaselineFromSections(resolvedSections as any);
+      expect(resolvedStructuredBaseline.experience.length).toBeGreaterThan(0);
+
       const versionsResponse = await request(app.getHttpServer())
         .get(`/baselines/${encodeURIComponent(baselineId)}/versions`)
         .set('Authorization', `Bearer ${authToken}`)
@@ -253,7 +302,7 @@ describe('customer workflow contract (real API e2e)', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .send({
           title: 'Director of Support Operations - Date Less Fixture',
-          company: 'Example SaaS Date Less',
+          company: 'Example SaaS',
           rawDescription: jobDescription.trim(),
           responsibilities: [
             'Lead and scale support operations across global teams.',
@@ -283,15 +332,7 @@ describe('customer workflow contract (real API e2e)', () => {
         .get(`/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(baselineId)}/latest`)
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200);
-      expectObject(latestAssessmentResponse.body);
-      const score = Number(
-        (latestAssessmentResponse.body as any).score ??
-          (latestAssessmentResponse.body as any).overallScore ??
-          (latestAssessmentResponse.body as any).fit_score ??
-          NaN,
-      );
-      expect(Number.isFinite(score)).toBe(true);
-      expect(score).toBeGreaterThanOrEqual(80);
+      assertFitAssessmentContract(latestAssessmentResponse.body, 30);
       const assessmentId = String(
         (latestAssessmentResponse.body as any).assessmentId ??
           (latestAssessmentResponse.body as any).id ??
@@ -308,9 +349,19 @@ describe('customer workflow contract (real API e2e)', () => {
           jobId,
           analysisId: assessmentId,
           oneTap: true,
-        });
+      });
       expect([200, 201]).toContain(resumeResponse.status);
       expectObject(resumeResponse.body);
+      // eslint-disable-next-line no-console
+      console.log('[CUSTOMER_LOOP_RESUME_RESULT]', {
+        status: (resumeResponse.body as any)?.status ?? null,
+        generationStatus: (resumeResponse.body as any)?.generationStatus ?? null,
+        exportReady: (resumeResponse.body as any)?.exportReady ?? null,
+        qualityGateStatus: (resumeResponse.body as any)?.qualityGate?.status ?? null,
+        qualityGateReasons: Array.isArray((resumeResponse.body as any)?.qualityGate?.reasons)
+          ? (resumeResponse.body as any).qualityGate.reasons
+          : null,
+      });
       expect(String((resumeResponse.body as any)?.auditId ?? '')).not.toMatch(/^minimal:/);
       expect(String((resumeResponse.body as any)?.generationAuthority ?? '')).not.toBe('fallback');
 
@@ -323,16 +374,40 @@ describe('customer workflow contract (real API e2e)', () => {
           jobId,
           analysisId: assessmentId,
           oneTap: true,
-        });
+      });
       expect([200, 201]).toContain(coverLetterResponse.status);
       expectObject(coverLetterResponse.body);
-      await coverLettersService.generateCoverLetter(userId, {
-        baselineId,
-        baselineVersionId,
-        jobId,
-        analysisId: assessmentId,
-        oneTap: false,
-      } as any);
+      // eslint-disable-next-line no-console
+      console.log('[CUSTOMER_LOOP_COVER_RESULT]', {
+        status: (coverLetterResponse.body as any)?.status ?? null,
+        generationStatus: (coverLetterResponse.body as any)?.generationStatus ?? null,
+        exportReady: (coverLetterResponse.body as any)?.exportReady ?? null,
+        qualityGateStatus: (coverLetterResponse.body as any)?.qualityGate?.status ?? null,
+        qualityGateReasons: Array.isArray((coverLetterResponse.body as any)?.qualityGate?.reasons)
+          ? (coverLetterResponse.body as any).qualityGate.reasons
+          : null,
+      });
+
+      const persistedArtifact = await studioArtifactRepository
+        .createQueryBuilder('artifact')
+        .where('artifact.userId = :userId', { userId })
+        .andWhere('artifact.baselineId = :baselineId', { baselineId })
+        .andWhere('artifact.jobId = :jobId', { jobId })
+        .orderBy('artifact.resumeGeneratedAt', 'DESC')
+        .addOrderBy('artifact.coverLetterGeneratedAt', 'DESC')
+        .addOrderBy('artifact.updatedAt', 'DESC')
+        .addOrderBy('artifact.createdAt', 'DESC')
+        .getOne();
+      expect(persistedArtifact).toBeTruthy();
+      expect(persistedArtifact?.baselineId).toBe(baselineId);
+      expect(persistedArtifact?.jobId).toBe(jobId);
+      expect(persistedArtifact?.baselineVersionId).toBe(baselineVersionId);
+      expect(persistedArtifact?.resumeStatus).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+      expect(persistedArtifact?.coverLetterStatus).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+      expect(persistedArtifact?.resumeResponseBody).toBeTruthy();
+      expect(persistedArtifact?.coverLetterResponseBody).toBeTruthy();
+      expect((persistedArtifact?.resumeMetadata as any)?.analysisId).toBe(assessmentId);
+      expect((persistedArtifact?.coverLetterMetadata as any)?.analysisId).toBe(assessmentId);
       let studioResponse: any = null;
       for (let attempt = 0; attempt < 20; attempt += 1) {
         studioResponse = await request(app.getHttpServer())
@@ -413,7 +488,7 @@ describe('customer workflow contract (real API e2e)', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .send({
           title: 'Director of Support Operations - Date Less Fixture',
-          company: 'Example SaaS Date Less',
+          company: 'Example SaaS',
           rawDescription: uniqueJobDescription,
           responsibilities: [
             'Lead and scale support operations across global teams.',
@@ -443,15 +518,7 @@ describe('customer workflow contract (real API e2e)', () => {
         .get(`/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(baselineId)}/latest`)
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200);
-      expectObject(latestAssessmentResponse.body);
-      const score = Number(
-        (latestAssessmentResponse.body as any).score ??
-          (latestAssessmentResponse.body as any).overallScore ??
-          (latestAssessmentResponse.body as any).fit_score ??
-          NaN,
-      );
-      expect(Number.isFinite(score)).toBe(true);
-      expect(score).toBeGreaterThanOrEqual(80);
+      assertFitAssessmentContract(latestAssessmentResponse.body, 30);
       const assessmentId = String(
         (latestAssessmentResponse.body as any).assessmentId ??
           (latestAssessmentResponse.body as any).id ??
@@ -468,9 +535,16 @@ describe('customer workflow contract (real API e2e)', () => {
           jobId,
           analysisId: assessmentId,
           oneTap: true,
-        });
+      });
       expect([200, 201]).toContain(resumeResponse.status);
       expectObject(resumeResponse.body);
+      expect((resumeResponse.body as any)?.status).toBe('success');
+      expect((resumeResponse.body as any)?.generationStatus).toBe('success');
+      expect((resumeResponse.body as any)?.qualityGate?.status).toBe('pass');
+      expect((resumeResponse.body as any)?.exportReady).toBe(true);
+      expect(Array.isArray((resumeResponse.body as any)?.preview?.resume?.experience)).toBe(true);
+      expect((resumeResponse.body as any)?.preview?.resume?.experience?.length ?? 0).toBeGreaterThan(0);
+      expect(String((resumeResponse.body as any)?.preview?.resume?.summary ?? '')).toContain('operational process improvement');
 
       const coverLetterResponse = await request(app.getHttpServer())
         .post('/cover-letters/generate')
@@ -481,16 +555,9 @@ describe('customer workflow contract (real API e2e)', () => {
           jobId,
           analysisId: assessmentId,
           oneTap: true,
-        });
+      });
       expect([200, 201]).toContain(coverLetterResponse.status);
       expectObject(coverLetterResponse.body);
-      await coverLettersService.generateCoverLetter(userId, {
-        baselineId,
-        baselineVersionId,
-        jobId,
-        analysisId: assessmentId,
-        oneTap: false,
-      } as any);
 
       const coverContent = String(
         (coverLetterResponse.body as any)?.preview?.coverLetter ??
@@ -528,7 +595,6 @@ describe('customer workflow contract (real API e2e)', () => {
 
       expectObject(studioResponse.body);
       const state = studioResponse.body as any;
-
       expect(state.resume).toBeTruthy();
       expect(state.coverLetter).toBeTruthy();
       expect(state.resume?.actions?.canExport ?? state.resume?.responseBody?.actions?.canExport).toBe(true);

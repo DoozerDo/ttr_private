@@ -1,7 +1,7 @@
 import { Baseline } from './baseline.entity';
 import { BaselineIncludePolicy, BaselineSection, BaselineSectionType } from './baseline-section.entity';
 import { buildValidatedResumeV2FromParsedBaseline } from './baseline-resume-v2';
-import { extractStructuredBaselineFromSections } from './structuredBaselineExtractor';
+import { extractStructuredBaselineFromSections, type StructuredBaseline } from './structuredBaselineExtractor';
 import {
   normalizeNormalizedResumeDocument,
   validateNormalizedResumeDocument,
@@ -17,12 +17,6 @@ export function resolveBaselineSectionsForGeneration(
   const canonicalSections = (baseline.sections ?? []).slice().sort((a, b) => a.order - b.order);
   const structured = extractStructuredBaselineFromSections(canonicalSections as any);
   const canonicalEvidenceUnitCount = countCanonicalEvidenceUnits(canonicalSections);
-  const latestParsedBaseline = getLatestParsedBaseline(baseline.parsedRecords);
-
-  const rawParsedExperienceCount = countParsedExperienceEntries(latestParsedBaseline);
-  if (!rawParsedExperienceCount) {
-    return canonicalSections;
-  }
   if (canonicalEvidenceUnitCount >= 2) {
     return canonicalSections;
   }
@@ -30,6 +24,35 @@ export function resolveBaselineSectionsForGeneration(
   const nonExperienceCanonicalSections = canonicalSections.filter(
     (section) => String(section.sectionType ?? section.type ?? '').toUpperCase() !== BaselineSectionType.EXPERIENCE,
   );
+
+  const structuredExperienceSections = structured.experience.length >= 2
+    ? buildSectionsFromStructuredBaseline(baseline.id, structured)
+    : [];
+  if (structuredExperienceSections.length > 0) {
+    const experienceSections = structuredExperienceSections.filter(
+      (section) => String(section.sectionType ?? section.type ?? '').toUpperCase() === BaselineSectionType.EXPERIENCE,
+    );
+    const supplementalSections = structuredExperienceSections.filter((section) => {
+      const sectionType = String(section.sectionType ?? section.type ?? '').toUpperCase();
+      if (sectionType === BaselineSectionType.EXPERIENCE) return false;
+      return !nonExperienceCanonicalSections.some(
+        (existing) => String(existing.sectionType ?? existing.type ?? '').toUpperCase() === sectionType,
+      );
+    });
+
+    if (experienceSections.length > 0 || supplementalSections.length > 0) {
+      return [...nonExperienceCanonicalSections, ...supplementalSections, ...experienceSections].sort(
+        (a, b) => a.order - b.order,
+      );
+    }
+  }
+
+  const latestParsedBaseline = getLatestParsedBaseline(baseline.parsedRecords);
+
+  const rawParsedExperienceCount = countParsedExperienceEntries(latestParsedBaseline);
+  if (!rawParsedExperienceCount) {
+    return canonicalSections;
+  }
 
   const authoritativeResumeV2 = getAuthoritativeResumeV2(nonExperienceCanonicalSections, latestParsedBaseline);
   if (!authoritativeResumeV2) {
@@ -65,6 +88,38 @@ export function resolveBaselineSectionsForGeneration(
   return [...nonExperienceCanonicalSections, ...supplementalSections, ...experienceSections].sort(
     (a, b) => a.order - b.order,
   );
+}
+
+function buildSectionsFromStructuredBaseline(
+  baselineId: string,
+  structured: StructuredBaseline,
+): BaselineSection[] {
+  const resumeV2Like = {
+    heading: { name: 'Candidate', contactLine: '' },
+    summary: typeof structured.summary === 'string' ? structured.summary : undefined,
+    competencies: Array.isArray(structured.skills) ? structured.skills : [],
+    coreCompetencies: Array.isArray(structured.skills) ? structured.skills : [],
+    experience: Array.isArray(structured.experience)
+      ? structured.experience.map((entry) => ({
+          company: (entry as any)?.company,
+          roleTitle: (entry as any)?.roleTitle,
+          dates: (entry as any)?.dates,
+          bullets: Array.isArray((entry as any)?.bullets) ? (entry as any).bullets : [],
+        }))
+      : [],
+    education: Array.isArray((structured as any)?.education) ? (structured as any).education : [],
+    additionalSections: Array.isArray((structured as any)?.additionalSections)
+      ? (structured as any).additionalSections
+      : [],
+  } as any;
+
+  const normalized = normalizeNormalizedResumeDocument(resumeV2Like);
+  const validation = validateNormalizedResumeDocument(normalized as any);
+  if (!validation.valid) {
+    return [];
+  }
+
+  return buildSectionsFromNormalizedResumeV2(baselineId, normalized);
 }
 
 function trimToText(value: unknown): string {
