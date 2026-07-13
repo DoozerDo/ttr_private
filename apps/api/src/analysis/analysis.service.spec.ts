@@ -1361,6 +1361,75 @@ const sampleScoringV2: CxFitV2Result = {
     });
   });
 
+  it('derives score_breakdown from canonical dimension points even when resumeProject compatibility totals disagree', async () => {
+    const canonicalScoringV2 = JSON.parse(JSON.stringify(sampleScoringV2)) as CxFitV2Result;
+    canonicalScoringV2.score = 84;
+    canonicalScoringV2.rubric.dimensionPoints = {
+      role_scope_and_seniority: 25,
+      support_operations_and_process_rigor: 25,
+      tooling_and_platform_experience: 20,
+      domain_and_business_context: 7,
+      change_leadership_and_customer_advocacy: 7,
+    };
+    canonicalScoringV2.rubric.resumeProject = {
+      ...canonicalScoringV2.rubric.resumeProject,
+      totalScore: 98,
+      finalScore: 98,
+      categories: {
+        experience_alignment: 30,
+        leadership_level: 20,
+        technical_and_platform_fit: 20,
+        industry_and_context_fit: 15,
+        strategic_vs_tactical_balance: 13,
+      },
+      categoryPoints: {
+        experience_alignment: 30,
+        leadership_level: 20,
+        technical_and_platform_fit: 20,
+        industry_and_context_fit: 15,
+        strategic_vs_tactical_balance: 13,
+      },
+    };
+
+    const assessment: FitAssessment = {
+      id: 'fit-compat-mismatch',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 84,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 84,
+        leadershipLevel: 84,
+        technicalPlatformFit: 84,
+        industryContext: 84,
+        strategicTacticalFit: 84,
+      },
+      strengths: ['aws'],
+      gaps: ['golang'],
+      complianceFlags: [],
+      scoringV2: canonicalScoringV2,
+      createdAt: new Date(),
+    };
+
+    const breakdown = (service as any).buildScoreBreakdown(assessment) as {
+      total_score: number;
+      dimensions: Array<{ key: string; label: string; score: number; weight: number }>;
+    };
+
+    expect(breakdown.total_score).toBe(84);
+    expect(breakdown.dimensions.map((dimension) => dimension.score)).toEqual([25, 25, 20, 7, 7]);
+    expect(breakdown.dimensions.map((dimension) => dimension.label)).toEqual([
+      'Leadership Scope',
+      'Support Operations and Process Rigor',
+      'Tooling and Platform Experience',
+      'Domain and Business Context',
+      'Change Leadership and Customer Advocacy',
+    ]);
+    expect(breakdown.total_score).not.toBe(98);
+  });
+
   it('rejects ambiguous JD inputs', async () => {
     expect.assertions(1);
     try {

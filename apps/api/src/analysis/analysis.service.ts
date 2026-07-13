@@ -819,27 +819,27 @@ export class AnalysisService {
   }> = [
     {
       key: 'role_scope_and_seniority',
-      label: 'Experience Alignment',
-      weight: 30,
+      label: 'Leadership Scope',
+      weight: 25,
     },
     {
       key: 'support_operations_and_process_rigor',
-      label: 'Leadership Level',
-      weight: 20,
+      label: 'Support Operations and Process Rigor',
+      weight: 25,
     },
     {
       key: 'tooling_and_platform_experience',
-      label: 'Technical and Platform Fit',
+      label: 'Tooling and Platform Experience',
       weight: 20,
     },
     {
       key: 'domain_and_business_context',
-      label: 'Industry and Context Fit',
+      label: 'Domain and Business Context',
       weight: 15,
     },
     {
       key: 'change_leadership_and_customer_advocacy',
-      label: 'Strategic versus Tactical Balance',
+      label: 'Change Leadership and Customer Advocacy',
       weight: 15,
     },
   ];
@@ -963,34 +963,6 @@ export class AnalysisService {
   }
 
   private buildScoreBreakdown(assessment: FitAssessment): ScoreBreakdown {
-    const resumeProject = assessment.scoringV2?.rubric?.resumeProject;
-    if (resumeProject) {
-      const source = this.buildResumeProjectCompatibilityBreakdown(assessment.scoringV2);
-      if (source) {
-        const dimensions = this.scoreBreakdownMeta.map((entry) => {
-          const raw = {
-            role_scope_and_seniority: source.experience_alignment,
-            support_operations_and_process_rigor: source.leadership_level,
-            tooling_and_platform_experience: source.technical_platform_fit,
-            domain_and_business_context: source.industry_context,
-            change_leadership_and_customer_advocacy:
-              source.strategic_vs_tactical,
-          }[entry.key];
-          const score = this.roundToTenth(typeof raw === 'number' ? raw : 0);
-          return {
-            key: entry.key,
-            label: entry.label,
-            score: Math.max(0, Math.min(entry.weight, score)),
-            weight: entry.weight,
-          };
-        });
-        const total_score = this.roundToTenth(
-          dimensions.reduce((sum, dimension) => sum + dimension.score, 0),
-        );
-        return { total_score, dimensions };
-      }
-    }
-
     const dimensionPoints = assessment.scoringV2?.rubric?.dimensionPoints;
     if (dimensionPoints) {
       const dimensions = this.scoreBreakdownMeta.map((entry) => {
