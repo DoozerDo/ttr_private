@@ -18,4 +18,24 @@ describe('buildBaselineAllowlistSnapshot', () => {
       expect.arrayContaining(['zendesk', 'salesforce']),
     );
   });
+
+  it('does not promote contact/header lines into technology allowlist entries', () => {
+    const sections: ComplianceTextSection[] = [
+      {
+        title: 'Alex Candidate | alex@example.com | linkedin.com/in/alex-candidate',
+        content: 'Support operations leader with incident response ownership.',
+        sectionType: 'EXPERIENCE',
+        sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+      },
+    ];
+
+    const allowlist = buildBaselineAllowlistSnapshot(sections);
+
+    expect(allowlist.allowedTechnologies).not.toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('example.com'),
+        expect.stringContaining('linkedin.com'),
+      ]),
+    );
+  });
 });

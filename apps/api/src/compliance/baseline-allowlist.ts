@@ -2,7 +2,7 @@ import { ComplianceTextSection } from './compliance.types';
 import {
   collectCandidates,
   collectMetricCandidatesFromSections,
-  collectTechnologyTokensFromSections,
+  collectTechnologyClaimsFromSections,
   extractBaselineCompanyTokens,
   extractCompanyCandidatesFromText,
   extractRoleCandidatesFromText,
@@ -56,9 +56,6 @@ export function buildBaselineAllowlistSnapshot(
     normalizeTokenForComparison,
   );
 
-  const technologyTokens =
-    collectTechnologyTokensFromSections(normalizedSections);
-
   const metricTokens = new Set<string>();
   const metricCandidates =
     collectMetricCandidatesFromSections(normalizedSections);
@@ -68,10 +65,18 @@ export function buildBaselineAllowlistSnapshot(
     }
   }
 
+  const technologyTokens = new Set<string>();
+  for (const claim of collectTechnologyClaimsFromSections(normalizedSections).values()) {
+    const normalized = normalizeTokenForComparison(claim.text);
+    if (normalized) {
+      technologyTokens.add(normalized);
+    }
+  }
+
   return {
     allowedCompanies: [...companyTokens].sort(),
     allowedRoles: [...roleCandidates.keys()].sort(),
-    allowedTechnologies: [...technologyTokens.keys()].sort(),
+    allowedTechnologies: [...technologyTokens].sort(),
     allowedMetricTokens: [...metricTokens].sort(),
   };
 }

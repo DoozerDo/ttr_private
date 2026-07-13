@@ -45,6 +45,29 @@ describe('detectFictionalTechnology', () => {
     expect(technologyClaims).not.toContain('multi-system');
   });
 
+  it('does not treat contact header data as technology assertions', () => {
+    const flags = detectFictionalTechnology({
+      generatedSections: [
+        {
+          title: 'Alex Candidate | alex@example.com | linkedin.com/in/alex-candidate',
+          content: 'Support operations leader with incident response ownership.',
+          sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+        },
+      ],
+      baselineSections: [],
+      baselineAllowlist: {
+        allowedCompanies: [],
+        allowedRoles: [],
+        allowedTechnologies: [],
+        allowedMetricTokens: [],
+      },
+    });
+
+    expect(
+      flags.some((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY),
+    ).toBe(false);
+  });
+
   it('does not flag synthetic support-ops infrastructure tokens when present in baseline allowlist', () => {
     const flags = detectFictionalTechnology({
       baselineSections: [

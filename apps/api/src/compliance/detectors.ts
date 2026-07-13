@@ -2694,16 +2694,6 @@ function isTechnologyTokenCandidate(value: string): boolean {
   return true;
 }
 
-export function collectTechnologyTokensFromSections(
-  sections: ComplianceTextSection[] | null | undefined,
-): Map<string, string> {
-  return new Map(
-    [...collectTechnologyClaimsFromSections(sections).entries()].map(
-      ([normalized, claim]) => [normalized, claim.text],
-    ),
-  );
-}
-
 export function collectTechnologyClaimsFromSections(
   sections: ComplianceTextSection[] | null | undefined,
   options?: {
@@ -2737,7 +2727,6 @@ export function collectTechnologyClaimsFromSections(
     includeSkillStacks: true,
     includeBaselineEvidenceFragments: true,
     allowedLineTypes: [
-      ResumeLineType.ROLE_HEADER,
       ResumeLineType.BULLET_CLAIM,
       ResumeLineType.BULLET_EVIDENCE_FRAGMENT,
       ResumeLineType.SKILL_STACK,
@@ -2818,7 +2807,7 @@ export function detectFictionalTechnology(
     ?.length
     ? new Set(payload.baselineAllowlist.allowedTechnologies)
     : new Set(
-        collectTechnologyTokensFromSections(payload.baselineSections).keys(),
+        [...collectTechnologyClaimsFromSections(payload.baselineSections).keys()],
       );
   const flags: ComplianceFlag[] = [];
 
