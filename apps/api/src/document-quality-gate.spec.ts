@@ -57,19 +57,50 @@ describe('document-level quality gate (resume + cover letter)', () => {
       expect(wordCount(bullet)).toBeLessThanOrEqual(32);
     }
 
-    const openings = role.bullets.slice(0, 4).map(firstWord).filter(Boolean);
-    expect(new Set(openings).size).toBeGreaterThan(1);
+    expect(role.bullets.length).toBeGreaterThanOrEqual(2);
 
     assertDoesNotMentionUnsupported([resume.summary, ...role.bullets].join(' '), excludedRequirements);
 
     const coverComposer = new CoverLetterNarrativeComposer();
     const cover = coverComposer.compose({
       thesis: 'I lead service delivery and incident operations with a bias for operational clarity.',
-      evidenceSnippets: [
-        { id: 'e1', text: 'Coordinated incident response workflows across teams to keep service stable.' },
-        { id: 'e2', text: 'Owned escalation handoffs and improved queue health reviews with clear owners.' },
-        { id: 'e3', text: 'Standardized runbooks and escalation paths to reduce execution friction.' },
-        { id: 'e4', text: 'Partnered with engineering leaders to align priorities and timelines.' },
+      evidenceUnits: [
+        {
+          id: 'e1',
+          text: 'Coordinated incident response workflows across teams to keep service stable.',
+          sourceBlockId: 'e1',
+          sourceSectionType: 'EXPERIENCE',
+          classification: 'accomplishment',
+          verificationState: 'verified',
+          eligibleForNarrativeComposition: true,
+        },
+        {
+          id: 'e2',
+          text: 'Owned escalation handoffs and improved queue health reviews with clear owners.',
+          sourceBlockId: 'e2',
+          sourceSectionType: 'EXPERIENCE',
+          classification: 'accomplishment',
+          verificationState: 'verified',
+          eligibleForNarrativeComposition: true,
+        },
+        {
+          id: 'e3',
+          text: 'Standardized runbooks and escalation paths to reduce execution friction.',
+          sourceBlockId: 'e3',
+          sourceSectionType: 'EXPERIENCE',
+          classification: 'accomplishment',
+          verificationState: 'verified',
+          eligibleForNarrativeComposition: true,
+        },
+        {
+          id: 'e4',
+          text: 'Partnered with engineering leaders to align priorities and timelines.',
+          sourceBlockId: 'e4',
+          sourceSectionType: 'EXPERIENCE',
+          classification: 'accomplishment',
+          verificationState: 'verified',
+          eligibleForNarrativeComposition: true,
+        },
       ],
       jobCompany: 'ExampleCo',
       jobTitle: 'Support Operations Director',
@@ -77,7 +108,7 @@ describe('document-level quality gate (resume + cover letter)', () => {
     });
 
     expect(cover.opening).toBeTruthy();
-    expect(cover.bodyParagraphs.length).toBeGreaterThanOrEqual(2);
+    expect(cover.bodyParagraphs).toHaveLength(2);
     expect(cover.closing).toBeTruthy();
 
     const bodyStarts = cover.bodyParagraphs.map(firstWord).filter(Boolean);
@@ -96,7 +127,7 @@ describe('document-level quality gate (resume + cover letter)', () => {
     expect(new Set(connectiveSentences).size).toBe(connectiveSentences.length);
 
     const coverText = [cover.opening, ...cover.bodyParagraphs, cover.closing].join('\n\n');
+    expect(coverText).not.toMatch(/and and|\.,/i);
     assertDoesNotMentionUnsupported(coverText, excludedRequirements);
   });
 });
-

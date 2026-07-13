@@ -5,7 +5,10 @@ describe('TemplateCoverLetterGenerator', () => {
     const generator = new TemplateCoverLetterGenerator();
     const result = generator.generate({
       document: {
+        templateVersion: 'canonical_cover_letter_v1',
         senderHeading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+        companyName: 'ExampleCo',
+        roleTitle: 'Director of Support',
         salutation: 'Dear Hiring Team,',
         opening: 'Service delivery and incident operations leader.',
         bodyParagraphs: [
@@ -15,6 +18,12 @@ describe('TemplateCoverLetterGenerator', () => {
         closingParagraph: 'Thank you for your time and consideration.',
         signoff: 'Sincerely,',
         signatureName: 'Alex Candidate',
+        paragraphEvidence: [
+          { paragraphKey: 'opening', sourceEvidenceIds: ['e1'], anchorTexts: ['Service delivery and incident operations leader.'] },
+          { paragraphKey: 'body_1', sourceEvidenceIds: ['e2'], anchorTexts: ['Managed escalation flows and coordinated incident handoffs across product, support, and engineering teams.'] },
+          { paragraphKey: 'body_2', sourceEvidenceIds: ['e3'], anchorTexts: ['Built weekly operating reviews that kept queue health, staffing tradeoffs, and service quality visible.'] },
+          { paragraphKey: 'closing', sourceEvidenceIds: ['e4'], anchorTexts: ['Thank you for your time and consideration.'] },
+        ],
       },
       baselineId: 'base-1',
       jobId: 'job-1',
@@ -37,6 +46,9 @@ describe('TemplateCoverLetterGenerator', () => {
     } as any);
 
     expect(result.document.opening).toBe('Service delivery and incident operations leader.');
+    expect(result.document.templateVersion).toBe('canonical_cover_letter_v1');
+    expect(result.document.companyName).toBe('ExampleCo');
+    expect(result.document.roleTitle).toBe('Director of Support');
     expect(result.paragraphs).toEqual([
       'Service delivery and incident operations leader.',
       'Managed escalation flows and coordinated incident handoffs across product, support, and engineering teams.',
@@ -52,13 +64,17 @@ describe('TemplateCoverLetterGenerator', () => {
     const generator = new TemplateCoverLetterGenerator();
     const result = generator.generate({
       document: {
+        templateVersion: 'canonical_cover_letter_v1',
         senderHeading: { name: 'Alex Candidate' },
+        companyName: null,
+        roleTitle: null,
         salutation: 'Dear Hiring Team,',
         opening: '',
         bodyParagraphs: [],
         closingParagraph: '',
         signoff: 'Sincerely,',
         signatureName: 'Alex Candidate',
+        paragraphEvidence: [],
       },
       baselineId: 'base-1',
       jobId: 'job-1',
@@ -76,13 +92,21 @@ describe('TemplateCoverLetterGenerator', () => {
     const generator = new TemplateCoverLetterGenerator();
     const result = generator.generate({
       document: {
+        templateVersion: 'canonical_cover_letter_v1',
         senderHeading: { name: 'Alex Candidate' },
+        companyName: null,
+        roleTitle: null,
         salutation: 'Dear Hiring Team,',
         opening: 'Canonical opening.',
         bodyParagraphs: ['Canonical body.'],
         closingParagraph: 'Canonical closing.',
         signoff: 'Sincerely,',
         signatureName: 'Alex Candidate',
+        paragraphEvidence: [
+          { paragraphKey: 'opening', sourceEvidenceIds: ['e1'] },
+          { paragraphKey: 'body_1', sourceEvidenceIds: ['e2'] },
+          { paragraphKey: 'closing', sourceEvidenceIds: ['e3'] },
+        ],
       },
       baselineId: 'base-1',
       jobId: 'job-1',

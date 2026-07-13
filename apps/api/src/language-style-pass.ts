@@ -1,7 +1,7 @@
 import type { DocumentStrategyPlanLike } from "./document-strategy-plan.types";
 import type {
-  NormalizedCoverLetterDocument,
   NormalizedResumeDocument,
+  CanonicalCoverLetterDocument,
 } from "./documents/normalized-document.models";
 import type { CoverLetterGenerationResult } from "./cover-letters/generators/cover-letter-generator.interface";
 
@@ -329,7 +329,7 @@ export function polishCoverLetterGeneration(
     ],
   });
 
-  const document: NormalizedCoverLetterDocument = generation.document
+  const document: CanonicalCoverLetterDocument = generation.document
     ? {
         ...generation.document,
         opening: polishCoverOpening(generation.document.opening, input, pass),

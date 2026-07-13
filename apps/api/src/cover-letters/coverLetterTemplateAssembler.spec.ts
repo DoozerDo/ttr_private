@@ -1,4 +1,8 @@
-import { assembleCoverLetterFromStructuredBaseline } from './coverLetterTemplateAssembler';
+import {
+  assembleCoverLetterFromStructuredBaseline,
+  buildCanonicalCoverLetterDocument,
+} from './coverLetterTemplateAssembler';
+import { CANONICAL_COVER_LETTER_TEMPLATE_VERSION } from '../documents/normalized-document.models';
 
 describe('assembleCoverLetterFromStructuredBaseline', () => {
   const structured = {
@@ -21,7 +25,7 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
         dates: '2022 - 2024',
         bullets: [
           'Partnered with cloud teams on incident response and service reliability.',
-          'Standardized reporting and tooling governance across Zendesk, Jira, and Salesforce Service Cloud.',
+          'Standardized runbooks and handoff routines to reduce execution friction.',
         ],
       },
     ],
@@ -40,8 +44,19 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
     order: index * 1000,
     sectionType: 'EXPERIENCE',
   }));
+  const evidenceUnits = structured.experience.flatMap((entry: any, index: number) =>
+    (entry.bullets ?? []).map((bullet: string, bulletIndex: number) => ({
+      id: `parsed-experience-${index}:evidence:${bulletIndex}`,
+      text: bullet,
+      sourceBlockId: `parsed-experience-${index}`,
+      sourceSectionType: 'EXPERIENCE',
+      classification: 'accomplishment' as const,
+      verificationState: 'verified' as const,
+      eligibleForNarrativeComposition: true as const,
+    })),
+  );
 
-  it('passes the canonical composer output and paragraph anchors through the adapter', () => {
+  it('builds a canonical cover letter document with explicit template metadata and four paragraphs', () => {
     const assembly = assembleCoverLetterFromStructuredBaseline({
       structured,
       senderName: 'Alex Candidate',
@@ -49,14 +64,24 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
       jobTitle: 'Director of Support Operations',
       companyName: 'Example SaaS',
       allowedBlocks,
+      evidenceUnits,
     });
 
+    expect(assembly.document.templateVersion).toBe(CANONICAL_COVER_LETTER_TEMPLATE_VERSION);
+    expect(assembly.document.senderHeading).toEqual({
+      name: 'Alex Candidate',
+      contactLine: 'alex@example.com',
+    });
+    expect(assembly.document.companyName).toBe('Example SaaS');
+    expect(assembly.document.roleTitle).toBe('Director of Support Operations');
     expect(assembly.document.salutation).toBe('Dear Hiring Team,');
+    expect(assembly.document.signoff).toBe('Sincerely,');
+    expect(assembly.document.signatureName).toBe('Alex Candidate');
     expect(assembly.document.opening).toContain('Director of Support Operations');
     expect(assembly.document.opening).toContain('Example SaaS');
-    expect(assembly.document.bodyParagraphs.length).toBe(2);
+    expect(assembly.document.bodyParagraphs).toHaveLength(2);
     expect(assembly.document.closingParagraph).toBeTruthy();
-    expect(assembly.document.signatureName).toBe('Alex Candidate');
+    expect(assembly.paragraphEvidence).toHaveLength(4);
     expect(assembly.paragraphEvidence).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ paragraphKey: 'opening' }),
@@ -65,142 +90,84 @@ describe('assembleCoverLetterFromStructuredBaseline', () => {
         expect.objectContaining({ paragraphKey: 'closing' }),
       ]),
     );
-    expect(assembly.paragraphEvidence.every((entry) => entry.sourceEvidenceIds.length > 0)).toBe(true);
+    expect(
+      assembly.paragraphEvidence
+        .flatMap((entry) => entry.sourceEvidenceIds)
+        .every((id) => id.startsWith('parsed-experience-')),
+    ).toBe(true);
+    expect(assembly.paragraphEvidence.find((entry) => entry.paragraphKey === 'body_1')?.sourceEvidenceIds).toEqual([
+      'parsed-experience-0:evidence:0',
+    ]);
+    expect(assembly.paragraphEvidence.find((entry) => entry.paragraphKey === 'body_2')?.sourceEvidenceIds).toEqual([
+      'parsed-experience-1:evidence:0',
+    ]);
+    expect(assembly.document.bodyParagraphs[0]).not.toEqual(assembly.document.bodyParagraphs[1]);
+    expect(
+      [assembly.document.opening, ...assembly.document.bodyParagraphs, assembly.document.closingParagraph].join(' '),
+    ).not.toMatch(/For example|I am focused on the|role specific narrative|supplied baseline evidence|easy to audit|operating lane|and and|\.,/i);
   });
 
-  it('uses the canonical composer output instead of inventing an opening from job context', () => {
-    const assembly = assembleCoverLetterFromStructuredBaseline({
-      structured: {
-        summary: '',
-        experience: [
-          {
-            id: 'exp-1',
-            company: 'Acme',
-            roleTitle: 'Director of Support',
-            dates: '2022 - Present',
-            bullets: [
-              'Led support operations programs and reduced escalation churn through clear handoffs.',
-              'Built operating reviews that kept queue health and service quality visible.',
-            ],
-          } as any,
-          {
-            id: 'exp-2',
-            company: 'Acme',
-            roleTitle: 'Support Workflow Lead',
-            dates: '2020 - 2022',
-            bullets: [
-              'Standardized runbooks and escalation paths to reduce execution friction.',
-              'Partnered with engineering leaders to align priorities and timelines.',
-            ],
-          } as any,
-        ],
-      } as any,
+  it('lets the canonical builder finalize the exact 4-paragraph contract', () => {
+    const canonical = buildCanonicalCoverLetterDocument({
       senderName: 'Alex Candidate',
       senderContactLine: 'alex@example.com',
-      jobTitle: 'Director of Support',
-      companyName: 'ExampleCo',
-      allowedBlocks: [
-        {
-          id: 'parsed-experience-0',
-          title: 'Acme - Director of Support',
-          content:
-            'Acme | Director of Support | 2022 - Present\n- Led support operations programs and reduced escalation churn through clear handoffs.\n- Built operating reviews that kept queue health and service quality visible.',
-          includePolicy: 'OPTIONAL',
-          order: 0,
-          sectionType: 'EXPERIENCE',
-        },
-        {
-          id: 'parsed-experience-1',
-          title: 'Acme - Support Workflow Lead',
-          content:
-            'Acme | Support Workflow Lead | 2020 - 2022\n- Standardized runbooks and escalation paths to reduce execution friction.\n- Partnered with engineering leaders to align priorities and timelines.',
-          includePolicy: 'OPTIONAL',
-          order: 1000,
-          sectionType: 'EXPERIENCE',
-        },
-      ] as any,
+      jobTitle: 'Director of Support Operations',
+      companyName: 'Example SaaS',
+      opening: 'The Director of Support Operations role at Example SaaS fits my background because it reflects the way I have led service quality, operating rhythm, and cross-functional execution.',
+      bodyParagraphs: [
+        'Owned the support operations operating model and support workflow design for a high-volume SaaS support team. That work keeps the Director of Support Operations role at Example SaaS grounded in concrete ownership and visible service quality.',
+        'Partnered with cloud infrastructure and observability teams on incident response, major incident follow-up, incident command, and service reliability. Standardizing that cross-functional work helps keep support, engineering, and customer partners aligned on what comes next.',
+      ],
+      closingParagraph: 'That mix of support operations rigor, incident response, and cross-functional leadership is why I would welcome a conversation about the Director of Support Operations role at Example SaaS, especially given service quality and operating discipline.',
+      paragraphEvidence: [
+        { paragraphKey: 'opening', sourceEvidenceIds: ['parsed-experience-0:evidence:0'], anchorTexts: ['Owned the support workflow design and queue health for a SaaS team.'] },
+        { paragraphKey: 'body_1', sourceEvidenceIds: ['parsed-experience-0:evidence:1'], anchorTexts: ['Built dashboards and KPI reporting for executive reviews and staffing decisions.'] },
+        { paragraphKey: 'body_2', sourceEvidenceIds: ['parsed-experience-1:evidence:0', 'parsed-experience-1:evidence:1'], anchorTexts: ['Partnered with cloud teams on incident response and service reliability.', 'Standardized runbooks and handoff routines to reduce execution friction.'] },
+        { paragraphKey: 'closing', sourceEvidenceIds: ['parsed-experience-1:evidence:1'], anchorTexts: ['Standardized runbooks and handoff routines to reduce execution friction.'] },
+      ],
     });
 
-    expect(assembly.document.salutation).toBe('Dear Hiring Team,');
-    expect(assembly.document.opening).toBeTruthy();
-    expect(assembly.document.bodyParagraphs.length).toBe(2);
-    expect(assembly.document.closingParagraph).toBeTruthy();
-    expect(assembly.document.signatureName).toBe('Alex Candidate');
+    expect(canonical.templateVersion).toBe(CANONICAL_COVER_LETTER_TEMPLATE_VERSION);
+    expect(canonical.bodyParagraphs).toHaveLength(2);
+    expect(canonical.paragraphEvidence).toHaveLength(4);
+    expect(canonical.paragraphEvidence.find((entry) => entry.paragraphKey === 'body_1')?.sourceEvidenceIds).toEqual([
+      'parsed-experience-0:evidence:1',
+    ]);
+    expect(canonical.paragraphEvidence.find((entry) => entry.paragraphKey === 'body_2')?.sourceEvidenceIds).toEqual([
+      'parsed-experience-1:evidence:0',
+      'parsed-experience-1:evidence:1',
+    ]);
   });
 
-  it('passes through approved thesis text into the composed opening', () => {
-    const assembly = assembleCoverLetterFromStructuredBaseline({
-      structured: {
-        summary: 'Service delivery and incident operations leader.',
-        experience: [
+  it('fails closed when the canonical baseline is too sparse to support the document', () => {
+    expect(() =>
+      assembleCoverLetterFromStructuredBaseline({
+        structured: {
+          summary: 'Support operations leader focused on measurable improvements and reliable execution.',
+          experience: [
+            {
+              id: 'exp-1',
+              company: 'Example SaaS',
+              roleTitle: 'Support Operations Director',
+              dates: '2022 - Present',
+              bullets: ['Owned the support operations operating model.'],
+            },
+          ],
+        } as any,
+        senderName: 'Alex Candidate',
+        jobTitle: 'Director of Support Operations',
+        companyName: 'Example SaaS',
+        allowedBlocks: [
           {
-            id: 'exp-1',
-            company: 'Acme',
-            roleTitle: 'Director of Support',
-            dates: '2022 - Present',
-            bullets: ['Led support operations programs.'],
-          } as any,
-        ],
-      } as any,
-      senderName: 'Alex Candidate',
-      jobTitle: 'Director of Support',
-      companyName: 'ExampleCo',
-      allowedBlocks: [
-        {
-          id: 'parsed-experience-0',
-          title: 'Acme - Director of Support',
-          content:
-            'Acme | Director of Support | 2022 - Present\n- Led support operations programs.',
-          includePolicy: 'OPTIONAL',
-          order: 0,
-          sectionType: 'EXPERIENCE',
-        },
-      ] as any,
-    });
-
-    expect(assembly.document.opening).toContain('Service delivery and incident operations leader.');
-    expect(assembly.document.opening).toContain('Director of Support');
-    expect(assembly.document.bodyParagraphs.length).toBe(1);
-  });
-
-  it('derives canonical evidence from summary, skills, and experience blocks without legacy plain text', () => {
-    const assembly = assembleCoverLetterFromStructuredBaseline({
-      structured: {
-        summary: 'Support operations leader focused on execution cadence and measurable outcomes.',
-        skills: ['ServiceNow', 'Jira Service Management', 'Incident Response'],
-        experience: [
-          {
-            id: 'exp-1',
-            company: 'Acme',
-            roleTitle: 'Director of Support',
-            dates: '2022 - Present',
-            bullets: [
-              'Led support operations programs and reduced escalation churn through clear handoffs.',
-              'Built operating reviews that kept queue health and service quality visible.',
-            ],
-          } as any,
-        ],
-      } as any,
-      senderName: 'Alex Candidate',
-      jobTitle: 'Director of Support',
-      companyName: 'ExampleCo',
-      allowedBlocks: [
-        {
-          id: 'parsed-experience-0',
-          title: 'Acme - Director of Support',
-          content:
-            'Acme | Director of Support | 2022 - Present\n- Led support operations programs and reduced escalation churn through clear handoffs.\n- Built operating reviews that kept queue health and service quality visible.',
-          includePolicy: 'optional',
-          order: 1000,
-          sectionType: 'EXPERIENCE',
-        },
-      ] as any,
-    });
-
-    expect(assembly.document.bodyParagraphs.length).toBe(2);
-    const sourceEvidenceIds = assembly.paragraphEvidence.flatMap((entry) => entry.sourceEvidenceIds);
-    expect(sourceEvidenceIds.some((id) => id.startsWith('parsed-experience-0:evidence:'))).toBe(true);
-    expect(sourceEvidenceIds.some((id) => id.startsWith('resume_v2_exp_'))).toBe(false);
-    expect(assembly.paragraphEvidence.every((entry) => entry.sourceEvidenceIds.every((id) => !id.includes('resume_v2_plain_text')))).toBe(true);
+            id: 'parsed-experience-0',
+            title: 'Example SaaS - Support Operations Director',
+            content: 'Example SaaS | Support Operations Director | 2022 - Present\n- Owned the support operations operating model.',
+            includePolicy: 'OPTIONAL',
+            order: 0,
+            sectionType: 'EXPERIENCE',
+          },
+        ] as any,
+      }),
+    ).toThrow('canonical_cover_letter_evidence_insufficient');
   });
 });

@@ -6,7 +6,7 @@ import type {
   CoverLetterJobContext,
 } from './cover-letter-generator.interface';
 import type { CoverLetterComplianceConstraints } from '../types/cover-letter-compliance-constraints';
-import type { NormalizedCoverLetterDocument } from '../../documents/normalized-document.models';
+import type { CanonicalCoverLetterDocument } from '../../documents/normalized-document.models';
 
 function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -20,7 +20,7 @@ function countWords(text: string): number {
     .filter(Boolean).length;
 }
 
-function normalizeParagraphs(document: NormalizedCoverLetterDocument): string[] {
+function normalizeParagraphs(document: CanonicalCoverLetterDocument): string[] {
   return [document.opening, ...(document.bodyParagraphs ?? []), document.closingParagraph]
     .map((part) => trimToText(part))
     .filter(Boolean);

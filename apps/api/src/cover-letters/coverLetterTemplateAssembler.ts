@@ -1,4 +1,8 @@
-import type { NormalizedCoverLetterDocument } from '../documents/normalized-document.models';
+import {
+  CANONICAL_COVER_LETTER_TEMPLATE_VERSION,
+  type CanonicalCoverLetterDocument,
+  type CanonicalCoverLetterParagraphEvidence,
+} from '../documents/normalized-document.models';
 import type { StructuredBaseline } from '../baseline/structuredBaselineExtractor';
 import type { CoverLetterGenerationResult } from './generators/cover-letter-generator.interface';
 import type { AllowedBaselineBlock } from './generators/cover-letter-generator.interface';
@@ -46,6 +50,34 @@ export type CanonicalEvidenceUnit = {
   verificationState: 'verified';
   eligibleForNarrativeComposition: true;
 };
+
+export function groupCanonicalEvidenceUnits(evidenceUnits: CanonicalEvidenceUnit[]): CanonicalEvidenceUnit[][] {
+  const groups: CanonicalEvidenceUnit[][] = [];
+  const groupBySourceBlock = new Map<string, CanonicalEvidenceUnit[]>();
+  for (const unit of evidenceUnits) {
+    const blockId = trimToText(unit.sourceBlockId);
+    if (!blockId) continue;
+    let group = groupBySourceBlock.get(blockId);
+    if (!group) {
+      group = [];
+      groupBySourceBlock.set(blockId, group);
+      groups.push(group);
+    }
+    group.push(unit);
+  }
+  return groups.filter((group) => group.length > 0);
+}
+
+function normalizeEvidenceUnitsForComposition(input: {
+  allowedBlocks?: AllowedBaselineBlock[];
+  evidenceUnits?: CanonicalEvidenceUnit[];
+}): CanonicalEvidenceUnit[] {
+  const units = toCanonicalEvidenceUnits(input).filter((unit) => {
+    const sectionType = String(unit.sourceSectionType ?? '').toUpperCase();
+    return sectionType === 'EXPERIENCE' || sectionType === 'PROJECT';
+  });
+  return units;
+}
 
 export function toCanonicalEvidenceUnits(input: {
   allowedBlocks?: AllowedBaselineBlock[];
@@ -130,9 +162,71 @@ export function toCanonicalEvidenceUnits(input: {
 }
 
 export type CoverLetterAssemblyResult = {
-  document: NormalizedCoverLetterDocument;
+  document: CanonicalCoverLetterDocument;
   paragraphEvidence: NonNullable<CoverLetterGenerationResult['paragraphEvidence']>;
 };
+
+export function buildCanonicalCoverLetterDocument(args: {
+  senderName: string;
+  senderContactLine?: string | null;
+  jobTitle?: string | null;
+  companyName?: string | null;
+  opening: string;
+  bodyParagraphs: string[];
+  closingParagraph: string;
+  paragraphEvidence: CanonicalCoverLetterParagraphEvidence[];
+}): CanonicalCoverLetterDocument {
+  const senderName = trimToText(args.senderName);
+  const senderContactLine = trimToText(args.senderContactLine ?? '');
+  const jobTitle = trimToText(args.jobTitle ?? '');
+  const companyName = trimToText(args.companyName ?? '');
+  const opening = trimToText(args.opening);
+  const bodyParagraphs = (args.bodyParagraphs ?? []).map((paragraph) => trimToText(paragraph)).filter(Boolean);
+  const closingParagraph = trimToText(args.closingParagraph);
+  const paragraphEvidence = (args.paragraphEvidence ?? []).map((entry) => ({
+    paragraphKey: entry.paragraphKey,
+    sourceEvidenceIds: (entry.sourceEvidenceIds ?? []).map((id) => trimToText(id)).filter(Boolean),
+    anchorTexts: (entry.anchorTexts ?? []).map((text) => trimToText(text)).filter(Boolean),
+  }));
+
+  const expectedKeys: CanonicalCoverLetterParagraphEvidence['paragraphKey'][] = [
+    'opening',
+    'body_1',
+    'body_2',
+    'closing',
+  ];
+  const actualKeys = paragraphEvidence.map((entry) => entry.paragraphKey);
+
+  if (
+    !senderName ||
+    !opening ||
+    bodyParagraphs.length !== 2 ||
+    !closingParagraph ||
+    new Set([opening, ...bodyParagraphs, closingParagraph]).size !== 4 ||
+    paragraphEvidence.length !== expectedKeys.length ||
+    expectedKeys.some((key) => !actualKeys.includes(key)) ||
+    paragraphEvidence.some((entry) => entry.sourceEvidenceIds.length === 0)
+  ) {
+    throw new Error('canonical_cover_letter_evidence_insufficient');
+  }
+
+  return {
+    templateVersion: CANONICAL_COVER_LETTER_TEMPLATE_VERSION,
+    senderHeading: {
+      name: senderName,
+      ...(senderContactLine ? { contactLine: senderContactLine } : {}),
+    },
+    companyName: companyName || null,
+    roleTitle: jobTitle || null,
+    salutation: 'Dear Hiring Team,',
+    opening,
+    bodyParagraphs,
+    closingParagraph,
+    signoff: 'Sincerely,',
+    signatureName: senderName,
+    paragraphEvidence,
+  };
+}
 
 export function assembleCoverLetterFromStructuredBaseline(opts: {
   structured: StructuredBaseline;
@@ -144,34 +238,32 @@ export function assembleCoverLetterFromStructuredBaseline(opts: {
   evidenceUnits?: CanonicalEvidenceUnit[];
 }): CoverLetterAssemblyResult {
   const senderName = trimToText(opts.senderName);
-  const senderContactLine = trimToText(opts.senderContactLine ?? '');
-  const structuredSummary = trimToText((opts.structured as any)?.summary ?? '');
-  const evidenceUnits = toCanonicalEvidenceUnits({
+  const evidenceUnits = normalizeEvidenceUnitsForComposition({
     allowedBlocks: opts.allowedBlocks,
     evidenceUnits: opts.evidenceUnits,
   });
   const composer = new CoverLetterNarrativeComposer();
   const composition = composer.compose({
-    thesis: structuredSummary || null,
+    thesis: null,
     evidenceUnits,
     jobCompany: trimToText(opts.companyName ?? '') || null,
     jobTitle: trimToText(opts.jobTitle ?? '') || null,
-    maxBodyParagraphs: 3,
+    maxBodyParagraphs: 2,
+  });
+
+  const document = buildCanonicalCoverLetterDocument({
+    senderName,
+    senderContactLine: opts.senderContactLine ?? null,
+    jobTitle: opts.jobTitle ?? null,
+    companyName: opts.companyName ?? null,
+    opening: composition.opening,
+    bodyParagraphs: composition.bodyParagraphs,
+    closingParagraph: composition.closing,
+    paragraphEvidence: composition.paragraphEvidence,
   });
 
   return {
-    document: {
-      senderHeading: {
-        name: senderName,
-        ...(senderContactLine ? { contactLine: senderContactLine } : {}),
-      },
-      salutation: 'Dear Hiring Team,',
-      opening: composition.opening,
-      bodyParagraphs: composition.bodyParagraphs,
-      closingParagraph: composition.closing || 'Thank you for your time and consideration.',
-      signoff: 'Sincerely,',
-      signatureName: senderName,
-    },
+    document,
     paragraphEvidence: composition.paragraphEvidence,
   };
 }

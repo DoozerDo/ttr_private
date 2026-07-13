@@ -1,7 +1,33 @@
+import { CANONICAL_COVER_LETTER_TEMPLATE_VERSION } from '../../../documents/normalized-document.models';
 import type { CoverLetterGenerationInput } from '../cover-letter-generator.interface';
 
 export const gameDesignFixture: CoverLetterGenerationInput = {
   document: {
+    templateVersion: CANONICAL_COVER_LETTER_TEMPLATE_VERSION,
+    companyName: 'Northline Interactive',
+    roleTitle: 'Senior Game Designer',
+    paragraphEvidence: [
+      {
+        paragraphKey: 'opening',
+        sourceEvidenceIds: ['g1:evidence:0'],
+        anchorTexts: ['Designed progression and rewards systems for a live multiplayer title'],
+      },
+      {
+        paragraphKey: 'body_1',
+        sourceEvidenceIds: ['g1:evidence:0'],
+        anchorTexts: ['Designed progression and rewards systems for a live multiplayer title'],
+      },
+      {
+        paragraphKey: 'body_2',
+        sourceEvidenceIds: ['g1:evidence:1'],
+        anchorTexts: ['Partnered with product managers, gameplay engineers, and artists'],
+      },
+      {
+        paragraphKey: 'closing',
+        sourceEvidenceIds: ['g1:evidence:0'],
+        anchorTexts: ['Designed progression and rewards systems for a live multiplayer title'],
+      },
+    ],
     senderHeading: {
       name: 'Alex Rivera',
       contactLine: 'alex@example.com',
@@ -53,6 +79,31 @@ export const gameDesignFixture: CoverLetterGenerationInput = {
 
 export const supportOperationsFixture: CoverLetterGenerationInput = {
   document: {
+    templateVersion: CANONICAL_COVER_LETTER_TEMPLATE_VERSION,
+    companyName: 'Acme Care',
+    roleTitle: 'Support Operations Manager',
+    paragraphEvidence: [
+      {
+        paragraphKey: 'opening',
+        sourceEvidenceIds: ['o1:evidence:0'],
+        anchorTexts: ['Led support operations for a high volume service organization'],
+      },
+      {
+        paragraphKey: 'body_1',
+        sourceEvidenceIds: ['o1:evidence:0'],
+        anchorTexts: ['Led support operations for a high volume service organization'],
+      },
+      {
+        paragraphKey: 'body_2',
+        sourceEvidenceIds: ['o1:evidence:1'],
+        anchorTexts: ['Worked with product and engineering partners to prioritize root cause fixes'],
+      },
+      {
+        paragraphKey: 'closing',
+        sourceEvidenceIds: ['o1:evidence:0'],
+        anchorTexts: ['Led support operations for a high volume service organization'],
+      },
+    ],
     senderHeading: {
       name: 'Jordan Lee',
       contactLine: 'jordan@example.com',

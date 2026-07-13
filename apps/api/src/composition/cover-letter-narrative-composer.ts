@@ -1,4 +1,8 @@
 import { GenericLanguageDetector } from './generic-language-detector';
+import type {
+  CanonicalCoverLetterParagraphEvidence,
+  CanonicalCoverLetterParagraphKey,
+} from '../documents/normalized-document.models';
 
 function trimToText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -10,94 +14,59 @@ function ensureSentence(value: string): string {
   return /[.!?]\s*$/.test(text) ? text : `${text}.`;
 }
 
-function compactSnippet(text: string, maxWords = 80): string {
+function lowercaseFirst(value: string): string {
+  const text = trimToText(value);
+  if (!text) return '';
+  return text.charAt(0).toLowerCase() + text.slice(1);
+}
+
+function compactSnippet(text: string, maxWords = 28): string {
   const cleaned = trimToText(text).replace(/\|/g, ' ');
   const words = cleaned.split(/\s+/).filter(Boolean);
   return words.length > maxWords ? words.slice(0, maxWords).join(' ').trim() : cleaned;
 }
 
+function normalizeEvidenceGrammar(text: string): string {
+  return trimToText(text)
+    .replace(/\b(and)\s+\1\b/gi, '$1')
+    .replace(/\.\s*,/g, '.')
+    .replace(
+      /,\s+(Owned|Built|Led|Managed|Partnered|Standardized|Coordinated|Drove|Improved|Implemented|Developed|Automated|Launched|Reduced|Maintained|Operated|Supported|Oversaw)\b/g,
+      (_match, verb: string) => `, ${verb.toLowerCase()}`,
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function sentenceFromSnippet(text: string): string {
-  const cleaned = ensureSentence(compactSnippet(text, 60));
+  const cleaned = ensureSentence(normalizeEvidenceGrammar(compactSnippet(text, 48)));
   return cleaned.replace(/^[\s-]+/, '').trim();
 }
 
-function varyImpactSentence(source: string): string {
-  const lowered = source.toLowerCase();
-  const stableHash = (() => {
-    let hash = 0;
-    for (let i = 0; i < lowered.length; i += 1) {
-      hash = (hash * 31 + lowered.charCodeAt(i)) | 0;
-    }
-    return Math.abs(hash);
-  })();
-  const candidates = (() => {
-    if (/(incident|escalat|outage|reliab|availability)/.test(lowered)) {
-      return [
-        'That keeps execution calm under pressure and makes escalation paths easier to trust.',
-        'That improves reliability without overstating scope or outcomes.',
-        'That tightens handoffs during escalations and reduces avoidable coordination churn.',
-      ];
-    }
-    if (/(workflow|process|runbook|playbook|handoff)/.test(lowered)) {
-      return [
-        'That clarifies ownership and reduces ambiguity in day-to-day decisions.',
-        'That turns good intentions into repeatable execution that teams can review.',
-        'That strengthens handoffs and keeps expectations explicit across partners.',
-      ];
-    }
-    if (/(queue|sla|support|customer|service)/.test(lowered)) {
-      return [
-        'That protects service quality by keeping signals and decisions explicit.',
-        'That reduces friction for both customers and internal partners.',
-        'That improves the operating rhythm without turning the letter into a checklist.',
-      ];
-    }
-    return [
-      'That keeps priorities clear and execution reviewable.',
-      'That turns evidence into practical decisions teams can follow.',
-      'That improves consistency without inflating claims.',
-    ];
-  })();
-  return candidates[candidates.length ? stableHash % candidates.length : 0] ?? candidates[0];
-}
-
-function chooseVariedOpenings(paragraphs: string[]): string[] {
-  const starters = ['In prior roles,', 'Across teams,', 'In practice,', 'One consistent pattern is', 'A concrete example is'];
-  let i = 0;
-  return paragraphs.map((p) => {
-    const text = trimToText(p);
-    if (!text) return '';
-    if (/^(in prior roles,|across teams,|in practice,|one consistent pattern is|a concrete example is)\b/i.test(text)) {
-      return ensureSentence(text);
-    }
-    const starter = starters[i % starters.length];
-    i += 1;
-    return ensureSentence(`${starter} ${text}`);
-  });
-}
-
-const BILLING_DOMAIN_TERMS = ['billing', 'invoice', 'invoicing', 'reconciliation', 'reconcile', 'entitlement', 'metering', 'usage metering', 'credit', 'dispute', 'revenue'];
-
-function containsBillingDomain(text: string): boolean {
+function deriveThemePhrase(text: string): string {
   const lowered = trimToText(text).toLowerCase();
-  if (!lowered) return false;
-  return BILLING_DOMAIN_TERMS.some((term) => lowered.includes(term));
+  if (/(workflow design|queue health)/.test(lowered)) {
+    return 'support workflow design and queue health';
+  }
+  if (/(dashboards?|kpi|reporting)/.test(lowered)) {
+    return 'dashboards, KPI reporting, and executive communication';
+  }
+  if (/(incident response|service reliability|incident command)/.test(lowered)) {
+    return 'incident response and service reliability';
+  }
+  if (/(ticketing|routing|handoff)/.test(lowered)) {
+    return 'ticketing governance, routing, and handoff routines';
+  }
+  return compactSnippet(text, 12);
 }
 
-function stripBillingDomainSentences(text: string): string {
-  const sentences = trimToText(text)
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => trimToText(s))
-    .filter(Boolean);
-  return sentences.filter((s) => !containsBillingDomain(s)).join(' ').trim();
-}
-
-function sanitizeThesisAgainstEvidence(thesis: string, evidenceCorpus: string): string {
-  const normalizedThesis = trimToText(thesis);
-  if (!normalizedThesis) return '';
-  if (!containsBillingDomain(normalizedThesis)) return normalizedThesis;
-  if (containsBillingDomain(evidenceCorpus)) return normalizedThesis;
-  return stripBillingDomainSentences(normalizedThesis);
+function jobContext(jobTitle?: string | null, jobCompany?: string | null): string {
+  const title = trimToText(jobTitle ?? '');
+  const company = trimToText(jobCompany ?? '');
+  if (title && company) return `the ${title} role at ${company}`;
+  if (title) return `the ${title} role`;
+  if (company) return `the opportunity at ${company}`;
+  return 'the role';
 }
 
 type CanonicalEvidenceUnit = {
@@ -110,127 +79,124 @@ type CanonicalEvidenceUnit = {
   eligibleForNarrativeComposition: boolean;
 };
 
-type ParagraphKey = 'opening' | 'body_1' | 'body_2' | 'closing';
+type ParagraphKey = CanonicalCoverLetterParagraphKey;
 
-type ParagraphEvidence = {
+function groupEvidenceBySourceBlock(evidenceUnits: CanonicalEvidenceUnit[]): CanonicalEvidenceUnit[][] {
+  const groups: CanonicalEvidenceUnit[][] = [];
+  const bySourceBlock = new Map<string, CanonicalEvidenceUnit[]>();
+  for (const unit of evidenceUnits) {
+    const blockId = trimToText(unit.sourceBlockId);
+    if (!blockId) continue;
+    let group = bySourceBlock.get(blockId);
+    if (!group) {
+      group = [];
+      bySourceBlock.set(blockId, group);
+      groups.push(group);
+    }
+    group.push(unit);
+  }
+  return groups.filter((group) => group.length > 0);
+}
+
+function buildParagraphEvidence(args: {
   paragraphKey: ParagraphKey;
-  sourceEvidenceIds: string[];
-  anchorTexts?: string[];
-};
-
-function jobContextSentence(jobTitle?: string | null, jobCompany?: string | null): string {
-  const title = trimToText(jobTitle ?? '');
-  const company = trimToText(jobCompany ?? '');
-  if (title && company) {
-    return `I am focused on the ${title} role at ${company}.`;
-  }
-  if (title) {
-    return `I am focused on the ${title} role.`;
-  }
-  if (company) {
-    return `I am focused on the opportunity at ${company}.`;
-  }
-  return '';
+  evidenceUnits: CanonicalEvidenceUnit[];
+}): CanonicalCoverLetterParagraphEvidence {
+  return {
+    paragraphKey: args.paragraphKey,
+    sourceEvidenceIds: args.evidenceUnits.map((unit) => unit.id).filter(Boolean),
+    anchorTexts: args.evidenceUnits.map((unit) => compactSnippet(unit.text, 24)).filter(Boolean),
+  };
 }
 
-function splitEvidenceIntoBodyGroups(snippets: CanonicalEvidenceUnit[]): CanonicalEvidenceUnit[][] {
-  const usable = snippets.slice(0, 6);
-  if (usable.length === 0) return [];
-  if (usable.length === 1) return [usable];
-
-  const midpoint = Math.ceil(usable.length / 2);
-  const first = usable.slice(0, midpoint);
-  const second = usable.slice(midpoint);
-  return second.length > 0 ? [first, second] : [first];
-}
-
-function buildParagraphText(args: {
-  snippets: CanonicalEvidenceUnit[];
+function buildOpeningParagraph(args: {
   jobTitle?: string | null;
   jobCompany?: string | null;
-  paragraphIndex: number;
+  leadEvidence: CanonicalEvidenceUnit;
 }): string {
-  const { snippets, jobTitle, jobCompany, paragraphIndex } = args;
-  const sentenceParts: string[] = [];
-
-  const evidenceSentences = snippets
-    .map((snippet) => sentenceFromSnippet(snippet.text))
-    .filter(Boolean);
-  if (evidenceSentences.length > 0) {
-    sentenceParts.push(...evidenceSentences.slice(0, 2));
-  }
-
-  const secondSnippet = snippets[1];
-  if (secondSnippet) {
-    sentenceParts.push(ensureSentence(`For example, ${compactSnippet(secondSnippet.text, 38)}`));
-  }
-  const context = jobContextSentence(jobTitle, jobCompany);
-  if (context) {
-    sentenceParts.push(context);
-  }
-
-  if (snippets.length > 0) {
-    sentenceParts.push(
-      ensureSentence(
-        'Those details keep the work anchored to concrete outcomes, clear ownership, and steady follow through.',
-      ),
-    );
-    sentenceParts.push(ensureSentence('This gives the hiring team a direct line from the evidence to the role fit.'));
-  }
-
-  const impact = varyImpactSentence(`${snippets.map((snippet) => snippet.text).join(' ')} ${paragraphIndex}`).replace(/[.!?]\s*$/, '');
-  const laneSuffix =
-    paragraphIndex === 1
-      ? 'across the first operating lane.'
-      : 'across the second operating lane.';
-  sentenceParts.push(ensureSentence(`${impact} ${laneSuffix}`));
-
-  return sentenceParts.filter(Boolean).join(' ').trim();
-}
-
-function buildClosingText(args: {
-  snippets: CanonicalEvidenceUnit[];
-  jobTitle?: string | null;
-  jobCompany?: string | null;
-}): string {
-  const { snippets, jobTitle, jobCompany } = args;
-  const sentenceParts: string[] = [];
-  const finalSnippet = snippets[snippets.length - 1];
-
-  if (finalSnippet) {
-    sentenceParts.push(sentenceFromSnippet(finalSnippet.text));
-  }
-
-  const title = trimToText(jobTitle ?? '');
-  const company = trimToText(jobCompany ?? '');
-  if (title && company) {
-    sentenceParts.push(
-      ensureSentence(
-        `I would welcome the chance to discuss how this background supports the ${title} role at ${company}.`,
-      ),
-    );
-  } else if (title) {
-    sentenceParts.push(
-      ensureSentence(
-        `I would welcome the chance to discuss how this background supports the ${title} role.`,
-      ),
-    );
-  } else if (company) {
-    sentenceParts.push(
-      ensureSentence(
-        `I would welcome the chance to discuss how this background supports the opportunity at ${company}.`,
-      ),
-    );
-  } else {
-    sentenceParts.push('I would welcome the chance to discuss the fit in more detail.');
-  }
-
-  sentenceParts.push(
-    ensureSentence("Thank you for considering how this experience could support the next stage of your team's work."),
+  const roleContext = jobContext(args.jobTitle, args.jobCompany);
+  const leadSentence = sentenceFromSnippet(args.leadEvidence.text);
+  const operatingSentence = ensureSentence(
+    `It reflects the operating rhythm I use when support, product, and engineering need the work to stay organized, measurable, and easy to act on.`,
   );
-  sentenceParts.push(ensureSentence('I would welcome a conversation about how to apply that background in the role.'));
+  const fitSentence = ensureSentence(
+    `That is why I see ${roleContext} as a practical fit for the way I work and the kind of ownership I like to bring.`,
+  );
+  const contributionSentence = ensureSentence(
+    `I try to keep the work grounded in clear priorities, visible follow through, and the kind of execution that makes a team easier to trust.`,
+  );
+  return [
+    ensureSentence(
+      `${roleContext.charAt(0).toUpperCase()}${roleContext.slice(1)} fits my background because it reflects the way I have led service quality, operating rhythm, and cross-functional execution.`,
+    ),
+    leadSentence,
+    operatingSentence,
+    fitSentence,
+    contributionSentence,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
 
-  return sentenceParts.filter(Boolean).join(' ').trim();
+function buildBodyParagraph(args: {
+  jobTitle?: string | null;
+  jobCompany?: string | null;
+  primaryEvidence: CanonicalEvidenceUnit;
+  secondaryEvidence?: CanonicalEvidenceUnit;
+  paragraphIndex: 1 | 2;
+}): string {
+  const roleContext = jobContext(args.jobTitle, args.jobCompany);
+  const sentences = [sentenceFromSnippet(args.primaryEvidence.text)];
+  if (args.secondaryEvidence) {
+    sentences.push(sentenceFromSnippet(args.secondaryEvidence.text));
+  }
+
+  const synthesis =
+    args.paragraphIndex === 1
+      ? `That work keeps ${roleContext} grounded in concrete ownership and visible service quality, while making handoffs and escalation paths easier to follow.`
+      : `That mix of experience is a strong fit for ${roleContext} because it keeps support, engineering, and customer partners aligned, and it gives the team a practical way to move issues forward without losing accountability.`;
+
+  const secondSynthesis =
+    args.paragraphIndex === 1
+      ? `It also creates a steady operating pattern that helps the team see where decisions happen and how work moves from one owner to the next.`
+      : `It also makes it easier to keep priorities clear when the work spans service quality, operational follow through, and customer communication.`;
+
+  return [...sentences, ensureSentence(synthesis), ensureSentence(secondSynthesis)]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
+
+function buildClosingParagraph(args: {
+  jobTitle?: string | null;
+  jobCompany?: string | null;
+  evidence: CanonicalEvidenceUnit[];
+}): string {
+  const roleContext = jobContext(args.jobTitle, args.jobCompany);
+  const themeSentence = args.evidence.length
+    ? lowercaseFirst(
+        normalizeEvidenceGrammar(
+          deriveThemePhrase(
+            args.evidence
+              .map((unit) => unit.text)
+              .join(' '),
+          ),
+        ),
+      )
+    : '';
+
+  return [
+    ensureSentence(
+      `That mix of support operations rigor, incident response, and cross-functional leadership is why I would welcome a conversation about ${roleContext}${themeSentence ? `, especially given ${themeSentence}` : ''}.`,
+    ),
+    ensureSentence(
+      `I would bring the same attention to detail, ownership, and steady communication to the work so the team can keep moving with confidence.`,
+    ),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
 }
 
 export class CoverLetterNarrativeComposer {
@@ -246,71 +212,73 @@ export class CoverLetterNarrativeComposer {
     opening: string;
     bodyParagraphs: string[];
     closing: string;
-    paragraphEvidence: ParagraphEvidence[];
+    paragraphEvidence: CanonicalCoverLetterParagraphEvidence[];
     diagnostics: {
       genericLanguageFlags: ReturnType<GenericLanguageDetector['detect']>;
       renderedEvidenceSnippetIds: string[];
       narrativeStrategy: string;
     };
   } {
-    const evidenceCorpus = input.evidenceUnits.map((s) => trimToText(s.text)).filter(Boolean).join(' ');
-    const thesis = sanitizeThesisAgainstEvidence(trimToText(input.thesis ?? ''), evidenceCorpus);
-    const renderedEvidenceSnippetIds = input.evidenceUnits.map((s) => s.id);
+    void input.thesis;
+    const evidenceUnits = input.evidenceUnits
+      .filter((unit) => unit?.eligibleForNarrativeComposition !== false)
+      .filter((unit) => {
+        const sectionType = String(unit?.sourceSectionType ?? '').toUpperCase();
+        return sectionType === 'EXPERIENCE' || sectionType === 'PROJECT';
+      })
+      .filter((unit) => trimToText(unit?.text).length > 0)
+      .slice(0, 4);
 
-    const jobTitle = trimToText(input.jobTitle ?? '');
-    const jobCompany = trimToText(input.jobCompany ?? '');
-    const bodyParagraphGroups = splitEvidenceIntoBodyGroups(input.evidenceUnits).slice(
-      0,
-      Math.min(Math.max(input.maxBodyParagraphs, 0), 2),
-    );
+    if (evidenceUnits.length < 2) {
+      throw new Error('canonical_cover_letter_evidence_insufficient');
+    }
 
-    const openingEvidence = input.evidenceUnits.slice(0, Math.min(2, input.evidenceUnits.length));
-    const openingParts = [
-      thesis,
-      openingEvidence[0] ? sentenceFromSnippet(openingEvidence[0].text) : '',
-      openingEvidence[1] ? sentenceFromSnippet(openingEvidence[1].text) : '',
-      jobContextSentence(jobTitle, jobCompany),
-      ensureSentence('The result is a role-specific narrative that stays tied to the supplied baseline evidence.'),
-      ensureSentence('It keeps the opening concrete, reviewable, and easy to audit.'),
-    ].filter(Boolean);
-    const opening = chooseVariedOpenings([openingParts.join(' ')])[0] ?? '';
+    const groupedEvidence = groupEvidenceBySourceBlock(evidenceUnits);
+    const selectedEvidence =
+      groupedEvidence.length >= 2
+        ? [groupedEvidence[0][0], groupedEvidence[1][0]].filter(Boolean)
+        : evidenceUnits.slice(0, 2);
 
-    const bodyParagraphs = chooseVariedOpenings(
-      bodyParagraphGroups.map((group, index) =>
-        buildParagraphText({ snippets: group, jobTitle, jobCompany, paragraphIndex: index + 1 }),
-      ),
-    );
-    const closing = buildClosingText({
-      snippets: input.evidenceUnits.slice(-1),
-      jobTitle,
-      jobCompany,
+    if (selectedEvidence.length < 2) {
+      throw new Error('canonical_cover_letter_evidence_insufficient');
+    }
+
+    const openingEvidence = [selectedEvidence[0]];
+    const bodyOneEvidence = [selectedEvidence[0]];
+    const bodyTwoEvidence = [selectedEvidence[1]];
+    const closingEvidence = [selectedEvidence[0]];
+
+    const opening = buildOpeningParagraph({
+      jobTitle: input.jobTitle,
+      jobCompany: input.jobCompany,
+      leadEvidence: selectedEvidence[0],
+    });
+    const bodyParagraphs = [
+      buildBodyParagraph({
+        jobTitle: input.jobTitle,
+        jobCompany: input.jobCompany,
+        primaryEvidence: selectedEvidence[0],
+        paragraphIndex: 1,
+      }),
+      buildBodyParagraph({
+        jobTitle: input.jobTitle,
+        jobCompany: input.jobCompany,
+        primaryEvidence: selectedEvidence[1],
+        paragraphIndex: 2,
+      }),
+    ];
+    const closing = buildClosingParagraph({
+      jobTitle: input.jobTitle,
+      jobCompany: input.jobCompany,
+      evidence: closingEvidence,
     });
 
-    const paragraphEvidence: ParagraphEvidence[] = [];
-    if (opening) {
-      paragraphEvidence.push({
-        paragraphKey: 'opening',
-        sourceEvidenceIds: openingEvidence.map((snippet) => snippet.id).filter(Boolean),
-        anchorTexts: openingEvidence.map((snippet) => compactSnippet(snippet.text, 24)).filter(Boolean),
-      });
-    }
-    bodyParagraphGroups.forEach((group, index) => {
-      if (!group.length) return;
-      const paragraphKey: ParagraphKey = index === 0 ? 'body_1' : 'body_2';
-      paragraphEvidence.push({
-        paragraphKey,
-        sourceEvidenceIds: group.map((snippet) => snippet.id).filter(Boolean),
-        anchorTexts: group.map((snippet) => compactSnippet(snippet.text, 24)).filter(Boolean),
-      });
-    });
-    if (closing) {
-      const finalEvidence = input.evidenceUnits.slice(-1);
-      paragraphEvidence.push({
-        paragraphKey: 'closing',
-        sourceEvidenceIds: finalEvidence.map((snippet) => snippet.id).filter(Boolean),
-        anchorTexts: finalEvidence.map((snippet) => compactSnippet(snippet.text, 24)).filter(Boolean),
-      });
-    }
+    const paragraphEvidence: CanonicalCoverLetterParagraphEvidence[] = [
+      buildParagraphEvidence({ paragraphKey: 'opening', evidenceUnits: openingEvidence }),
+      buildParagraphEvidence({ paragraphKey: 'body_1', evidenceUnits: bodyOneEvidence }),
+      buildParagraphEvidence({ paragraphKey: 'body_2', evidenceUnits: bodyTwoEvidence }),
+      buildParagraphEvidence({ paragraphKey: 'closing', evidenceUnits: closingEvidence }),
+    ];
 
     const fullText = [opening, ...bodyParagraphs, closing].filter(Boolean).join('\n\n');
     const flags = this.detector.detect(fullText);
@@ -322,8 +290,8 @@ export class CoverLetterNarrativeComposer {
       paragraphEvidence,
       diagnostics: {
         genericLanguageFlags: flags,
-        renderedEvidenceSnippetIds,
-        narrativeStrategy: thesis ? 'thesis_first' : 'canonical_absence',
+        renderedEvidenceSnippetIds: selectedEvidence.map((unit) => unit.id),
+        narrativeStrategy: 'canonical_cover_letter_v1',
       },
     };
   }

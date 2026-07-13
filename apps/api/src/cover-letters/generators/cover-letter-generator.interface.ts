@@ -26,12 +26,15 @@ export type CoverLetterClosingTemplate = {
 };
 
 import type { CoverLetterComplianceConstraints } from '../types/cover-letter-compliance-constraints';
-import type { NormalizedCoverLetterDocument } from '../../documents/normalized-document.models';
+import type {
+  CanonicalCoverLetterDocument,
+  CanonicalCoverLetterParagraphEvidence,
+} from '../../documents/normalized-document.models';
 import type { DocumentStrategyPlanLike } from '../../document-strategy-plan.types';
 import type { AuthoritativeRenderPlan } from '../../positioning/authoritative-render-plan';
 
 export type CoverLetterGenerationInput = {
-  document: NormalizedCoverLetterDocument;
+  document: CanonicalCoverLetterDocument;
   baselineId: string;
   jobId: string;
   allowedBaselineBlocks: AllowedBaselineBlock[];
@@ -61,7 +64,7 @@ export type CoverLetterGenerationInput = {
 };
 
 export type CoverLetterGenerationResult = {
-  document: NormalizedCoverLetterDocument;
+  document: CanonicalCoverLetterDocument;
   content: string;
   wordCount: number;
   greeting: string;
@@ -82,11 +85,7 @@ export type CoverLetterGenerationResult = {
     droppedEvidenceIds: string[];
   };
   constraintSummary?: string | null;
-  paragraphEvidence?: Array<{
-    paragraphKey: 'opening' | 'body_1' | 'body_2' | 'body_3' | 'closing';
-    sourceEvidenceIds: string[];
-    anchorTexts?: string[];
-  }>;
+  paragraphEvidence?: CanonicalCoverLetterParagraphEvidence[];
 };
 
 export interface CoverLetterGenerator {

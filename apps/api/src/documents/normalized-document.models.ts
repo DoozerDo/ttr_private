@@ -48,6 +48,23 @@ export type NormalizedCoverLetterDocument = {
   signatureName: string;
 };
 
+export const CANONICAL_COVER_LETTER_TEMPLATE_VERSION = 'canonical_cover_letter_v1' as const;
+
+export type CanonicalCoverLetterParagraphKey = 'opening' | 'body_1' | 'body_2' | 'closing';
+
+export type CanonicalCoverLetterParagraphEvidence = {
+  paragraphKey: CanonicalCoverLetterParagraphKey;
+  sourceEvidenceIds: string[];
+  anchorTexts?: string[];
+};
+
+export type CanonicalCoverLetterDocument = NormalizedCoverLetterDocument & {
+  templateVersion: typeof CANONICAL_COVER_LETTER_TEMPLATE_VERSION;
+  companyName: string | null;
+  roleTitle: string | null;
+  paragraphEvidence: CanonicalCoverLetterParagraphEvidence[];
+};
+
 export type DocumentGenerationExports = {
   docx: boolean;
   pdf: boolean;

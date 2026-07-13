@@ -431,7 +431,11 @@ describe('CoverLettersService contract', () => {
       expect(allowedBlockIds).not.toEqual(expect.arrayContaining(['legacy-experience']));
       expect(allowedBlockIds.some((id: string) => id.startsWith('resume_v2_exp_'))).toBe(false);
       expect(paragraphEvidenceIds.some((id: string) => id.startsWith('parsed-experience-'))).toBe(true);
-      expect(draft.generation.document.bodyParagraphs.length).toBeGreaterThanOrEqual(2);
+      expect(draft.generation.paragraphEvidence).toHaveLength(4);
+      expect(draft.generation.document.bodyParagraphs).toHaveLength(2);
+      expect(draft.generation.document.templateVersion).toBe('canonical_cover_letter_v1');
+      expect(draft.generation.document.roleTitle).toBe(job.title);
+      expect(draft.generation.document.companyName).toBe(job.company);
       expect(draft.generation.content).toMatch(/\S/);
     } finally {
       buildAllowedBlocksSpy.mockRestore();
@@ -459,7 +463,7 @@ describe('CoverLettersService contract', () => {
       );
       expect(allowedBlocks.some((block: any) => String(block.id ?? '').startsWith('resume_v2_exp_'))).toBe(false);
       expect(draft.generation.content).toMatch(/\S/);
-      expect(draft.generation.document.bodyParagraphs.length).toBeGreaterThanOrEqual(1);
+      expect(draft.generation.document.bodyParagraphs).toHaveLength(2);
     } finally {
       buildAllowedBlocksSpy.mockRestore();
       baseline.sections = originalSections;
@@ -565,7 +569,9 @@ describe('CoverLettersService contract', () => {
       expect(allowedBlockIds.some((id: string) => id.startsWith('resume_v2_plain_text'))).toBe(false);
       expect(allowedBlockIds.some((id: string) => id.startsWith('interpreted:'))).toBe(false);
       expect(paragraphEvidenceIds.some((id: string) => id.startsWith('resume_v2_exp_'))).toBe(false);
-      expect(draft.generation.document.bodyParagraphs.length).toBeGreaterThanOrEqual(2);
+      expect(draft.generation.paragraphEvidence).toHaveLength(4);
+      expect(draft.generation.document.bodyParagraphs).toHaveLength(2);
+      expect(draft.generation.document.templateVersion).toBe('canonical_cover_letter_v1');
       expect(draft.generation.content).toMatch(/\S/);
       expect(draft.baselineVerified).toBe(true);
     } finally {
@@ -637,7 +643,7 @@ describe('CoverLettersService contract', () => {
     try {
       const draft = await (service as any).buildCoverLetterDraft('user-1', request as any);
       expect(draft.baselineVerified).toBe(true);
-      expect(draft.generation.document.bodyParagraphs.length).toBeGreaterThanOrEqual(2);
+      expect(draft.generation.document.bodyParagraphs).toHaveLength(2);
       expect(draft.generation.content).toMatch(/\S/);
     } finally {
       baseline.sections = originalSections;
@@ -693,7 +699,7 @@ describe('CoverLettersService contract', () => {
       expect(allowedBlockIds.some((id: string) => String(id ?? '').startsWith('resume_v2_exp_'))).toBe(false);
       expect(paragraphEvidenceIds.some((id: string) => String(id ?? '').startsWith('parsed-experience-'))).toBe(true);
       expect(paragraphEvidenceIds.some((id: string) => String(id ?? '').startsWith('resume_v2_exp_'))).toBe(false);
-      expect(draft.generation.document.bodyParagraphs.length).toBeGreaterThanOrEqual(2);
+      expect(draft.generation.document.bodyParagraphs).toHaveLength(2);
       expect(draft.generation.content).toMatch(/Program Manager/i);
       expect(draft.generation.content).toMatch(/Example Co/i);
       expect(draft.baselineVerified).toBe(true);
@@ -995,7 +1001,7 @@ describe('CoverLettersService contract', () => {
       expect(Array.isArray(draft.generation.internalTrace?.usedEvidenceIds)).toBe(true);
       expect((draft.generation.internalTrace?.usedEvidenceIds ?? []).some((id: string) => id.startsWith('parsed-experience-'))).toBe(true);
       expect((draft.generation.internalTrace?.usedEvidenceIds ?? []).some((id: string) => id.startsWith('resume_v2_exp_'))).toBe(false);
-      expect(draft.generation.document.bodyParagraphs.length).toBeGreaterThanOrEqual(2);
+      expect(draft.generation.document.bodyParagraphs).toHaveLength(2);
       expect(draft.generation.content).toMatch(/Program Manager/i);
     } finally {
       baseline.sections = originalSections;
@@ -1623,6 +1629,32 @@ describe('CoverLettersService contract', () => {
         generationInputsHash: 'hash',
         generation: {
           ...(() => {
+            const allowedBlocks = [
+              {
+                id: 'parsed-experience-0',
+                title: 'Example Co - Program Manager',
+                content: [
+                  'Example Co | Program Manager | 2020 - 2024',
+                  '- Led enterprise support modernization across global teams.',
+                  '- Improved escalation readiness, incident response quality, and KPI governance using repeatable operational systems.',
+                ].join('\n'),
+                includePolicy: 'OPTIONAL',
+                order: 0,
+                sectionType: 'EXPERIENCE',
+              },
+              {
+                id: 'parsed-experience-1',
+                title: 'Example Co - Senior Program Manager',
+                content: [
+                  'Example Co | Senior Program Manager | 2018 - 2020',
+                  '- Partnered cross-functionally to tighten ownership and operating reviews.',
+                  '- Built reporting rhythms that made service reliability and stakeholder communication easier to manage.',
+                ].join('\n'),
+                includePolicy: 'OPTIONAL',
+                order: 1000,
+                sectionType: 'EXPERIENCE',
+              },
+            ] as const;
             const assembly = assembler.assembleCoverLetterFromStructuredBaseline({
             structured: {
               contact: undefined,
@@ -1632,7 +1664,20 @@ describe('CoverLettersService contract', () => {
                   company: 'Example Co',
                   roleTitle: 'Program Manager',
                   dates: '2020 - 2024',
-                  bullets: ['Led enterprise support modernization across global teams.'],
+                  bullets: [
+                    'Led enterprise support modernization across global teams.',
+                    'Improved escalation readiness, incident response quality, and KPI governance using repeatable operational systems.',
+                  ],
+                  source: 'baseline',
+                },
+                {
+                  company: 'Example Co',
+                  roleTitle: 'Senior Program Manager',
+                  dates: '2018 - 2020',
+                  bullets: [
+                    'Partnered cross-functionally to tighten ownership and operating reviews.',
+                    'Built reporting rhythms that made service reliability and stakeholder communication easier to manage.',
+                  ],
                   source: 'baseline',
                 },
               ],
@@ -1644,18 +1689,34 @@ describe('CoverLettersService contract', () => {
             senderContactLine: null,
             jobTitle: job.title,
             companyName: job.company,
+            allowedBlocks,
             });
+            const renderedParagraphs = [
+              assembly.document.opening,
+              ...(assembly.document.bodyParagraphs ?? []),
+              assembly.document.closingParagraph,
+            ];
             return {
               document: assembly.document,
               paragraphEvidence: assembly.paragraphEvidence,
+              content: [
+                'Dear Hiring Team,',
+                ...renderedParagraphs,
+                'Sincerely,',
+                'Jordan Lee',
+              ].join('\n\n'),
+              wordCount: [
+                'Dear Hiring Team,',
+                ...renderedParagraphs,
+                'Sincerely,',
+                'Jordan Lee',
+              ].join(' ').split(/\s+/).filter(Boolean).length,
+              greeting: 'Dear Hiring Team,',
+              paragraphs: [assembly.document.opening, ...(assembly.document.bodyParagraphs ?? [])],
+              closingParagraphs: [assembly.document.closingParagraph],
+              traceMap: {},
             };
           })(),
-          content: 'Dear Hiring Team,\\n\\nOpening.\\n\\nBody one.\\n\\nClosing.\\n\\nSincerely,\\n\\nJordan Lee',
-          wordCount: 120,
-          greeting: 'Dear Hiring Team,',
-          paragraphs: ['Opening.', 'Body one.'],
-          closingParagraphs: ['Closing.'],
-          traceMap: {},
         },
         complianceResult: {
           normalizedContent: 'This cover letter is complete and ready for export.',
@@ -1963,9 +2024,35 @@ describe('CoverLettersService contract', () => {
       jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
       closingTemplateKey: 'default',
       generationInputsHash: 'hash',
-      generation: {
-        ...(() => {
-          const assembly = assembler.assembleCoverLetterFromStructuredBaseline({
+        generation: {
+          ...(() => {
+            const allowedBlocks = [
+              {
+                id: 'parsed-experience-0',
+                title: 'Example Co - Program Manager',
+                content: [
+                  'Example Co | Program Manager | 2020 - 2024',
+                  '- Led enterprise support modernization across global teams.',
+                  '- Improved escalation readiness, incident response quality, and KPI governance using repeatable operational systems.',
+                ].join('\n'),
+                includePolicy: 'OPTIONAL',
+                order: 0,
+                sectionType: 'EXPERIENCE',
+              },
+              {
+                id: 'parsed-experience-1',
+                title: 'Example Co - Senior Program Manager',
+                content: [
+                  'Example Co | Senior Program Manager | 2018 - 2020',
+                  '- Partnered cross-functionally to tighten ownership and operating reviews.',
+                  '- Built reporting rhythms that made service reliability and stakeholder communication easier to manage.',
+                ].join('\n'),
+                includePolicy: 'OPTIONAL',
+                order: 1000,
+                sectionType: 'EXPERIENCE',
+              },
+            ] as const;
+            const assembly = assembler.assembleCoverLetterFromStructuredBaseline({
           structured: {
             contact: undefined,
             summary: undefined,
@@ -1974,7 +2061,20 @@ describe('CoverLettersService contract', () => {
                 company: 'Example Co',
                 roleTitle: 'Program Manager',
                 dates: '2020 - 2024',
-                bullets: ['Led enterprise support modernization across global teams.'],
+                bullets: [
+                  'Led enterprise support modernization across global teams.',
+                  'Improved escalation readiness, incident response quality, and KPI governance using repeatable operational systems.',
+                ],
+                source: 'baseline',
+              },
+              {
+                company: 'Example Co',
+                roleTitle: 'Senior Program Manager',
+                dates: '2018 - 2020',
+                bullets: [
+                  'Partnered cross-functionally to tighten ownership and operating reviews.',
+                  'Built reporting rhythms that made service reliability and stakeholder communication easier to manage.',
+                ],
                 source: 'baseline',
               },
             ],
@@ -1986,18 +2086,34 @@ describe('CoverLettersService contract', () => {
           senderContactLine: null,
           jobTitle: job.title,
           companyName: job.company,
+          allowedBlocks,
           });
+          const renderedParagraphs = [
+            assembly.document.opening,
+            ...(assembly.document.bodyParagraphs ?? []),
+            assembly.document.closingParagraph,
+          ];
           return {
             document: assembly.document,
             paragraphEvidence: assembly.paragraphEvidence,
+            content: [
+              'Dear Hiring Team,',
+              ...renderedParagraphs,
+              'Sincerely,',
+              'Jordan Lee',
+            ].join('\n\n'),
+            wordCount: [
+              'Dear Hiring Team,',
+              ...renderedParagraphs,
+              'Sincerely,',
+              'Jordan Lee',
+            ].join(' ').split(/\s+/).filter(Boolean).length,
+            greeting: 'Dear Hiring Team,',
+            paragraphs: [assembly.document.opening, ...(assembly.document.bodyParagraphs ?? [])],
+            closingParagraphs: [assembly.document.closingParagraph],
+            traceMap: {},
           };
         })(),
-        content: 'Dear Hiring Team,\\n\\nOpening.\\n\\nClosing.\\n\\nSincerely,\\n\\nJordan Lee',
-        wordCount: 120,
-        greeting: 'Dear Hiring Team,',
-        paragraphs: ['Opening.'],
-        closingParagraphs: ['Closing.'],
-        traceMap: {},
       },
       complianceResult: {
         normalizedContent: 'This cover letter is complete and ready for export.',
