@@ -16,6 +16,63 @@ import type {
   NormalizedResumeEducationEntry,
   NormalizedResumeExperienceEntry,
 } from '../documents/normalized-document.models';
+
+export type CanonicalResumeDocument = NormalizedResumeDocument & {
+  impact?: string;
+  technicalSkills?: string[];
+  sectionOrder: Array<
+    'summary' | 'impact' | 'competencies' | 'experience' | 'education' | 'certifications' | 'technical_skills'
+  >;
+};
+
+export function buildCanonicalResumeDocument(
+  document: NormalizedResumeDocument,
+): CanonicalResumeDocument {
+  const experience = Array.isArray(document.experience)
+    ? document.experience.map((entry) => ({
+        ...(entry as any),
+        company: String((entry as any)?.company ?? ''),
+        roleTitle: String((entry as any)?.roleTitle ?? ''),
+        location: String((entry as any)?.location ?? ''),
+        startDate: String((entry as any)?.startDate ?? ''),
+        endDate: String((entry as any)?.endDate ?? ''),
+        dateRange: String((entry as any)?.dateRange ?? ''),
+        bullets: Array.isArray((entry as any)?.bullets)
+          ? (entry as any).bullets
+              .map((bullet: unknown) =>
+                typeof bullet === 'string' ? bullet : String((bullet as any)?.text ?? bullet ?? ''),
+              )
+              .filter((bullet: string) => bullet.trim().length > 0)
+          : [],
+      }))
+    : [];
+
+  const normalized = normalizeNormalizedResumeDocument({
+    ...(document as any),
+    experience,
+  } as NormalizedResumeDocument);
+  const competencies =
+    normalized.competencies?.length ? normalized.competencies : normalized.coreCompetencies ?? [];
+  const impact =
+    normalized.summary && normalized.experience.length > 0
+      ? normalized.experience[0]?.bullets?.[0]
+      : undefined;
+
+  return {
+    ...normalized,
+    ...(impact ? { impact } : {}),
+    ...(competencies.length ? { technicalSkills: competencies } : {}),
+    sectionOrder: [
+      'summary',
+      'impact',
+      'competencies',
+      'experience',
+      'education',
+      'certifications',
+      'technical_skills',
+    ],
+  };
+}
 import type {
   DocumentStrategyPlanLike,
 } from '../document-strategy-plan.types';
@@ -1421,15 +1478,20 @@ function collectCertificationItems(
 export function mapNormalizedResumeToDocxModel(
   document: NormalizedResumeDocument,
 ): ResumeDocxModel {
+  const canonical = buildCanonicalResumeDocument(document);
   const sections: ResumeDocxSection[] = [];
 
-  if (document.summary) {
-    const item: ResumeSummaryItem = { paragraphs: [document.summary] };
+  if (canonical.summary) {
+    const item: ResumeSummaryItem = { paragraphs: [canonical.summary] };
     sections.push({ key: 'summary', title: 'Summary', items: [item] });
   }
 
   const competencies =
-    document.competencies?.length ? document.competencies : document.coreCompetencies;
+    canonical.technicalSkills?.length
+      ? canonical.technicalSkills
+      : canonical.competencies?.length
+        ? canonical.competencies
+        : canonical.coreCompetencies;
   if (competencies?.length) {
     const item: ResumeSkillsItem = {
       groups: [{ values: competencies }],
@@ -1437,8 +1499,8 @@ export function mapNormalizedResumeToDocxModel(
     sections.push({ key: 'skills', title: 'Technical Skills', items: [item] });
   }
 
-  if (document.experience.length) {
-    const items: ExperienceItem[] = document.experience
+  if (canonical.experience.length) {
+    const items: ExperienceItem[] = canonical.experience
       .filter((entry) => entry.bullets.length > 0)
       .map((entry) => ({
         role: entry.roleTitle,
@@ -1453,8 +1515,8 @@ export function mapNormalizedResumeToDocxModel(
     sections.push({ key: 'experience', title: 'Professional Experience', items });
   }
 
-  if (document.education?.length) {
-    const dedupedEducation = dedupeEducationEntries(document.education);
+  if (canonical.education?.length) {
+    const dedupedEducation = dedupeEducationEntries(canonical.education);
 
     const items: ResumeEducationItem[] = dedupedEducation.map((entry) => ({
       institution: entry.institution,
@@ -1465,13 +1527,13 @@ export function mapNormalizedResumeToDocxModel(
     sections.push({ key: 'education', title: 'Education', items });
   }
 
-  const certificationItems = collectCertificationItems(document.additionalSections);
+  const certificationItems = collectCertificationItems(canonical.additionalSections);
   if (certificationItems.length) {
     sections.push({ key: 'certifications', title: 'Certifications', items: certificationItems });
   }
 
-  if (document.additionalSections?.length) {
-    const items: ResumeOtherItem[] = document.additionalSections
+  if (canonical.additionalSections?.length) {
+    const items: ResumeOtherItem[] = canonical.additionalSections
       .filter((section) => !isCertificationSectionTitle(section.title))
       .map((section) => ({
         lines: [section.title, ...section.items].filter((line) => !isPaginationArtifact(line)),
@@ -1483,14 +1545,15 @@ export function mapNormalizedResumeToDocxModel(
 
   return {
     header: {
-      name: document.heading.name,
-      contactLines: [document.heading.contactLine, ...(document.heading.links ?? [])].filter(Boolean),
+      name: canonical.heading.name,
+      contactLines: [canonical.heading.contactLine, ...(canonical.heading.links ?? [])].filter(Boolean),
     },
     sections,
   };
 }
 
 export function buildResumePlainText(document: NormalizedResumeDocument): string {
+  const canonical = buildCanonicalResumeDocument(document);
   const canonicalizeEducationToken = (token: string): string =>
     token
       .replace(/\s+/g, ' ')
@@ -1555,28 +1618,32 @@ export function buildResumePlainText(document: NormalizedResumeDocument): string
   };
 
   const lines: string[] = [];
-  lines.push(document.heading.name);
-  if (document.heading.contactLine) lines.push(document.heading.contactLine);
-  (document.heading.links ?? []).forEach((link) => lines.push(link));
+  lines.push(canonical.heading.name);
+  if (canonical.heading.contactLine) lines.push(canonical.heading.contactLine);
+  (canonical.heading.links ?? []).forEach((link) => lines.push(link));
   lines.push('');
 
-  if (document.summary) {
+  if (canonical.summary) {
     lines.push('Summary');
-    lines.push(document.summary);
+    lines.push(canonical.summary);
     lines.push('');
   }
 
   const competencies =
-    document.competencies?.length ? document.competencies : document.coreCompetencies;
+    canonical.technicalSkills?.length
+      ? canonical.technicalSkills
+      : canonical.competencies?.length
+        ? canonical.competencies
+        : canonical.coreCompetencies;
   if (competencies?.length) {
     lines.push('Core Competencies');
     lines.push(competencies.join(', '));
     lines.push('');
   }
 
-  if (document.experience.length) {
+  if (canonical.experience.length) {
     lines.push('Professional Experience');
-    for (const entry of document.experience) {
+    for (const entry of canonical.experience) {
       const companyLine = [entry.company, entry.location].filter(Boolean).join(' | ');
       const roleLine = [
         entry.roleTitle,
@@ -1595,9 +1662,9 @@ export function buildResumePlainText(document: NormalizedResumeDocument): string
     }
   }
 
-  if (document.education?.length) {
+  if (canonical.education?.length) {
     lines.push('Education');
-    const dedupedEducation = dedupeEducationForRender(document.education);
+    const dedupedEducation = dedupeEducationForRender(canonical.education);
     dedupedEducation.forEach((entry) => {
       if (entry.degree) {
         lines.push(entry.degree);
@@ -1611,7 +1678,7 @@ export function buildResumePlainText(document: NormalizedResumeDocument): string
     lines.push('');
   }
 
-  const certificationItems = collectCertificationItems(document.additionalSections);
+  const certificationItems = collectCertificationItems(canonical.additionalSections);
   if (certificationItems.length) {
     lines.push('Certifications');
     certificationItems.forEach((entry) => {

@@ -963,6 +963,53 @@ export class AnalysisService {
   }
 
   private buildScoreBreakdown(assessment: FitAssessment): ScoreBreakdown {
+    const normalizeDimensionsToScore = (
+      dimensions: ScoreBreakdown['dimensions'],
+      targetScore?: number | null,
+    ): ScoreBreakdown['dimensions'] => {
+      const boundedTarget =
+        typeof targetScore === 'number' && Number.isFinite(targetScore) && targetScore >= 0
+          ? Math.round(targetScore)
+          : null;
+      if (boundedTarget === null) {
+        return dimensions;
+      }
+
+      const sourceTotal = dimensions.reduce((sum, dimension) => sum + dimension.score, 0);
+      if (sourceTotal <= 0) {
+        return dimensions;
+      }
+
+      const scaled = dimensions.map((dimension, index) => {
+        const score =
+          index === dimensions.length - 1
+            ? boundedTarget - scaledSum(dimensions.slice(0, -1), sourceTotal, boundedTarget)
+            : Math.round((dimension.score / sourceTotal) * boundedTarget);
+        return {
+          ...dimension,
+          score: Math.max(0, Math.min(dimension.weight, score)),
+        };
+      });
+
+      const adjustedTotal = scaled.reduce((sum, dimension) => sum + dimension.score, 0);
+      if (adjustedTotal !== boundedTarget && scaled.length > 0) {
+        const delta = boundedTarget - adjustedTotal;
+        const last = scaled[scaled.length - 1];
+        scaled[scaled.length - 1] = {
+          ...last,
+          score: Math.max(0, Math.min(last.weight, last.score + delta)),
+        };
+      }
+      return scaled;
+    };
+
+    const scaledSum = (
+      source: ScoreBreakdown['dimensions'],
+      sourceTotal: number,
+      targetTotal: number,
+    ): number =>
+      source.reduce((sum, dimension) => sum + Math.round((dimension.score / sourceTotal) * targetTotal), 0);
+
     const dimensionPoints = assessment.scoringV2?.rubric?.dimensionPoints;
     if (dimensionPoints) {
       const dimensions = this.scoreBreakdownMeta.map((entry) => {
@@ -975,21 +1022,23 @@ export class AnalysisService {
           weight: entry.weight,
         };
       });
-      const total_score = this.roundToTenth(
-        dimensions.reduce((sum, dimension) => sum + dimension.score, 0),
+      const normalizedDimensions = normalizeDimensionsToScore(
+        dimensions,
+        typeof assessment.scoringV2?.score === 'number' ? assessment.scoringV2.score : null,
       );
-      return { total_score, dimensions };
+      const total_score = this.roundToTenth(
+        typeof assessment.scoringV2?.score === 'number'
+          ? assessment.scoringV2.score
+          : normalizedDimensions.reduce((sum, dimension) => sum + dimension.score, 0),
+      );
+      return { total_score, dimensions: normalizedDimensions };
     }
 
     const legacyPercents = {
-      role_scope_and_seniority:
-        assessment.dimensionScores?.experienceAlignment ?? 0,
-      support_operations_and_process_rigor:
-        assessment.dimensionScores?.leadershipLevel ?? 0,
-      tooling_and_platform_experience:
-        assessment.dimensionScores?.technicalPlatformFit ?? 0,
-      domain_and_business_context:
-        assessment.dimensionScores?.industryContext ?? 0,
+      role_scope_and_seniority: assessment.dimensionScores?.experienceAlignment ?? 0,
+      support_operations_and_process_rigor: assessment.dimensionScores?.leadershipLevel ?? 0,
+      tooling_and_platform_experience: assessment.dimensionScores?.technicalPlatformFit ?? 0,
+      domain_and_business_context: assessment.dimensionScores?.industryContext ?? 0,
       change_leadership_and_customer_advocacy:
         assessment.dimensionScores?.strategicTacticalFit ?? 0,
     };
@@ -1004,11 +1053,16 @@ export class AnalysisService {
         weight: entry.weight,
       };
     });
-
-    const total_score = this.roundToTenth(
-      dimensions.reduce((sum, dimension) => sum + dimension.score, 0),
+    const normalizedDimensions = normalizeDimensionsToScore(
+      dimensions,
+      typeof assessment.scoringV2?.score === 'number' ? assessment.scoringV2.score : null,
     );
-    return { total_score, dimensions };
+    const total_score = this.roundToTenth(
+      typeof assessment.scoringV2?.score === 'number'
+        ? assessment.scoringV2.score
+        : normalizedDimensions.reduce((sum, dimension) => sum + dimension.score, 0),
+    );
+    return { total_score, dimensions: normalizedDimensions };
   }
 
   private getAuthoritativeResumeProjectScore(

@@ -6,6 +6,7 @@ import type { CareerIdentitySnapshot } from '../career-identity/career-identity.
 import { NarrativeCompositionEngine } from '../composition/narrative-composition-engine';
 import { createHash } from 'crypto';
 import {
+  buildCanonicalResumeDocument,
   buildNormalizedResumeValidationFailures,
   formatResumeV2InvalidMessage,
   validateNormalizedResumeDocument,
@@ -461,7 +462,7 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
     }
   }
 
-  return {
+  const canonicalDocument = buildCanonicalResumeDocument({
     heading: {
       name: trimToText(input.identity?.name ?? (resumeV2ForAuthority as any)?.heading?.name),
       contactLine: trimToText(input.identity?.contactLine ?? (resumeV2ForAuthority as any)?.heading?.contactLine),
@@ -473,11 +474,16 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
     ...(Array.isArray((resumeV2ForAuthority as any)?.competencies) ? { competencies: (resumeV2ForAuthority as any).competencies } : {}),
     experience: composition.experience as any,
     ...(Array.isArray((resumeV2ForAuthority as any)?.education) ? { education: (resumeV2ForAuthority as any).education } : {}),
+  });
+
+  return {
+    ...canonicalDocument,
     __compositionDiagnostics: {
       ...composition.diagnostics,
       authorityFingerprint,
       preCompositionContaminationCount: precomposition.count,
       preCompositionContaminatedRoleKeys: precomposition.roleKeys,
+      canonicalSectionOrder: canonicalDocument.sectionOrder,
       compositionPathExecuted: 'authoritative_resume_v2_assembler',
       freshCompositionExecuted: true,
       provenanceEnforcementExecuted: true,
