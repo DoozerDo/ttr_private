@@ -4062,7 +4062,7 @@ export class ResumeService {
     };
 
 	    const TEMPLATE_ASSEMBLY_THRESHOLD = 80;
-	    const STRUCTURED_BASELINE_TEMPLATE_VERSION = 'structured-baseline-v1';
+	    const STRUCTURED_BASELINE_TEMPLATE_VERSION = 'canonical_resume_v1';
     const scoreForTemplateRaw =
       effectiveAssessment?.overallScore ?? latestAssessment?.overallScore ?? 0;
     const scoreForTemplate = Number(scoreForTemplateRaw);
@@ -5467,7 +5467,7 @@ export class ResumeService {
 
         const cachedResponseUsesCanonicalAuthority =
           Boolean((response as any)?.internal?.generationMode === 'structured_baseline_template') ||
-          Boolean((response as any)?.internal?.templateVersion === 'structured-baseline-v1');
+          Boolean((response as any)?.internal?.templateVersion === 'canonical_resume_v1');
         const cachedExportReady = await this.canExportResumeArtifact({
           normalizedDocument: ((response as any)?.preview?.resume ?? {}) as NormalizedResumeDocument,
           usedStructuredBaselineTemplate: cachedResponseUsesCanonicalAuthority,

@@ -25,6 +25,44 @@ export type CanonicalResumeDocument = NormalizedResumeDocument & {
   >;
 };
 
+export const CANONICAL_RESUME_TEMPLATE_VERSION = 'canonical_resume_v1';
+
+export type CanonicalResumePresentationPlan = {
+  templateVersion: typeof CANONICAL_RESUME_TEMPLATE_VERSION;
+  header: {
+    name: string;
+    headline?: string;
+    location?: string;
+    phone?: string;
+    email?: string;
+    linkedin?: string;
+    contactLines: string[];
+  };
+  summary?: string;
+  impact: string[];
+  competencies: string[];
+  experience: Array<{
+    company: string;
+    roleTitle: string;
+    dateRange?: string;
+    location?: string;
+    bullets: string[];
+  }>;
+  education: Array<{
+    degree?: string;
+    institution: string;
+    location?: string;
+    raw: string;
+  }>;
+  certifications: Array<{
+    title: string;
+    organization?: string;
+    dateRange?: string;
+  }>;
+  technicalSkills: string[];
+  sectionOrder: CanonicalResumeDocument['sectionOrder'];
+};
+
 export function buildCanonicalResumeDocument(
   document: NormalizedResumeDocument,
 ): CanonicalResumeDocument {
@@ -125,6 +163,14 @@ const GENERIC_SUMMARY_PHRASES = [
   'led with impact',
   'delivered results',
 ];
+const CERTIFICATION_KEYWORD_PATTERN =
+  /\b(?:certif(?:ication|ied)|itil|lean\s*six\s*sigma|six\s*sigma|green\s*belt|black\s*belt|white\s*belt|yellow\s*belt|foundation|associate|professional|scrum\s+master|pmp|cissp|cism|aws\s+certified|azure\s+certified|google\s+cloud\s+certified)\b/i;
+const CONTACT_URI_PATTERN =
+  /\b(?:https?:\/\/|www\.|linkedin\.com\/in\/|linkedin\.com\/company\/|github\.com\/|mailto:|@[A-Z0-9.-]+\.[A-Z]{2,})\b/i;
+const TECHNOLOGY_PLACEHOLDER_PATTERN =
+  /^(?:technology|technologies|tech|tools|technology\s*&\s*tools|technical\s+skills|skills|competencies|experience)$/i;
+const BULLET_CORRUPTION_PATTERN =
+  /(?:\band\s+and\b|(?:\.,)|(?:,\s*\.)|(?:\.\s*,)|(?:\s,\s*,)|(?:\s;\s*;)|(?:\s:\s*:))/i;
 
 function cleanText(value?: string | null): string {
   return (value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\u00a0/g, ' ').trim();
@@ -154,7 +200,7 @@ function stripPaginationArtifactsFromString(value: string): string {
 
   const withoutPageTokens = normalized
     .replace(PAGE_TOKEN_PATTERN, ' ')
-    .replace(/\s*[|/]\s*/g, ' | ')
+    .replace(/\s*\|\s*/g, ' | ')
     .replace(/\s{2,}/g, ' ')
     .replace(/\|\s*\|/g, '|')
     .replace(/^\|\s*|\s*\|$/g, '')
@@ -171,6 +217,8 @@ function isLowQualityFragment(value: string): boolean {
   const normalized = normalizeLine(value);
   if (!normalized) return true;
   if (isPaginationArtifact(normalized)) return true;
+  if (isContactLikeText(normalized)) return true;
+  if (isTechnologyPlaceholderText(normalized)) return true;
   if (FRAGMENT_TOKEN_REJECT_PATTERN.test(normalized)) return true;
   const words = normalized.split(/\s+/).filter(Boolean);
   const lowercaseOnly = /^[a-z]+(?:\s+[a-z]+){0,3}$/.test(normalized);
@@ -179,6 +227,79 @@ function isLowQualityFragment(value: string): boolean {
   if (/^\d+[a-zA-Z]*$/.test(normalized)) return true;
   if (words.length === 1 && normalized.length < 12 && lowercaseOnly) return true;
   return false;
+}
+
+function isCertificationLikeText(value: string): boolean {
+  const normalized = normalizeLine(value);
+  if (!normalized) return false;
+  return CERTIFICATION_KEYWORD_PATTERN.test(normalized);
+}
+
+function isContactLikeText(value: string): boolean {
+  const normalized = normalizeLine(value);
+  if (!normalized) return false;
+  if (CONTACT_URI_PATTERN.test(normalized)) return true;
+  if (/\b(?:linkedin|github)\b/i.test(normalized) && /\b(?:\.com|\.io|\.net)\b/i.test(normalized)) return true;
+  return false;
+}
+
+function isTechnologyPlaceholderText(value: string): boolean {
+  const normalized = normalizeLine(value);
+  if (!normalized) return false;
+  return TECHNOLOGY_PLACEHOLDER_PATTERN.test(normalized);
+}
+
+function isEmploymentLikeRoleTitle(value: string): boolean {
+  const normalized = normalizeLine(value);
+  if (!normalized) return false;
+  if (isCertificationLikeText(normalized) || isContactLikeText(normalized) || isTechnologyPlaceholderText(normalized)) {
+    return false;
+  }
+  return isLikelyRoleTitle(normalized);
+}
+
+function isEmploymentLikeCompany(value: string): boolean {
+  const normalized = normalizeLine(value);
+  if (!normalized) return false;
+  if (isCertificationLikeText(normalized) || isContactLikeText(normalized) || isTechnologyPlaceholderText(normalized)) {
+    return false;
+  }
+  return isLikelyCompany(normalized);
+}
+
+function hasBulletCorruption(value: string): boolean {
+  const normalized = normalizeLine(value);
+  if (!normalized) return true;
+  if (BULLET_CORRUPTION_PATTERN.test(normalized)) return true;
+  if (/\bTECHNOLOGY\b/.test(normalized) && normalized.split(/\s+/).length <= 3) return true;
+  if (isContactLikeText(normalized)) return true;
+  return false;
+}
+
+function isValidCanonicalBulletText(value: string): boolean {
+  const normalized = normalizeLine(value);
+  if (!normalized) return false;
+  if (isLowQualityFragment(normalized)) return false;
+  if (isClearlyIncompleteBulletFragment(normalized)) return false;
+  if (hasBulletCorruption(normalized)) return false;
+  return normalized.length >= 12;
+}
+
+function isCanonicalEmploymentExperienceEntry(entry: {
+  company?: string | null;
+  roleTitle?: string | null;
+  bullets?: Array<string | null | undefined>;
+}): boolean {
+  const company = normalizeLine(entry.company ?? '');
+  const roleTitle = normalizeLine(entry.roleTitle ?? '');
+  const bullets = Array.isArray(entry.bullets) ? entry.bullets : [];
+  if (!company || !roleTitle) return false;
+  if (!isEmploymentLikeCompany(company) || !isEmploymentLikeRoleTitle(roleTitle)) return false;
+  const bulletCount = bullets.filter((bullet) => isValidCanonicalBulletText(String(bullet ?? ''))).length;
+  if (bulletCount === 0) return false;
+  const corpus = [company, roleTitle, ...bullets.map((bullet) => normalizeLine(String(bullet ?? '')))].join(' ');
+  if (isCertificationLikeText(corpus) || isContactLikeText(corpus) || isTechnologyPlaceholderText(corpus)) return false;
+  return true;
 }
 
 function isClearlyIncompleteBulletFragment(value: string): boolean {
@@ -203,6 +324,9 @@ function isDiscardableCompanyToken(value: string): boolean {
   const normalized = normalizeLine(value);
   if (!normalized) return true;
   if (isPaginationArtifact(normalized)) return true;
+  if (isCertificationLikeText(normalized) || isContactLikeText(normalized) || isTechnologyPlaceholderText(normalized)) {
+    return true;
+  }
   if (FRAGMENT_TOKEN_REJECT_PATTERN.test(normalized)) return true;
   const words = normalized.split(/\s+/).filter(Boolean);
   if (words.length === 1 && normalized.length <= 3) return true;
@@ -220,6 +344,9 @@ function isDiscardableCompanyToken(value: string): boolean {
 function isLikelyRoleTitle(value: string): boolean {
   const normalized = normalizeLine(value);
   if (!normalized) return false;
+  if (isCertificationLikeText(normalized) || isContactLikeText(normalized) || isTechnologyPlaceholderText(normalized)) {
+    return false;
+  }
   if (ROLE_HINT_PATTERN.test(normalized)) return true;
   if (/\bdesginer\b|\bdesinger\b/i.test(normalized)) return true;
   if (/\bcontractor\b/i.test(normalized)) return true;
@@ -236,6 +363,9 @@ function isLikelyCompany(value: string): boolean {
   const normalized = normalizeLine(value);
   if (!normalized) return false;
   if (isPaginationArtifact(normalized)) return false;
+  if (isCertificationLikeText(normalized) || isContactLikeText(normalized) || isTechnologyPlaceholderText(normalized)) {
+    return false;
+  }
   if (isLowQualityFragment(normalized)) return false;
   if (isDiscardableCompanyToken(normalized)) return false;
 
@@ -412,49 +542,6 @@ function tightenBulletForSeniority(bullet: string): string {
 function containsAnyPhrase(value: string, phrases: string[]): boolean {
   const lowered = normalizeLine(value).toLowerCase();
   return phrases.some((phrase) => lowered.includes(phrase.toLowerCase()));
-}
-
-function buildStrategicResumeSummary(
-  plan: DocumentStrategyPlanLike,
-  existingSummary: string | undefined,
-): string | undefined {
-  const position = normalizeLine(plan.positioningFrame ?? '').trim();
-  if (!position) return existingSummary;
-
-  const topAxes = Array.from(
-    new Set([
-      ...(plan.roleLens?.priorities ?? []).slice(0, 3),
-      ...((plan.qualityPass?.topNarrativeAxes ?? []).slice(0, 2)),
-    ]),
-  ).filter(Boolean);
-  const topEvidence = (plan.selectedEvidence ?? []).slice(0, 3);
-  const evidenceThemes = topEvidence
-    .flatMap((entry) => [...(entry.matchedSignals ?? []), ...(entry.approvedClaims ?? [])])
-    .map((value) => normalizeLine(value))
-    .filter(Boolean);
-
-  const openingThemes = topAxes.slice(0, 2).join(', ');
-  const evidencePhrase = evidenceThemes.slice(0, 2).join(', ');
-  const firstLine = openingThemes ? `${position} with strength in ${openingThemes}.` : `${position} focused on execution.`;
-  const secondLine = evidencePhrase
-    ? `Known for ${evidencePhrase} and shipping role-aligned outcomes from verified experience.`
-    : 'Known for shipping role-aligned outcomes from verified experience.';
-
-  const summary = [firstLine, secondLine].join(' ');
-  if (containsAnyPhrase(summary, GENERIC_SUMMARY_PHRASES)) {
-    return existingSummary;
-  }
-  return summary;
-}
-
-function isWeakResumeSummary(value?: string | null): boolean {
-  const normalized = normalizeLine(value ?? '');
-  if (!normalized) return true;
-  if (normalized.length < 40) return true;
-  if (containsAnyPhrase(normalized, GENERIC_SUMMARY_PHRASES)) return true;
-  return !/\b(operations|strategy|delivery|support|incident|workflow|process|leadership|execution|scale)\b/i.test(
-    normalized,
-  );
 }
 
 function mergeWrappedBulletFragments(bullets: string[]): string[] {
@@ -735,6 +822,7 @@ function parseExperienceHeader(
 function buildExperienceFromSection(section: ResumeExportSection): NormalizedResumeExperienceEntry[] {
   type CandidateBullet = {
     text: string;
+    sourceText?: string;
     sourceSectionId: string | null;
     sourceRoleIndex: number | null;
     reconstructedFromAdjacentLines: boolean;
@@ -871,10 +959,30 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
     return roleEvidence.includes(normalizedBullet);
   };
 
+  const chooseCanonicalBulletText = (candidate: CandidateBullet, roleTitle: string): string => {
+    const options = [
+      candidate.text,
+      stripRoleSuffixFromBulletText(candidate.text, roleTitle),
+      candidate.sourceText ?? '',
+      stripRoleSuffixFromBulletText(String(candidate.sourceText ?? ''), roleTitle),
+    ];
+
+    for (const option of options) {
+      const normalized = normalizeLine(String(option ?? ''))
+        .replace(GENERIC_ROLE_INLINE_PATTERN, ' ')
+        .replace(GENERIC_ROLE_TRAILING_PATTERN, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (isValidCanonicalBulletText(normalized)) return normalized;
+    }
+
+    return '';
+  };
+
   const addBulletToCandidate = (
     candidate: ExperienceCandidate,
     bulletText: string,
-    provenance: Omit<CandidateBullet, 'text'>,
+    provenance: Omit<CandidateBullet, 'text' | 'sourceText'> & { sourceText?: string },
   ) => {
     const normalizedText = normalizeLine(bulletText);
     if (!normalizedText) return;
@@ -884,6 +992,7 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
     );
     const incoming: CandidateBullet = {
       text: normalizedText,
+      sourceText: provenance.sourceText ?? normalizedText,
       ...provenance,
     };
     if (incoming.explicitInRoleSource) {
@@ -1088,12 +1197,8 @@ function buildExperienceFromSection(section: ResumeExportSection): NormalizedRes
       const normalizedBullets: CandidateBullet[] = [];
       const seen = new Map<string, number>();
       for (const bullet of entry.bullets) {
-        const cleaned = stripRoleSuffixFromBulletText(bullet.text, roleTitle)
-          .replace(GENERIC_ROLE_INLINE_PATTERN, ' ')
-          .replace(GENERIC_ROLE_TRAILING_PATTERN, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        const tightened = tightenBulletForSeniority(cleaned);
+        const preferred = chooseCanonicalBulletText(bullet, roleTitle);
+        const tightened = tightenBulletForSeniority(preferred);
         const terminalNormalized = normalizeLine(tightened);
         if (
           !tightened ||
@@ -1313,15 +1418,7 @@ export function buildNormalizedResumeDocument(
 
   const links: string[] = [];
   const dedupeEducation = dedupeEducationEntries(education);
-  const strategicSummary = options?.documentStrategyPlan
-    ? buildStrategicResumeSummary(options.documentStrategyPlan, summary)
-    : summary;
-  const normalizedSummary =
-    options?.documentStrategyPlan && isWeakResumeSummary(summary)
-      ? strategicSummary
-      : strategicSummary && containsAnyPhrase(strategicSummary, GENERIC_SUMMARY_PHRASES)
-        ? summary
-        : strategicSummary;
+  const normalizedSummary = summary;
 
   const normalized: NormalizedResumeDocument = {
     heading: {
@@ -1360,34 +1457,61 @@ function sanitizeNormalizedResumeDocument(
     .map((value) => sanitizeText(value))
     .filter((value) => value.length > 0 && !isLowQualityFragment(value));
 
-  const sanitizedExperience = document.experience
+  const reclassifiedCertificationItems: string[] = [];
+  const sanitizedExperience = (
+    document.experience
     .map((entry) => {
-      const roleTitle =
-        repairRoleTitleFragment(sanitizeText(entry.roleTitle)) || '';
+      const company = sanitizeText(entry.company);
+      const roleTitle = repairRoleTitleFragment(sanitizeText(entry.roleTitle)) || '';
       const bulletLines = entry.bullets
         .flatMap((bullet) => sanitizeText(bullet).split(/\r?\n/))
         .map((bullet) => bullet.trim())
         .filter((bullet) => bullet.length > 0);
 
-      const mergedBullets = mergeWrappedBulletFragments(bulletLines)
-        .map((bullet) => stripRoleSuffixFromBulletText(bullet, roleTitle))
-        .map((bullet) => tightenBulletForSeniority(bullet))
-        .filter((bullet) => bullet.length > 0)
-        .filter((bullet) => !isLowQualityFragment(bullet))
-        .filter((bullet) => !isClearlyIncompleteBulletFragment(bullet))
+      const candidateBullets = bulletLines
+        .map((bullet) => {
+          const transformed = stripRoleSuffixFromBulletText(bullet, roleTitle);
+          const tightened = tightenBulletForSeniority(transformed);
+          if (isValidCanonicalBulletText(tightened)) return tightened;
+          if (isValidCanonicalBulletText(bullet)) return bullet;
+          return '';
+        })
+        .filter(Boolean)
         .filter((bullet, index, list) => list.findIndex((item) => item.toLowerCase() === bullet.toLowerCase()) === index);
 
-      return {
-        company: sanitizeText(entry.company),
+      const canonicalExperience = {
+        company,
         roleTitle,
         location: sanitizeText(entry.location ?? '') || undefined,
         startDate: sanitizeText(entry.startDate ?? '') || undefined,
         endDate: sanitizeText(entry.endDate ?? '') || undefined,
         dateRange: sanitizeText(entry.dateRange ?? '') || undefined,
-        bullets: mergedBullets,
+        bullets: candidateBullets,
       };
+
+      if (!isCanonicalEmploymentExperienceEntry(canonicalExperience)) {
+        const certificationText = [company, roleTitle, canonicalExperience.dateRange]
+          .map((value) => normalizeLine(String(value ?? '')))
+          .filter(Boolean)
+          .join(' | ');
+        if (certificationText && isCertificationLikeText(certificationText)) {
+          reclassifiedCertificationItems.push(certificationText);
+        }
+        return null;
+      }
+
+      return canonicalExperience;
     })
-    .filter((entry) => entry.company.length > 0 && !isDiscardableCompanyToken(entry.company));
+    .filter(Boolean)
+  ) as Array<{
+    company: string;
+    roleTitle: string;
+    location?: string;
+    startDate?: string;
+    endDate?: string;
+    dateRange?: string;
+    bullets: string[];
+  }>;
 
   const sanitizedEducation = dedupeEducationEntries((document.education ?? [])
     .map((entry) => ({
@@ -1403,6 +1527,12 @@ function sanitizeNormalizedResumeDocument(
       items: section.items.map((item) => sanitizeText(item)).filter((item) => item.length > 0),
     }))
     .filter((section) => section.title.length > 0 && section.items.length > 0);
+  if (reclassifiedCertificationItems.length > 0) {
+    sanitizedAdditionalSections.push({
+      title: 'Certifications',
+      items: reclassifiedCertificationItems,
+    });
+  }
 
   return {
     heading: {
@@ -1475,84 +1605,263 @@ function collectCertificationItems(
   return items;
 }
 
-export function mapNormalizedResumeToDocxModel(
-  document: NormalizedResumeDocument,
-): ResumeDocxModel {
-  const canonical = buildCanonicalResumeDocument(document);
-  const sections: ResumeDocxSection[] = [];
+function extractCanonicalContactFields(contactLine: string | undefined): {
+  location?: string;
+  phone?: string;
+  email?: string;
+  linkedin?: string;
+  contactLines: string[];
+} {
+  const lines = String(contactLine ?? '')
+    .split('|')
+    .map((token) => normalizeLine(token))
+    .filter(Boolean)
+    .filter((token) => !isPaginationArtifact(token));
+  const joined = lines.join(' | ');
+  const email = joined.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0];
+  const phone = joined.match(/\+?\d[\d().\s-]{7,}\d/)?.[0];
+  const linkedin =
+    joined.match(
+      /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/[^\s|]+/i,
+    )?.[0];
 
-  if (canonical.summary) {
-    const item: ResumeSummaryItem = { paragraphs: [canonical.summary] };
-    sections.push({ key: 'summary', title: 'Summary', items: [item] });
+  const used = new Set<string>();
+  const contactLines: string[] = [];
+  for (const value of lines) {
+    const normalized = normalizeLine(value);
+    if (!normalized) continue;
+    if (email && normalized.toLowerCase() === email.toLowerCase()) {
+      if (!used.has(`email:${email.toLowerCase()}`)) {
+        contactLines.push(email);
+        used.add(`email:${email.toLowerCase()}`);
+      }
+      continue;
+    }
+    if (phone && normalizeLine(normalized).replace(/\D/g, '') === phone.replace(/\D/g, '')) {
+      const formatted = phone;
+      if (!used.has(`phone:${formatted.replace(/\D/g, '')}`)) {
+        contactLines.push(formatted);
+        used.add(`phone:${formatted.replace(/\D/g, '')}`);
+      }
+      continue;
+    }
+    if (linkedin && normalized.toLowerCase().includes('linkedin.com')) {
+      if (!used.has(`linkedin:${linkedin.toLowerCase()}`)) {
+        contactLines.push(linkedin);
+        used.add(`linkedin:${linkedin.toLowerCase()}`);
+      }
+      continue;
+    }
+    const key = `location:${normalized.toLowerCase()}`;
+    if (!used.has(key)) {
+      used.add(key);
+      contactLines.push(normalized);
+    }
   }
 
+  const location = contactLines.find(
+    (line) =>
+      line !== email &&
+      line !== phone &&
+      line !== linkedin &&
+      !EMAIL_PATTERN.test(line) &&
+      !/\+?\d[\d().\s-]{7,}\d/.test(line) &&
+      !/linkedin\.com/i.test(line),
+  );
+
+  return {
+    location,
+    phone,
+    email,
+    linkedin,
+    contactLines,
+  };
+}
+
+function buildCanonicalCertificationItems(
+  document: CanonicalResumeDocument,
+): ResumeCertificationItem[] {
+  const canonicalAdditionalSections = document.additionalSections ?? [];
+  return collectCertificationItems(canonicalAdditionalSections);
+}
+
+export function buildCanonicalResumePresentationPlan(
+  document: NormalizedResumeDocument,
+): CanonicalResumePresentationPlan {
+  const canonical = buildCanonicalResumeDocument(document);
+  const contact = extractCanonicalContactFields(canonical.heading.contactLine);
   const competencies =
     canonical.technicalSkills?.length
       ? canonical.technicalSkills
       : canonical.competencies?.length
         ? canonical.competencies
-        : canonical.coreCompetencies;
-  if (competencies?.length) {
-    const item: ResumeSkillsItem = {
-      groups: [{ values: competencies }],
-    };
-    sections.push({ key: 'skills', title: 'Technical Skills', items: [item] });
+        : canonical.coreCompetencies ?? [];
+  const certifications = buildCanonicalCertificationItems(canonical);
+  return {
+    templateVersion: CANONICAL_RESUME_TEMPLATE_VERSION,
+    header: {
+      name: canonical.heading.name,
+      headline: (canonical as any)?.heading?.title
+        ? String((canonical as any).heading.title).trim()
+        : undefined,
+      location: contact.location,
+      phone: contact.phone,
+      email: contact.email,
+      linkedin: contact.linkedin,
+      contactLines: contact.contactLines,
+    },
+    summary: canonical.summary,
+    impact: canonical.impact ? [canonical.impact] : [],
+    competencies,
+    experience: canonical.experience.map((entry) => ({
+      company: entry.company,
+      roleTitle: entry.roleTitle,
+      dateRange: entry.dateRange ?? ([entry.startDate, entry.endDate].filter(Boolean).join(' - ') || undefined),
+      location: entry.location,
+      bullets: entry.bullets,
+    })),
+    education: (canonical.education ?? []).map((entry) => ({
+      degree: entry.degree,
+      institution: entry.institution,
+      location: entry.location,
+      raw: [entry.degree, entry.institution, entry.location].filter(Boolean).join(' | '),
+    })),
+    certifications,
+    technicalSkills: competencies,
+    sectionOrder: canonical.sectionOrder,
+  };
+}
+
+export function mapNormalizedResumeToDocxModel(
+  document: NormalizedResumeDocument,
+): ResumeDocxModel {
+  const plan = buildCanonicalResumePresentationPlan(document);
+  const sections: ResumeDocxSection[] = [];
+
+  if (plan.summary) {
+    sections.push({
+      key: 'summary',
+      title: 'Executive Summary',
+      items: [{ paragraphs: [plan.summary] }],
+    });
   }
 
-  if (canonical.experience.length) {
-    const items: ExperienceItem[] = canonical.experience
-      .filter((entry) => entry.bullets.length > 0)
-      .map((entry) => ({
-        role: entry.roleTitle,
-        company: entry.company,
-        location: entry.location,
-        dateRange:
-          entry.dateRange ??
-          ([entry.startDate, entry.endDate].filter(Boolean).join(' - ') ||
-            undefined),
-        bullets: entry.bullets,
-      }));
+  if (plan.impact.length) {
+    sections.push({
+      key: 'impact',
+      title: 'Executive Impact',
+      items: [{ paragraphs: plan.impact }],
+    });
+  }
+
+  if (plan.competencies.length) {
+    sections.push({
+      key: 'competencies',
+      title: 'Core Competencies',
+      items: [{ groups: [{ values: plan.competencies }] }],
+    });
+  }
+
+  if (plan.experience.length) {
+    const items: ExperienceItem[] = plan.experience.map((entry) => ({
+      role: entry.roleTitle,
+      company: entry.company,
+      location: entry.location,
+      dateRange: entry.dateRange,
+      bullets: entry.bullets,
+    }));
     sections.push({ key: 'experience', title: 'Professional Experience', items });
   }
 
-  if (canonical.education?.length) {
-    const dedupedEducation = dedupeEducationEntries(canonical.education);
-
-    const items: ResumeEducationItem[] = dedupedEducation.map((entry) => ({
+  if (plan.education.length) {
+    const items: ResumeEducationItem[] = plan.education.map((entry) => ({
       institution: entry.institution,
       degree: entry.degree,
       details: entry.location ? [entry.location] : undefined,
-      raw: [entry.degree, entry.institution, entry.location].filter(Boolean).join(' | '),
+      raw: entry.raw,
     }));
     sections.push({ key: 'education', title: 'Education', items });
   }
 
-  const certificationItems = collectCertificationItems(canonical.additionalSections);
-  if (certificationItems.length) {
-    sections.push({ key: 'certifications', title: 'Certifications', items: certificationItems });
+  if (plan.certifications.length) {
+    sections.push({ key: 'certifications', title: 'Certifications', items: plan.certifications });
   }
 
-  if (canonical.additionalSections?.length) {
-    const items: ResumeOtherItem[] = canonical.additionalSections
-      .filter((section) => !isCertificationSectionTitle(section.title))
-      .map((section) => ({
-        lines: [section.title, ...section.items].filter((line) => !isPaginationArtifact(line)),
-      }));
-    if (items.length) {
-      sections.push({ key: 'other', title: 'Additional Information', items: items as ResumeSectionItem[] });
-    }
+  if (plan.technicalSkills.length) {
+    sections.push({
+      key: 'technical_skills',
+      title: 'Technical Skills',
+      items: [{ groups: [{ values: plan.technicalSkills }] }],
+    });
   }
 
   return {
     header: {
-      name: canonical.heading.name,
-      contactLines: [canonical.heading.contactLine, ...(canonical.heading.links ?? [])].filter(Boolean),
+      name: plan.header.name,
+      title: plan.header.headline,
+      contactLines: plan.header.contactLines,
     },
     sections,
   };
 }
 
+function renderCanonicalResumePlainText(plan: CanonicalResumePresentationPlan): string {
+  const lines: string[] = [];
+
+  if (plan.header.name) lines.push(plan.header.name);
+  if (plan.header.headline) lines.push(plan.header.headline);
+  plan.header.contactLines.forEach((line) => lines.push(line));
+  if (lines.length) lines.push('');
+
+  const appendSection = (title: string, content: string[]) => {
+    if (!content.length) return;
+    lines.push(title);
+    lines.push(...content);
+    lines.push('');
+  };
+
+  appendSection('Executive Summary', plan.summary ? [plan.summary] : []);
+  appendSection('Executive Impact', plan.impact);
+  appendSection('Core Competencies', plan.competencies.length ? [plan.competencies.join(', ')] : []);
+  appendSection(
+    'Professional Experience',
+    plan.experience.flatMap((entry) => [
+      [entry.company, entry.roleTitle, entry.dateRange, entry.location].filter(Boolean).join(' | '),
+      ...entry.bullets.map((bullet) => `- ${bullet}`),
+      '',
+    ]),
+  );
+  appendSection(
+    'Education',
+    plan.education.flatMap((entry) => {
+      const content: string[] = [];
+      if (entry.degree) content.push(entry.degree);
+      const secondary = [entry.institution, entry.location].filter(Boolean).join(' | ');
+      if (secondary) content.push(secondary);
+      content.push('');
+      return content;
+    }),
+  );
+  appendSection(
+    'Certifications',
+    plan.certifications.flatMap((entry) => {
+      const line = [entry.title, entry.organization, entry.dateRange].filter(Boolean).join(' | ');
+      return line ? [line, ''] : [];
+    }),
+  );
+  appendSection('Technical Skills', plan.technicalSkills.length ? [plan.technicalSkills.join(', ')] : []);
+
+  return lines
+    .map((line) => normalizeDisplayLine(line) ?? '')
+    .filter((line, index, arr) => !(line === '' && arr[index - 1] === ''))
+    .join('\n')
+    .trim();
+}
+
 export function buildResumePlainText(document: NormalizedResumeDocument): string {
+  return renderCanonicalResumePlainText(buildCanonicalResumePresentationPlan(document));
+}
+  /*
   const canonical = buildCanonicalResumeDocument(document);
   const canonicalizeEducationToken = (token: string): string =>
     token
@@ -1697,6 +2006,7 @@ export function buildResumePlainText(document: NormalizedResumeDocument): string
     .join('\n')
     .trim();
 }
+  */
 
 
 

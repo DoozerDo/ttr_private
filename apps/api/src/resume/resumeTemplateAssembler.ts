@@ -439,7 +439,7 @@ export function buildAuthoritativeResumeDraftFromResumeV2(input: {
     })),
   });
 
-  const summary = trimToText(composition.summary);
+  const summary = ensureSummaryMinimum(trimToText(composition.summary), finalExperience as any);
   if (process.env.DOCGEN_DIAGNOSTICS === 'true') {
     try {
       const renderedRoleIds = selected.map((x) => x.id);

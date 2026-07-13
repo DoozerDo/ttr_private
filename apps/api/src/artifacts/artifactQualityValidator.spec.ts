@@ -158,6 +158,25 @@ describe('artifactQualityValidator', () => {
     expect(gate.reasons).toContain('malformed_experience_header:role_title');
   });
 
+  it('allows legitimate role titles that end with Lead', () => {
+    const resume: any = {
+      heading: { name: 'Test', contactLine: 'test@example.com' },
+      summary: 'Summary.',
+      competencies: [],
+      experience: [
+        {
+          company: 'Northwind Support',
+          roleTitle: 'Workflow And Incident Design Lead',
+          bullets: ['Standardized ticketing system governance in Zendesk and Jira.'],
+        },
+      ],
+      education: [],
+    };
+
+    const gate = validateResumeArtifactQuality(resume);
+    expect(gate.reasons).not.toContain('malformed_experience_header:role_title');
+  });
+
   it('trims dangling fragments on every line', () => {
     const cleaned = trimIncompleteTrailingFragments(
       ['First line ends with and', 'Second line is fine.', 'Third line ends with the'].join('\n'),

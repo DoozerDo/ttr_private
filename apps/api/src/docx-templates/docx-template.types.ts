@@ -23,10 +23,13 @@ export interface ResumeDocxHeader {
 
 export type ResumeSectionKey =
   | 'summary'
+  | 'impact'
+  | 'competencies'
   | 'skills'
   | 'experience'
   | 'education'
   | 'certifications'
+  | 'technical_skills'
   | 'other';
 
 export interface ResumeDocxSection {
@@ -36,6 +39,10 @@ export interface ResumeDocxSection {
 }
 
 export interface ResumeSummaryItem {
+  paragraphs: string[];
+}
+
+export interface ResumeImpactItem {
   paragraphs: string[];
 }
 
@@ -78,6 +85,7 @@ export interface ExperienceItem {
 
 export type ResumeSectionItem =
   | ResumeSummaryItem
+  | ResumeImpactItem
   | ResumeSkillsItem
   | ExperienceItem
   | ResumeEducationItem

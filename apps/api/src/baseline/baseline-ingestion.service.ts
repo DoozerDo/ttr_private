@@ -783,7 +783,17 @@ export class BaselineIngestionService {
   private extractSummary(rawText: string): string | null {
     const lines = rawText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     const index = lines.findIndex((line) => /^(summary|professional summary|profile)\b/i.test(line));
-    return index >= 0 && lines[index + 1] ? this.cleanEvidenceText(lines[index + 1]) : null;
+    if (index < 0) return null;
+
+    const summaryLines: string[] = [];
+    for (let i = index + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (isStandaloneSectionHeadingLine(line)) break;
+      summaryLines.push(line);
+    }
+
+    const summary = this.cleanEvidenceText(summaryLines.join(' '));
+    return summary || null;
   }
 
   private extractLocation(text: string): string | null {

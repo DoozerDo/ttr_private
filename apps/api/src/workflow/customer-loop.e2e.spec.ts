@@ -544,7 +544,9 @@ describe('customer workflow contract (real API e2e)', () => {
       expect((resumeResponse.body as any)?.exportReady).toBe(true);
       expect(Array.isArray((resumeResponse.body as any)?.preview?.resume?.experience)).toBe(true);
       expect((resumeResponse.body as any)?.preview?.resume?.experience?.length ?? 0).toBeGreaterThan(0);
-      expect(String((resumeResponse.body as any)?.preview?.resume?.summary ?? '')).toContain('operational process improvement');
+      const resumeSummary = String((resumeResponse.body as any)?.preview?.resume?.summary ?? '');
+      expect(resumeSummary).toContain('Support Operations Director at Example SaaS');
+      expect(resumeSummary.split(/(?<=[.!?])\s+/).filter(Boolean).length).toBeGreaterThanOrEqual(2);
 
       const coverLetterResponse = await request(app.getHttpServer())
         .post('/cover-letters/generate')

@@ -1243,7 +1243,7 @@ export class StudioArtifactsService {
       const internal = normalizeRecord(responseBody.internal);
       return (
         safeText(internal?.generationMode) === 'structured_baseline_template' &&
-        safeText(internal?.templateVersion) === 'structured-baseline-v1'
+        safeText(internal?.templateVersion) === 'canonical_resume_v1'
       );
     };
 

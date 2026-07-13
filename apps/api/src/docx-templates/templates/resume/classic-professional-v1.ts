@@ -18,6 +18,7 @@ import {
   ResumeDocxModel,
   ResumeDocxSection,
   ResumeEducationItem,
+  ResumeImpactItem,
   ResumeSectionItem,
   ResumeSkillsGroup,
   ResumeSkillsItem,
@@ -210,7 +211,11 @@ function renderSection(section: ResumeDocxSection) {
   switch (section.key) {
     case 'summary':
       return renderSummarySection(section.items);
+    case 'impact':
+      return renderImpactSection(section.items);
+    case 'competencies':
     case 'skills':
+    case 'technical_skills':
       return renderSkillsSection(section.items);
     case 'experience':
       return renderExperienceSection(section.items);
@@ -231,6 +236,18 @@ function renderSummarySection(items: ResumeSectionItem[]) {
       const normalized = paragraph.trim();
       if (!normalized) return;
       children.push(createSummaryParagraph(normalized));
+    });
+  });
+  return children;
+}
+
+function renderImpactSection(items: ResumeSectionItem[]) {
+  const children: Paragraph[] = [];
+  items.filter(isImpactItem).forEach((item) => {
+    item.paragraphs.forEach((paragraph) => {
+      const normalized = paragraph.trim();
+      if (!normalized) return;
+      children.push(createDescriptionParagraph(normalized));
     });
   });
   return children;
@@ -543,6 +560,10 @@ function createSkillFlowParagraph(line: string) {
 }
 
 function isSummaryItem(item: ResumeSectionItem): item is ResumeSummaryItem {
+  return 'paragraphs' in item && Array.isArray(item.paragraphs);
+}
+
+function isImpactItem(item: ResumeSectionItem): item is ResumeImpactItem {
   return 'paragraphs' in item && Array.isArray(item.paragraphs);
 }
 

@@ -80,7 +80,6 @@ const EXPERIENCE_TITLE_DANGLING_SUFFIXES = new Set(
     'of',
     'full',
     'senior',
-    'lead',
     'principal',
     'technical',
     'software',

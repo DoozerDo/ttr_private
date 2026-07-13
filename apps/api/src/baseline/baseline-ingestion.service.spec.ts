@@ -303,6 +303,29 @@ describe('BaselineIngestionService', () => {
     );
   });
 
+  it('preserves wrapped multi-sentence summaries instead of truncating to the first line after SUMMARY', async () => {
+    const rawText = [
+      'Alex Candidate',
+      'alex.candidate@example.com | Seattle, WA | (555) 555-1234',
+      '',
+      'SUMMARY',
+      'Support operations leader with verified impact across incident management, automation, and executive',
+      'reporting. Builds cross-functional programs across support and product to strengthen service quality',
+      'and operating rhythm.',
+      '',
+      'EXPERIENCE',
+      'Acme Support | Senior Support Operations Manager | 2021 - Present',
+      '- Led incident response for Sev1 and Sev2 outages and reduced escalation friction.',
+    ].join('\n');
+
+    const result = await service.ingestFromText(rawText, 'docx');
+
+    const summary = String(result.canonical.identity.summary ?? '');
+    expect(summary).toContain('verified impact across incident management, automation, and executive reporting.');
+    expect(summary).toContain('Builds cross-functional programs across support and product to strengthen service quality and operating rhythm.');
+    expect(summary).not.toContain('EXPERIENCE');
+  });
+
   it('preserves line-oriented experience blocks from DOCX-style extraction into canonical ResumeV2 experience', async () => {
     const rawText = [
       'Alex Candidate',
