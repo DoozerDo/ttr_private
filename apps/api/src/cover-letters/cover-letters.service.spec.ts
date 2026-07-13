@@ -1096,6 +1096,9 @@ describe('CoverLettersService contract', () => {
       baselineVersion,
       job,
       analysisAssessment: assessment,
+      generationAuthority: 'canonical',
+      baselineVerified: true,
+      baselineFileUsable: true,
       allowedBlocks: [],
       templateReadiness: {
         canGenerateResume: true,
@@ -1176,6 +1179,10 @@ describe('CoverLettersService contract', () => {
       jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
       closingTemplateKey: 'default',
       generationInputsHash: 'hash',
+      generationAuthority: 'canonical',
+      baselineVerified: true,
+      baselineFileUsable: true,
+      qualityGate: { status: 'pass', reasons: [] },
       generation: {
         document: {
           senderHeading: { name: 'Jordan Lee' },
@@ -1260,6 +1267,10 @@ describe('CoverLettersService contract', () => {
       jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
       closingTemplateKey: 'default',
       generationInputsHash: 'hash',
+      generationAuthority: 'canonical',
+      baselineVerified: true,
+      baselineFileUsable: true,
+      qualityGate: { status: 'pass', reasons: [] },
       generation: {
         document: {
           senderHeading: { name: 'Jordan Lee' },
@@ -1290,7 +1301,9 @@ describe('CoverLettersService contract', () => {
 
     const result = await service.generateCoverLetter('user-1', request as any);
     expect(result.status).toBe('success');
-    expect(result.exportReady).toBe(false);
+    expect(result.exportReady).toBe(true);
+    expect(result.exports).toEqual({ docx: true, pdf: true });
+    expect(result.actions.canExport).toBe(true);
     expect(result.preview?.coverLetter).toBeTruthy();
     expect((result as any).content).toBeTruthy();
     const content = String((result as any).content);
@@ -1394,6 +1407,10 @@ describe('CoverLettersService contract', () => {
       jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
       closingTemplateKey: 'default',
       generationInputsHash: 'hash',
+      generationAuthority: 'canonical',
+      baselineVerified: true,
+      baselineFileUsable: true,
+      qualityGate: { status: 'pass', reasons: [] },
       generation: {
         document: {
           senderHeading: { name: 'Jordan Lee' },
@@ -1529,6 +1546,10 @@ describe('CoverLettersService contract', () => {
       jobContextAllowlist: { allowedCompanies: ['Example Co'], allowedRoleTitles: ['Program Manager'] },
       closingTemplateKey: 'default',
       generationInputsHash: 'hash',
+      generationAuthority: 'canonical',
+      baselineVerified: true,
+      baselineFileUsable: true,
+      qualityGate: { status: 'pass', reasons: [] },
       generation: {
         document: {
           senderHeading: { name: 'Jordan Lee' },
@@ -1559,7 +1580,7 @@ describe('CoverLettersService contract', () => {
       responseBody: {
         status: 'success',
         generationStatus: 'success',
-        exportReady: true,
+        exportReady: false,
         id: 'cover-existing',
         userId: 'user-1',
         baselineId: 'baseline-1',
@@ -1569,16 +1590,27 @@ describe('CoverLettersService contract', () => {
         generatorVersion: 'v1',
         closingTemplateKey: 'default',
         generationInputsHash: 'hash',
-        preview: { coverLetter: { salutation: 'Dear Hiring Team,' } },
+        preview: {
+          coverLetter: {
+            senderHeading: { name: 'Jordan Lee' },
+            salutation: 'Dear Hiring Team,',
+            opening: 'Opening paragraph.',
+            bodyParagraphs: ['Body paragraph one.', 'Body paragraph two.'],
+            closingParagraph: 'Closing paragraph.',
+            signoff: 'Sincerely,',
+            signatureName: 'Jordan Lee',
+          },
+        },
         compliance_flags: [],
         audit_id: 'audit-1',
         auditId: 'audit-1',
         baseline_version_hash: 'hash-1',
-        exports: { docx: true, pdf: true },
+        exports: { docx: false, pdf: false },
         display: { title: '', description: '', reasons: [], cta: { label: '', href: '' } },
         safeDisplay: { title: '', description: '', reasons: [], cta: { label: '', href: '' } },
         traceMap: {},
         debugTrace: { passed: true, failures: [], traceCoverage: 100, unusedEvidence: [], selectedEvidence: [] },
+        qualityGate: { status: 'pass', reasons: [] },
         internal: {
           auditId: 'audit-1',
           baselineVersionHash: 'hash-1',
@@ -1593,6 +1625,9 @@ describe('CoverLettersService contract', () => {
 
     expect(result.id).toBe('cover-existing');
     expect(result.idempotency?.reused).toBe(true);
+    expect(result.exportReady).toBe(true);
+    expect(result.exports).toEqual({ docx: true, pdf: true });
+    expect(result.actions.canExport).toBe(true);
     expect(coverRepo.save).not.toHaveBeenCalled();
     buildDraftSpy.mockRestore();
     assessment.overallScore = originalScore;

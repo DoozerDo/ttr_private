@@ -117,6 +117,9 @@ import {
   groupCanonicalEvidenceUnits,
   toCanonicalEvidenceUnits,
 } from './coverLetterTemplateAssembler';
+import {
+  resolveCanonicalCoverLetterExportReadiness,
+} from './cover-letter-export-readiness';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
 import { resolveSyntheticCandidateName } from './candidate-name.util';
 import { TargetRolePositioningResolver } from '../positioning/target-role-positioning.resolver';
@@ -652,12 +655,30 @@ export class CoverLettersService {
       } catch {
         // Keep the reused response usable, but canonical persistence must exist for Studio reloads.
       }
+      const cachedExportReadiness = resolveCanonicalCoverLetterExportReadiness({
+        qualityStatus: String(
+          (effectiveReservation.responseBody as any)?.quality?.status ??
+            (effectiveReservation.responseBody as any)?.qualityGate?.status ??
+            ((draft as any)?.qualityGate?.status ?? (draft as any)?.quality?.status ?? '') ??
+            '',
+        ),
+        qualityGateStatus: String(
+          (effectiveReservation.responseBody as any)?.qualityGate?.status ??
+            (effectiveReservation.responseBody as any)?.quality?.status ??
+            ((draft as any)?.qualityGate?.status ?? (draft as any)?.quality?.status ?? '') ??
+            '',
+        ),
+        hasCanonicalDocument: Boolean(
+          (effectiveReservation.responseBody as any)?.preview?.coverLetter ??
+            (effectiveReservation.responseBody as any)?.preview?.resume ??
+            draft.generation?.document,
+        ),
+      });
       const cachedExportReady =
-        Boolean((effectiveReservation.responseBody as any)?.exportReady) &&
         draft.generationAuthority === 'canonical' &&
         draft.baselineFileUsable === true &&
         draft.baselineVerified === true &&
-        (await this.canRenderCoverLetterTemplate(draft));
+        cachedExportReadiness.exportReady;
       return {
         ...(effectiveReservation.responseBody as CoverLetterGenerationResponse),
         generationAuthority: draft.generationAuthority,
@@ -665,7 +686,12 @@ export class CoverLettersService {
         baselineFileUsable: draft.baselineFileUsable,
         baselineFileVersionHash: draft.baselineFileVersionHash,
         exportReady: cachedExportReady,
-        exports: cachedExportReady ? { docx: true, pdf: true } : { docx: false, pdf: false },
+        exports: cachedExportReady ? cachedExportReadiness.exports : { docx: false, pdf: false },
+        actions: {
+          canExport: cachedExportReady,
+          canRegenerate: true,
+          canSaveToOpportunities: cachedExportReady,
+        },
         idempotency: {
           status: effectiveReservation.status,
           runId: effectiveReservation.runId,
@@ -804,16 +830,20 @@ export class CoverLettersService {
       const display = this.buildSuccessDisplayPayload(
         (draft.templateReadiness.hardBlockReasons ?? []).map((reason) => String(reason.code ?? '')),
       );
-      const templateRenderable = await this.canRenderCoverLetterTemplate(draft);
       const canonicalAuthority = draft.generationAuthority === 'canonical';
+      const draftQualityGateStatus = String((draft as any)?.qualityGate?.status ?? (draft as any)?.quality?.status ?? '');
+      const exportReadiness = resolveCanonicalCoverLetterExportReadiness({
+        qualityStatus: draftQualityGateStatus,
+        qualityGateStatus: draftQualityGateStatus,
+        hasCanonicalDocument: Boolean(draft.generation?.document),
+      });
       const exportReady =
         canonicalAuthority &&
         draft.baselineFileUsable === true &&
         draft.baselineVerified === true &&
-        draft.qualityGate.status === 'pass' &&
-        templateRenderable;
+        exportReadiness.exportReady;
       const exports: DocumentGenerationExports = exportReady
-        ? { docx: true, pdf: true }
+        ? exportReadiness.exports
         : { docx: false, pdf: false };
       const canonicalQualityGate =
         draft.qualityGate ?? { status: 'pass', reasons: [] as string[] };
@@ -2082,30 +2112,6 @@ export class CoverLettersService {
         href: '/results',
       },
     };
-  }
-
-  private async canRenderCoverLetterTemplate(draft: CoverLetterDraft): Promise<boolean> {
-    try {
-      const identity = resolveBaselineIdentity(draft.baseline);
-      const model = mapCoverLetterResultToModel(
-        draft.generation,
-        identity,
-        draft.jobContext,
-      );
-      const template = getDocxTemplate<CoverLetterDocxModel>(
-        'cover_letter',
-        DEFAULT_COVER_LETTER_TEMPLATE_KEY,
-      );
-      const renderContext: DocxRenderContextBase = {
-        templateKey: DEFAULT_COVER_LETTER_TEMPLATE_KEY,
-        font: 'Calibri',
-        margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
-      };
-      await template.render(model, renderContext);
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   private buildGenerationDedupeKey(input: {

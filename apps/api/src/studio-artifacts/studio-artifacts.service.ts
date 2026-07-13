@@ -33,6 +33,7 @@ import { assembleResumeFromStructuredBaseline } from '../resume/resumeTemplateAs
 import { BaselineResumeV2BackfillService } from '../baseline/baseline-resume-v2-backfill.service';
 import { ResumeService } from '../resume/resume.service';
 import { CoverLettersService } from '../cover-letters/cover-letters.service';
+import { resolveCanonicalCoverLetterExportReadiness } from '../cover-letters/cover-letter-export-readiness';
 import type { CustomerWorkflowState } from '../workflow/customer-workflow.service';
 import { resolveBaselineSectionsForGeneration } from '../baseline/baseline-section-source';
 import { WORKFLOW_DIRECT_STUDIO_SCORE_FLOOR } from '@shared/workflowThresholds';
@@ -1907,6 +1908,14 @@ export class StudioArtifactsService {
         )
       : correctionReasons;
 
+    const coverLetterExportReadiness =
+      artifact === 'cover_letter'
+        ? resolveCanonicalCoverLetterExportReadiness({
+            qualityStatus,
+            qualityGateStatus: String(qualityGate?.status ?? ''),
+            hasCanonicalDocument: Boolean(previewModel),
+          })
+        : null;
     const exportReadyRaw =
       canonicalResponseBody && typeof canonicalResponseBody.exportReady === 'boolean'
         ? canonicalResponseBody.exportReady
@@ -1914,7 +1923,9 @@ export class StudioArtifactsService {
     const exportReady =
       artifact === 'resume' && resumeIsPersistedAuthority
         ? true
-        : Boolean(exportReadyRaw) && qualityStatus === 'pass';
+        : artifact === 'cover_letter'
+          ? Boolean(coverLetterExportReadiness?.exportReady)
+          : Boolean(exportReadyRaw) && qualityStatus === 'pass';
     const exportsRaw =
       canonicalResponseBody && typeof canonicalResponseBody.exports === 'object'
         ? (canonicalResponseBody.exports as Record<string, unknown>)
@@ -1925,6 +1936,10 @@ export class StudioArtifactsService {
           pdf: artifact === 'resume' && resumeIsPersistedAuthority ? true : Boolean(exportsRaw && exportsRaw.pdf),
         }
       : { docx: false, pdf: false };
+    const canonicalExports =
+      artifact === 'cover_letter' && coverLetterExportReadiness
+        ? coverLetterExportReadiness.exports
+        : exports;
 
     const generationState =
       qualityStatus === 'pass' && previewModel
@@ -1945,7 +1960,7 @@ export class StudioArtifactsService {
             ? combinedCorrectionReasons
             : [{ code: 'needs_correction', message: 'Needs correction.', severity: 'warning' }],
       exportReady,
-      exports,
+      exports: canonicalExports,
       actions: {
         ...baseActions,
         canExport: exportReady,

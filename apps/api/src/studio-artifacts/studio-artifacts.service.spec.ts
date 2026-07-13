@@ -976,7 +976,7 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
         coverLetterResponseBody: {
           status: 'success',
           generationStatus: 'success',
-          exportReady: true,
+          exportReady: false,
           qualityGate: { status: 'pass', reasons: [] },
           preview: {
             coverLetter: { paragraphs: ['Persisted cover letter'] },
@@ -1052,6 +1052,10 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     expect((state.coverLetterResult as any)?.generationState).toBe('generated_usable');
     expect((state.coverLetterResult as any)?.qualityStatus).toBe('pass');
     expect((state.coverLetterResult as any)?.exportReady).toBe(true);
+    expect((state.coverLetterResult as any)?.exports).toEqual({
+      docx: true,
+      pdf: true,
+    });
   });
 
   it('returns both persisted resume and cover letter artifacts from readState after canonical success writes', async () => {
