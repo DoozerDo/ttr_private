@@ -227,12 +227,97 @@ describe('cover letter post-processing', () => {
     // Post-processing flags are allowed to vary as generator strategy evolves; keep assertions focused on invariants.
     expect(postProcessed.generation.content).toContain('Dear Hiring Team,');
     expect(postProcessed.generation.content).toContain('Sincerely,');
+    expect(postProcessed.generation.document.templateVersion).toBe('canonical_cover_letter_v1');
+    expect(postProcessed.generation.document.bodyParagraphs).toHaveLength(2);
+    expect(postProcessed.generation.document.paragraphEvidence).toHaveLength(4);
     expect(postProcessed.generation.content).not.toMatch(/Explain why|opening proof point|line-by-line recap/i);
     expect(postProcessed.generation.content).not.toContain('-');
     expect(postProcessed.generation.content.split(/\n\s*\n/).length).toBeGreaterThanOrEqual(5);
     expect(postProcessed.generation.document.closingParagraph).toBeTruthy();
     expect(postProcessed.generation.document.bodyParagraphs.every((paragraph) => paragraph.split(/\s+/).length <= 130)).toBe(true);
     expect(postProcessed.flags).not.toEqual(expect.arrayContaining(['too_short', 'too_few_body_paragraphs', 'too_few_content_paragraphs', 'missing_role_or_company_context', 'paragraph_anchor_validation_failed']));
+  });
+
+  it('derives canonical grounding snippets from the rendered paragraph evidence projection', () => {
+    const { bundle, service } = buildService();
+    const plan = buildDocumentStrategyPlan({
+      fitScore: 87,
+      jobTitle: bundle.job.title,
+      jobCompany: bundle.job.company,
+      jobDescription: bundle.job.rawDescription,
+      jobRequirements: bundle.job.normalizedRequirements,
+      jobResponsibilities: bundle.job.normalizedResponsibilities,
+      analysisSummary: 'Support operations leader with incident response and workflow ownership.',
+      analysisStrengths: ['support operations rigor', 'service reliability', 'incident response'],
+      analysisGaps: [],
+      analysisRecommendedActions: [],
+      baselineSections: bundle.baseline.sections,
+    });
+
+    const generator = new TemplateCoverLetterGenerator();
+    const assembly = assembleCoverLetterFromStructuredBaseline({
+      structured: {
+        summary: 'Support operations leader with incident response and workflow ownership.',
+        experience: bundle.baseline.sections
+          .filter((section) => section.sectionType === 'EXPERIENCE')
+          .map((section) => {
+            const lines = String(section.content ?? '')
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter(Boolean);
+            return {
+              id: section.id,
+              company: bundle.job.company,
+              roleTitle: lines[0] ?? section.title,
+              dates: lines[1] ?? null,
+              bullets: lines.slice(2).map((line) => line.replace(/^-+\s*/, '')),
+            };
+          }),
+      } as any,
+      senderName: 'Synthetic Runner',
+      senderContactLine: 'runner@example.com',
+      jobTitle: bundle.job.title,
+      companyName: bundle.job.company,
+      allowedBlocks: bundle.baseline.sections.map((section, order) => ({
+        id: section.id,
+        title: section.title,
+        content: section.content,
+        includePolicy: 'ALWAYS' as never,
+        order,
+        sectionType: section.sectionType as never,
+      })) as never,
+    });
+    const generation = generator.generate({
+      document: assembly.document,
+      baselineId: bundle.baseline.id,
+      jobId: bundle.job.id,
+      candidateName: 'Synthetic Runner',
+      closingTemplate: resolveClosingTemplate(DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY),
+      job: {
+        id: bundle.job.id,
+        title: bundle.job.title,
+        company: bundle.job.company,
+        responsibilities: bundle.job.normalizedResponsibilities,
+        requirements: bundle.job.normalizedRequirements,
+      },
+      allowedBaselineBlocks: bundle.baseline.sections.map((section, order) => ({
+        id: section.id,
+        title: section.title,
+        content: section.content,
+        includePolicy: 'ALWAYS' as never,
+        order,
+        sectionType: section.sectionType as never,
+      })) as never,
+      safeMode: false,
+      documentStrategyPlan: plan,
+      maxWords: 280,
+      paragraphEvidence: assembly.paragraphEvidence,
+    });
+
+    const groundingSnippets = (service as any).buildCanonicalGroundingSnippets(generation) as string[];
+    expect(groundingSnippets.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(groundingSnippets).size).toBe(groundingSnippets.length);
+    expect(groundingSnippets.every((snippet) => String(generation.content ?? '').toLowerCase().includes(snippet.toLowerCase()))).toBe(true);
   });
 
   it('recognizes normalized production-shaped role titles during post-processing validation', () => {

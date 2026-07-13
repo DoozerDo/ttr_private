@@ -114,6 +114,7 @@ import { evaluateBaselineTemplateReadiness } from '../baseline/baselineTemplateR
 import {
   assembleCoverLetterFromStructuredBaseline,
   type CanonicalEvidenceUnit,
+  groupCanonicalEvidenceUnits,
   toCanonicalEvidenceUnits,
 } from './coverLetterTemplateAssembler';
 import { emitArtifactQualityTelemetry } from '../artifacts/artifactQualityTelemetry';
@@ -1496,9 +1497,12 @@ export class CoverLettersService {
       job: jobContext,
     });
     const canonicalEvidenceUnits = this.buildCanonicalEvidenceUnitsFromAllowedBlocks(allowedBlocks);
-    const groundedExperienceUnitCount = Array.isArray((structuredBaseline as any)?.experience)
-      ? (structuredBaseline as any).experience.length
-      : 0;
+    const canonicalCoverLetterEvidenceUnits = canonicalEvidenceUnits.filter((unit) => {
+      const sectionType = String(unit.sourceSectionType ?? '').toUpperCase();
+      return sectionType === 'EXPERIENCE' || sectionType === 'PROJECT';
+    });
+    const groundedEvidenceUnitCount = canonicalCoverLetterEvidenceUnits.length;
+    const groundedEvidenceLaneCount = groupCanonicalEvidenceUnits(canonicalCoverLetterEvidenceUnits).length;
     if (process.env.DEBUG_DOCGEN === 'true') {
       // eslint-disable-next-line no-console
       console.log('[COVER_LETTER_DRAFT_COUNTS]', {
@@ -1506,11 +1510,12 @@ export class CoverLettersService {
         jobId: job.id,
         allowedBlockCount: allowedBlocks.length,
         canonicalEvidenceUnitCount: canonicalEvidenceUnits.length,
-        groundedExperienceUnitCount,
+        groundedEvidenceUnitCount,
+        groundedEvidenceLaneCount,
       });
     }
-    const baselineVerified = groundedExperienceUnitCount >= 2;
-    if (groundedExperienceUnitCount < 2) {
+    const baselineVerified = groundedEvidenceUnitCount >= 2;
+    if (groundedEvidenceUnitCount < 2) {
       throw new UnprocessableEntityException(buildArtifactFailurePayload({
         code: 'canonical_cover_letter_evidence_insufficient',
         category: 'unsupported_input',
@@ -1608,7 +1613,7 @@ export class CoverLettersService {
         jobTitle: job?.title ?? null,
         companyName: job?.company ?? null,
         allowedBlocks,
-        evidenceUnits: canonicalEvidenceUnits,
+        evidenceUnits: canonicalCoverLetterEvidenceUnits,
       });
       if (process.env.DEBUG_DOCGEN === 'true') {
         // eslint-disable-next-line no-console
@@ -1646,10 +1651,10 @@ export class CoverLettersService {
           failures: [],
           traceCoverage: 1,
           unusedEvidence: [],
-          selectedEvidence: canonicalEvidenceUnits.map((unit) => unit.id),
+          selectedEvidence: canonicalCoverLetterEvidenceUnits.map((unit) => unit.id),
         },
         internalTrace: {
-          usedEvidenceIds: canonicalEvidenceUnits.map((unit) => unit.id),
+          usedEvidenceIds: canonicalCoverLetterEvidenceUnits.map((unit) => unit.id),
           droppedEvidenceIds: [],
         },
       };
@@ -1661,6 +1666,28 @@ export class CoverLettersService {
             throw new UnprocessableEntityException(parsed);
           }
         } catch {
+          if (/^canonical_cover_letter_evidence_insufficient$/i.test(error.message.trim())) {
+            throw new UnprocessableEntityException(
+              buildArtifactFailurePayload({
+                code: 'canonical_cover_letter_evidence_insufficient',
+                category: 'unsupported_input',
+                message:
+                  'The current cover letter input does not contain enough canonical evidence to generate a cover letter.',
+                detail:
+                  'The current cover letter input cannot be grounded into a supported artifact without recovering legacy evidence.',
+                retryable: false,
+                userAction: {
+                  title: 'Add stronger baseline evidence',
+                  description:
+                    'Include at least two grounded canonical experience evidence units before generating again.',
+                },
+                diagnostics: {
+                  unsupportedEnvelope: 'canonical_cover_letter_evidence_insufficient',
+                  missingRequirements: [],
+                },
+              }),
+            );
+          }
           if (
             /Cover letter generation failed validation: insufficient baseline evidence\./i.test(
               error.message,
@@ -1694,17 +1721,14 @@ export class CoverLettersService {
       generation,
       jobContext,
       candidateName,
-      canonicalEvidenceUnits,
+      canonicalCoverLetterEvidenceUnits,
     );
     generation = qualityResult.generation;
 
     // Soft quality enforcement (server-side self-heal): run shared artifact quality validation.
     // If the first pass fails, attempt one deterministic repair pass. If it still fails, return
     // the artifact but include quality metadata so Studio can surface the safety net.
-    const evidenceSnippets = canonicalEvidenceUnits
-      .map((unit) => String(unit.text ?? '').trim())
-      .filter(Boolean)
-      .slice(0, 4);
+    const evidenceSnippets = this.buildCanonicalGroundingSnippets(generation);
 
     const firstPassArtifactQuality = validateCoverLetterArtifactQuality(
       generation.paragraphs ?? generation.document?.bodyParagraphs ?? [],
@@ -1789,7 +1813,7 @@ export class CoverLettersService {
         generation,
         jobContext,
         candidateName,
-        canonicalEvidenceUnits,
+        canonicalCoverLetterEvidenceUnits,
       );
       generation = qualityResult.generation;
     }
@@ -1799,7 +1823,7 @@ export class CoverLettersService {
 
     let paragraphAnchorValidation = this.validateCoverLetterParagraphAnchors(
       generation,
-      canonicalEvidenceUnits,
+      canonicalCoverLetterEvidenceUnits,
     );
     if (!paragraphAnchorValidation.valid) {
       throw new UnprocessableEntityException({
@@ -1882,7 +1906,7 @@ export class CoverLettersService {
         generation,
         jobContext,
         candidateName,
-        canonicalEvidenceUnits,
+        canonicalCoverLetterEvidenceUnits,
       );
       generation = qualityResult.generation;
       if (qualityResult.flags.length > 0) {
@@ -1890,7 +1914,7 @@ export class CoverLettersService {
       }
       const strictAnchorValidation = this.validateCoverLetterParagraphAnchors(
         generation,
-        canonicalEvidenceUnits,
+        canonicalCoverLetterEvidenceUnits,
       );
       if (!strictAnchorValidation.valid) {
         throw new UnprocessableEntityException({
@@ -1928,13 +1952,13 @@ export class CoverLettersService {
     const finalArtifactQuality = validateCoverLetterArtifactQuality(finalParagraphs, {
       company: jobContext.company,
       roleTitle: jobContext.title,
-      requiredEvidenceSnippets: canonicalEvidenceUnits.map((unit) => unit.text).filter(Boolean).slice(0, 4),
+      requiredEvidenceSnippets: this.buildCanonicalGroundingSnippets(generation),
     });
     const finalRealDocument = validateRealCoverLetterDocument({
       paragraphs: finalParagraphs,
       jobTitle: jobContext.title ?? null,
       companyName: jobContext.company ?? null,
-      requiredEvidenceSnippets: canonicalEvidenceUnits.map((unit) => unit.text).filter(Boolean).slice(0, 4),
+      requiredEvidenceSnippets: this.buildCanonicalGroundingSnippets(generation),
     });
     const finalQualityGate: ArtifactQualityGate =
       finalArtifactQuality.status === 'pass' &&
@@ -2541,6 +2565,37 @@ export class CoverLettersService {
     };
   }
 
+  private buildCanonicalGroundingSnippets(
+    generation: CoverLetterGenerationResult,
+  ): string[] {
+    const paragraphEvidence = Array.isArray(generation.paragraphEvidence)
+      ? generation.paragraphEvidence
+      : [];
+    const orderedKeys: Array<'opening' | 'body_1' | 'body_2' | 'closing'> = [
+      'opening',
+      'body_1',
+      'body_2',
+      'closing',
+    ];
+    const uniqueSnippets = new Set<string>();
+
+    for (const key of orderedKeys) {
+      const entry = paragraphEvidence.find((item) => item.paragraphKey === key);
+      if (!entry) continue;
+      for (const snippet of entry.anchorTexts ?? []) {
+        const normalized = this.cleanText(
+          this.sanitizeCoverLetterText(String(snippet ?? '')),
+        );
+        if (!normalized || normalized.length < 8 || uniqueSnippets.has(normalized)) {
+          continue;
+        }
+        uniqueSnippets.add(normalized);
+      }
+    }
+
+    return Array.from(uniqueSnippets).slice(0, 4);
+  }
+
   private sanitizeCoverLetterText(content: string): string {
     const blocks = content
       .replace(/\r\n/g, '\n')
@@ -2840,7 +2895,7 @@ export class CoverLettersService {
     const evidenceSet = new Set(evidenceTokens);
     const overlap = paragraphTokens.filter((token) => evidenceSet.has(token)).length;
     const ratio = overlap / evidenceTokens.length;
-    return ratio >= 0.65 || overlap >= 8;
+    return ratio >= 0.2 || overlap >= 4;
   }
 
   private validateCoverLetterParagraphAnchors(
@@ -3053,7 +3108,7 @@ export class CoverLettersService {
 
     const classifySentenceSource = (
       sentence: string,
-      paragraphKey: 'opening' | 'body_1' | 'body_2' | 'body_3' | 'closing',
+      paragraphKey: 'opening' | 'body_1' | 'body_2' | 'closing',
     ): GeneratedTextSourceType => {
       const normalizedSentence = this.normalizeForAnchorMatch(sentence);
       const anchors = paragraphEvidenceMap.get(paragraphKey) ?? [];
@@ -3081,13 +3136,13 @@ export class CoverLettersService {
         sourceType: classifySentenceSource(sentence, 'opening'),
       })),
       ...generation.document.bodyParagraphs.flatMap((paragraph, index) =>
-        this.splitIntoSentences(paragraph).map((sentence) => ({
-          text: sentence,
-          sourceType: classifySentenceSource(
-            sentence,
-            (`body_${index + 1}` as 'body_1' | 'body_2' | 'body_3'),
-          ),
-        })),
+          this.splitIntoSentences(paragraph).map((sentence) => ({
+            text: sentence,
+            sourceType: classifySentenceSource(
+              sentence,
+              (`body_${index + 1}` as 'body_1' | 'body_2'),
+            ),
+          })),
       ),
       ...this.splitIntoSentences(generation.document.closingParagraph).map((sentence) => ({
         text: sentence,
