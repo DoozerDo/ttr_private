@@ -125,4 +125,35 @@ describe('CoverLettersController export gating', () => {
     expect(response.send).not.toHaveBeenCalled();
     expect(result).toBeInstanceOf(StreamableFile);
   });
+
+  it('allows PRO tier cover-letter PDF export and forwards the file', async () => {
+    const request = buildRequest(SubscriptionTier.PRO);
+    const response = buildResponse();
+    const file = {
+      buffer: Buffer.from('pdf-data'),
+      contentType: 'application/pdf',
+      filename: 'cover-letter.pdf',
+      auditId: 'audit-2',
+      baselineVersionHash: 'hash-2',
+    };
+    coverLettersService.exportCoverLetter.mockResolvedValueOnce(file);
+
+    const result = await controller.exportCoverLetterWithFormat('pdf', baseDto, request, response);
+
+    expect(coverLettersService.exportCoverLetter).toHaveBeenCalledWith(
+      'user-1',
+      baseDto,
+      'pdf',
+    );
+    expect(response.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      'attachment; filename="cover-letter.pdf"',
+    );
+    expect(response.setHeader).toHaveBeenCalledWith(
+      'X-Compliance-Audit-Id',
+      file.auditId,
+    );
+    expect(response.status).toHaveBeenCalledWith(HttpStatus.CREATED);
+    expect(result).toBeInstanceOf(StreamableFile);
+  });
 });
