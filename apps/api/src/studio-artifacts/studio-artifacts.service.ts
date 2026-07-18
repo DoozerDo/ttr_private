@@ -764,6 +764,15 @@ export class StudioArtifactsService {
       }),
     ]);
 
+    const canonicalResumeAssessment = await this.resolveCanonicalResumeAssessment({
+      userId: input.userId,
+      baselineId: input.baselineId,
+      jobId: input.jobId,
+      analysisId: input.analysisId,
+      record,
+      assessment,
+    });
+
     if (process.env.DEBUG_STUDIO_ARTIFACTS_ROUTE_TRACE === 'true') {
       // eslint-disable-next-line no-console
       console.info('[studio-artifacts][service][readState:hydrated-path]', {
@@ -780,7 +789,8 @@ export class StudioArtifactsService {
     const resumeInputsHash = this.computeResumeInputsHash({
       baselineVersionHash,
       jobFingerprint,
-      assessmentInputsHash: assessment?.inputsHash ?? null,
+      assessmentInputsHash:
+        canonicalResumeAssessment.assessment?.inputsHash ?? assessment?.inputsHash ?? null,
     });
     const coverLetterInputsHash = this.computeCoverLetterInputsHash({
       baselineVersionHash,
@@ -2344,6 +2354,41 @@ export class StudioArtifactsService {
         }),
       )
       .digest('hex');
+  }
+
+  private async resolveCanonicalResumeAssessment(input: {
+    userId: string;
+    baselineId: string;
+    jobId: string;
+    analysisId?: string | null;
+    record: StudioArtifact | null;
+    assessment: { overallScore?: number | null; inputsHash?: string | null } | null;
+  }): Promise<{
+    requestedAnalysisId: string;
+    persistedResumeAnalysisId: string;
+    canonicalAnalysisId: string;
+    assessment: { overallScore?: number | null; inputsHash?: string | null } | null;
+  }> {
+    const requestedAnalysisId = safeText(input.analysisId);
+    const persistedResumeAnalysisId = safeText((input.record as any)?.resumeMetadata?.analysisId);
+    const canonicalAnalysisId = persistedResumeAnalysisId || requestedAnalysisId;
+    const assessment =
+      canonicalAnalysisId && canonicalAnalysisId !== requestedAnalysisId
+        ? await loadPersistedFitAssessmentReadModel(
+            this.fitAssessmentRepository,
+            canonicalAnalysisId,
+            input.userId,
+            input.jobId,
+            input.baselineId,
+          )
+        : input.assessment;
+
+    return {
+      requestedAnalysisId,
+      persistedResumeAnalysisId,
+      canonicalAnalysisId,
+      assessment,
+    };
   }
 
   private buildArtifactRecord(

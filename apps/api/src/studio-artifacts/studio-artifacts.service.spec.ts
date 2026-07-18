@@ -1236,6 +1236,145 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     expect((state.resumeResult as any)?.preview).toBeTruthy();
     expect((state.coverLetterResult as any)?.preview).toBeTruthy();
   });
+
+  it('hydrates a persisted resume artifact using the analysis binding stored on the artifact row', async () => {
+    const studioArtifactRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'artifact-3',
+        createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-01T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        resumeInputsHash: 'resume-stored-hash',
+        resumeResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          qualityGate: { status: 'pass', reasons: [] },
+          preview: {
+            resume: {
+              heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+              summary: 'Persisted resume summary.',
+              experience: [{ company: 'Acme', roleTitle: 'Ops Lead', bullets: ['Owned escalations.'] }],
+              education: [],
+              competencies: [],
+            },
+          },
+        },
+        resumeContent: 'Alex Candidate\nAcme\n- Owned escalations.',
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: new Date('2026-06-01T00:01:00.000Z'),
+        resumeFailedAt: null,
+        resumeMetadata: { analysisId: 'analysis-old' },
+        coverLetterStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        coverLetterInputsHash: 'cover-hash',
+        coverLetterResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          qualityGate: { status: 'pass', reasons: [] },
+          preview: { coverLetter: { paragraphs: ['Dear Hiring Team,', 'Persisted cover letter.'] } },
+        },
+        coverLetterContent: 'Dear Hiring Team,\nPersisted cover letter.',
+        coverLetterFailureCode: null,
+        coverLetterFailureMessage: null,
+        coverLetterGenerationStartedAt: null,
+        coverLetterGeneratedAt: new Date('2026-06-01T00:01:00.000Z'),
+        coverLetterFailedAt: null,
+        coverLetterMetadata: { analysisId: 'analysis-current' },
+      } as any),
+    } as any;
+
+    const baselineRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          {
+            baseline_id: 'base-1',
+            baseline_userId: 'u-1',
+            baseline_version: 0,
+            baseline_versionNumber: 1,
+            baseline_originalFilename: 'resume.pdf',
+            baseline_mimeType: 'application/pdf',
+            baseline_storagePath: '/tmp/resume.pdf',
+            baseline_hash: null,
+            baseline_status: 'ACTIVE',
+            baseline_isActive: true,
+            baseline_archivedAt: null,
+            baseline_originalBaselineScore: null,
+            baseline_latestBaselineScore: null,
+            baseline_latestAssessmentId: null,
+            baseline_firstAnalyzedAt: null,
+            baseline_lastAnalyzedAt: null,
+            baseline_isSynthetic: false,
+            baseline_syntheticScenarioKey: null,
+            baseline_syntheticRunId: null,
+            baseline_syntheticCreatedAt: null,
+            baseline_preserveFromCleanup: false,
+          },
+        ]),
+        getOne: jest.fn().mockResolvedValue({ id: 'base-1', userId: 'u-1', sections: [] }),
+      }),
+    } as any;
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'base-version-1', baselineId: 'base-1', hash: 'hash-v1' }),
+    } as any;
+    const jobRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'job-1', title: 'Role', company: 'Co' }),
+    } as any;
+    const fitAssessmentRepository = {
+      findOne: jest.fn().mockImplementation(async (query: any) => {
+        const analysisId = query?.where?.id;
+        if (analysisId === 'analysis-old') {
+          return { overallScore: 88, inputsHash: 'resume-old-inputs' };
+        }
+        return { overallScore: 91, inputsHash: 'resume-current-inputs' };
+      }),
+    } as any;
+    const baselineResumeV2BackfillService = {
+      backfillLatestIfMissing: jest.fn().mockResolvedValue(null),
+    } as any;
+
+    const service = new StudioArtifactsService(
+      studioArtifactRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineResumeV2BackfillService,
+      { generateResume: jest.fn() } as any,
+      { generateCoverLetter: jest.fn() } as any,
+    );
+    jest.spyOn(service as any, 'computeResumeInputsHash').mockImplementation((input: any) =>
+      input.assessmentInputsHash === 'resume-old-inputs' ? 'resume-stored-hash' : 'resume-current-hash',
+    );
+    jest.spyOn(service as any, 'computeCoverLetterInputsHash').mockReturnValue('cover-hash');
+
+    const state = await service.readState({
+      userId: 'u-1',
+      baselineId: 'base-1',
+      baselineVersionId: 'base-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-current',
+    } as any);
+
+    expect(state.status).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+    expect(state.resume?.metadata?.analysisId).toBe('analysis-old');
+    expect(state.resume?.inputsHashMatches).toBe(true);
+    expect(state.resume?.artifactCurrent).toBe(true);
+    expect(state.resume?.usableCurrent).toBe(true);
+    expect((state.resumeResult as any)?.generationState).toBe('generated_usable');
+    expect((state.resumeResult as any)?.exportReady).toBe(true);
+    expect((state.coverLetterResult as any)?.exportReady).toBe(true);
+  });
 });
 
 describe('StudioArtifactsService (unit): artifact record hydration metadata', () => {
