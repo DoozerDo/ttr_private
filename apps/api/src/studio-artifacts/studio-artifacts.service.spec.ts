@@ -79,7 +79,7 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
     expect(result.exports).toEqual({ docx: true, pdf: true });
   });
 
-  it('quarantines cover-letter artifacts that still advertise fallback generation authority', () => {
+  it('keeps cover-letter artifacts current when only legacy fallback markers remain in the response body', () => {
     const service = Object.create(StudioArtifactsService.prototype) as any;
     const result = service.buildArtifactRecord(
       {
@@ -108,8 +108,52 @@ describe('StudioArtifactsService (unit): resumeResult contract', () => {
       'hash-1',
     );
 
-    expect(result.artifactCurrent).toBe(false);
-    expect(result.usableCurrent).toBe(false);
+    expect(result.artifactCurrent).toBe(true);
+    expect(result.usableCurrent).toBe(true);
+    expect(result.status).toBe(StudioArtifactLifecycleStatus.COMPLETED);
+  });
+
+  it('keeps a persisted resume artifact current when the response body includes a bypassed template marker', () => {
+    const service = Object.create(StudioArtifactsService.prototype) as any;
+    const result = service.buildArtifactRecord(
+      {
+        id: 'artifact-2',
+        createdAt: new Date('2026-06-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeStatus: StudioArtifactLifecycleStatus.COMPLETED,
+        resumeInputsHash: 'hash-2',
+        resumeResponseBody: {
+          status: 'success',
+          generationStatus: 'success',
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          preview: {
+            resume: {
+              heading: { name: 'Canonical Candidate', contactLine: 'canonical@example.com' },
+              summary: 'Canonical persisted resume preview.',
+              experience: [{ company: 'Canonical Co', roleTitle: 'Director', bullets: ['Led operations.'] }],
+            },
+          },
+          internal: {
+            generationMode: 'structured_baseline_template',
+            templateVersion: 'canonical_resume_v1',
+            bypassedTemplateHardBlockWithInterpretedEvidence: true,
+          },
+        },
+        resumeContent: 'Canonical persisted resume preview.',
+        resumeFailureCode: null,
+        resumeFailureMessage: null,
+        resumeGenerationStartedAt: null,
+        resumeGeneratedAt: new Date('2026-06-03T00:01:00.000Z'),
+        resumeFailedAt: null,
+        resumeMetadata: { analysisId: 'analysis-2' },
+      } as any,
+      'resume',
+      'hash-2',
+    );
+
+    expect(result.artifactCurrent).toBe(true);
+    expect(result.usableCurrent).toBe(true);
     expect(result.status).toBe(StudioArtifactLifecycleStatus.COMPLETED);
   });
 
