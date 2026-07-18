@@ -1221,12 +1221,66 @@ describe('ResumeService contract', () => {
       analysisId: assessment.id,
     } as any);
 
-    expect(readiness).toMatchObject({
+  expect(readiness).toMatchObject({
       status: 'ready',
       blocked: false,
       canGenerateResume: true,
     });
     expect((readiness as any)?.diagnostics?.readinessSource).toBe('canonical_persisted_studio_state');
+  });
+
+  it('exports the canonical persisted Studio resume without invoking generation', async () => {
+    const { service, studioArtifactsService } = buildService();
+    const generateResumeSpy = jest.spyOn(service as any, 'generateResume');
+    generateResumeSpy.mockRejectedValue(new Error('generateResume should not be called'));
+    (studioArtifactsService.readState as jest.Mock).mockResolvedValueOnce({
+      status: 'COMPLETED',
+      baselineId: baseline.id,
+      jobId: job.id,
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: 'job-fingerprint-1',
+      generationContractVersion: 'studio-artifacts-v1',
+      assessmentScore: 90,
+      resume: {
+        status: 'COMPLETED',
+        artifactCurrent: true,
+        usableCurrent: true,
+        responseBody: {
+          auditId: 'audit-1',
+          baselineVersionHash: 'hash-1',
+          preview: {
+            resume: {
+              heading: { name: 'Jordan Lee', contactLine: 'jordan@example.com' },
+              summary: 'Canonical persisted resume.',
+              experience: [
+                {
+                  company: 'Example Co',
+                  roleTitle: 'Program Manager',
+                  dateRange: '2020 - 2024',
+                  bullets: ['Led support operations.'],
+                },
+              ],
+            },
+          },
+        },
+        metadata: { auditId: 'audit-1' },
+      },
+      coverLetter: {
+        status: 'COMPLETED',
+        artifactCurrent: true,
+        usableCurrent: true,
+      },
+    } as any);
+
+    const result = await service.exportResume('user-1', baseRequest as any, 'pdf');
+
+    expect(result.contentType).toBe('application/pdf');
+    expect(result.buffer.length).toBeGreaterThan(0);
+    expect(result.buffer.slice(0, 5).toString('utf8')).toBe('%PDF-');
+    expect(result.buffer.toString('latin1')).toContain('Jordan Lee');
+    expect(studioArtifactsService.readState).toHaveBeenCalledTimes(1);
+    expect(generateResumeSpy).not.toHaveBeenCalled();
   });
 
 

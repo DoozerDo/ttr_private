@@ -83,9 +83,10 @@ import {
   normalizeNormalizedResumeDocument,
   validateNormalizedResumeDocument,
 } from '../resume/resume-normalization';
-import type {
-  DocumentGenerationExports,
-  UserSafeDisplayPayload,
+import {
+  CANONICAL_COVER_LETTER_TEMPLATE_VERSION,
+  type DocumentGenerationExports,
+  type UserSafeDisplayPayload,
 } from '../documents/normalized-document.models';
 import {
   buildPersistedFitAssessmentReadModelQuery,
@@ -97,6 +98,7 @@ import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
 import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
 import { WorkflowIdempotencyService } from '../common/workflow-idempotency.service';
 import { StudioArtifactsService } from '../studio-artifacts/studio-artifacts.service';
+import type { StudioArtifactsState } from '../studio-artifacts/studio-artifacts.service';
 import { ApplicationsService } from '../applications/applications.service';
 import { VERIFIED_ONLY_GENERATION_THRESHOLD } from '../config/verifiedOnlyGenerationThreshold';
 import type { ArtifactTraceAudit } from '../generation/artifact-trace-audit';
@@ -1127,40 +1129,37 @@ export class CoverLettersService {
     input: GenerateCoverLetterDto,
     format: 'docx' | 'pdf',
   ) {
-    const draft = await this.buildCoverLetterDraft(userId, input);
-
-    if (draft.complianceResult.blocked) {
+    const studioArtifactsState = await this.loadCanonicalPersistedCoverLetterExportState(userId, input);
+    const preview =
+      (((studioArtifactsState.coverLetter?.responseBody as Record<string, unknown> | null) as any)?.preview?.coverLetter ??
+      studioArtifactsState.coverLetterResult?.preview ??
+      null);
+    if (!preview) {
       throw new UnprocessableEntityException({
         error: {
-          code: 'COMPLIANCE_VIOLATION',
-          message: 'Compliance validation failed.',
-          details: {
-            blocked: true,
-            compliance_flags: draft.complianceResult.complianceFlags,
-            audit_id: draft.complianceResult.audit.id,
-            baseline_version_hash: draft.complianceResult.audit.baselineVersionHash,
-          },
+          code: 'NORMALIZATION_FAILED',
+          message: 'Cannot export cover letter because the canonical persisted document is missing.',
         },
       });
     }
-
-    const polished = polishCoverLetterGeneration(draft.generation, {
-      plan:
-        input.documentStrategyPlan ??
-        ({} as DocumentStrategyPlanLike),
-      roleLabel: draft.job.title ?? draft.jobContext.title ?? null,
+    const generation = this.buildPersistedCoverLetterGenerationFromPreview(preview as Record<string, unknown>);
+    const polished = polishCoverLetterGeneration(generation, {
+      plan: input.documentStrategyPlan ?? ({} as DocumentStrategyPlanLike),
+      roleLabel: String((preview as any)?.roleTitle ?? '').trim() || null,
     });
-    const generation = polished.generation;
-    const text = this.buildNormalizedCoverLetterText(generation);
+    const persistedGeneration = polished.generation;
+    const text = this.buildNormalizedCoverLetterText(persistedGeneration);
     let buffer: Buffer;
     if (format === 'pdf') {
       buffer = this.buildPdfBuffer(text);
     } else {
-      const identity = resolveBaselineIdentity(draft.baseline);
       const model = mapCoverLetterResultToModel(
-        generation,
-        identity,
-        draft.jobContext,
+        persistedGeneration,
+        undefined,
+        {
+          title: String((preview as any)?.roleTitle ?? '').trim() || null,
+          company: String((preview as any)?.companyName ?? '').trim() || null,
+        },
       );
       const template = getDocxTemplate<CoverLetterDocxModel>(
         'cover_letter',
@@ -1173,44 +1172,19 @@ export class CoverLettersService {
       };
       buffer = (await template.render(model, renderContext)).buffer;
     }
-
-    const baselineSections = draft.allowedBlocks.map((block) => ({
-      title: block.title,
-      content: block.content,
-    }));
-    const generatedSections: ComplianceTextSection[] =
-      this.buildCoverLetterGeneratedSectionsForCompliance(generation);
-
-    const { complianceFlags, blocked, audit } =
-      await this.complianceService.validateAndAudit({
-        action: ComplianceAction.COVER_LETTER_EXPORT,
-        actorId: userId,
-        baselineVersion: draft.baselineVersion,
-        job: draft.job,
-        outputHash: createHash('sha256')
-          .update(`${format}:${text}`)
-          .digest('hex'),
-        baselineSections,
-        generatedSections,
-        extraFlags: draft.complianceResult.complianceFlags,
-        scopeInflationDetected: false,
-        jobContext: draft.jobContextAllowlist,
-        documentType: DocumentType.COVER_LETTER,
-      });
-
-    if (blocked) {
-      throw new UnprocessableEntityException({
-        error: {
-          code: 'COMPLIANCE_VIOLATION',
-          message: 'Compliance validation failed.',
-          details: {
-            compliance_flags: complianceFlags,
-            audit_id: audit.id,
-            baseline_version_hash: audit.baselineVersionHash,
-          },
-        },
-      });
-    }
+    const coverLetterResponseBody = studioArtifactsState.coverLetter?.responseBody as Record<string, unknown> | null;
+    const auditId =
+      String(
+        (coverLetterResponseBody as any)?.auditId ??
+          (coverLetterResponseBody as any)?.audit_id ??
+          (studioArtifactsState.coverLetter?.metadata as any)?.auditId ??
+          '',
+      ) || '';
+    const baselineVersionHash =
+      (coverLetterResponseBody as any)?.baselineVersionHash ??
+      (coverLetterResponseBody as any)?.baseline_version_hash ??
+      studioArtifactsState.baselineVersionHash ??
+      null;
 
     return {
       buffer,
@@ -1219,8 +1193,8 @@ export class CoverLettersService {
           ? 'application/pdf'
           : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       filename: `cover-letter.${format}`,
-      auditId: audit.id,
-      baselineVersionHash: audit.baselineVersionHash,
+      auditId,
+      baselineVersionHash,
     };
   }
 
@@ -2205,6 +2179,98 @@ export class CoverLettersService {
     ];
 
     return Buffer.from(pdfParts.join('\n'));
+  }
+
+  private async loadCanonicalPersistedCoverLetterExportState(
+    userId: string,
+    input: GenerateCoverLetterDto,
+  ): Promise<StudioArtifactsState> {
+    const baselineId = input.baselineId?.trim();
+    const baselineVersionId = input.baselineVersionId?.trim();
+    const jobId = input.jobId?.trim();
+    const analysisId = input.analysisId?.trim();
+
+    if (!baselineId || !baselineVersionId || !jobId || !analysisId) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'NORMALIZATION_FAILED',
+          message: 'Cannot export cover letter because canonical identifiers are missing.',
+        },
+      });
+    }
+
+    const state = await this.studioArtifactsService.readState({
+      userId,
+      baselineId,
+      baselineVersionId,
+      jobId,
+      analysisId,
+    });
+
+    if (state.coverLetter?.usableCurrent !== true) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'NORMALIZATION_FAILED',
+          message: 'Cannot export cover letter because the canonical persisted Studio state is not current.',
+        },
+      });
+    }
+
+    return state;
+  }
+
+  private buildPersistedCoverLetterGenerationFromPreview(preview: Record<string, unknown>): CoverLetterGenerationResult {
+    const toText = (value: unknown) => String(value ?? '').trim();
+    const bodyParagraphs = Array.isArray((preview as any)?.bodyParagraphs)
+      ? ((preview as any).bodyParagraphs as unknown[]).map((value) => toText(value)).filter(Boolean)
+      : Array.isArray((preview as any)?.paragraphs)
+        ? ((preview as any).paragraphs as unknown[]).slice(1, -1).map((value) => toText(value)).filter(Boolean)
+        : [];
+    const opening = toText((preview as any)?.opening);
+    const closingParagraph = toText((preview as any)?.closingParagraph);
+    const salutation = toText((preview as any)?.salutation ?? (preview as any)?.greeting) || COVER_LETTER_REQUIRED_SALUTATION;
+    const signoff = toText((preview as any)?.signoff) || COVER_LETTER_SIGNOFF;
+    const signatureName =
+      toText((preview as any)?.signatureName) ||
+      toText((preview as any)?.senderHeading?.name) ||
+      'Candidate';
+    const dateLine = toText((preview as any)?.dateLine) || undefined;
+    const recipientLine =
+      Array.isArray((preview as any)?.addresseeLines) && (preview as any).addresseeLines.length
+        ? ((preview as any).addresseeLines as unknown[]).map((value) => toText(value)).filter(Boolean)
+        : [toText((preview as any)?.roleTitle), toText((preview as any)?.companyName)].filter(Boolean);
+    const paragraphs = [opening, ...bodyParagraphs, closingParagraph].filter(Boolean);
+    const content = [salutation, ...paragraphs, signoff, signatureName].filter(Boolean).join('\n\n');
+
+    return {
+      document: {
+        senderHeading: {
+          name: signatureName,
+          contactLine: undefined,
+        },
+        templateVersion: CANONICAL_COVER_LETTER_TEMPLATE_VERSION,
+        companyName: toText((preview as any)?.companyName) || null,
+        roleTitle: toText((preview as any)?.roleTitle) || null,
+        paragraphEvidence: [],
+        dateLine,
+        recipientLine: recipientLine.length ? recipientLine : undefined,
+        salutation,
+        opening,
+        bodyParagraphs,
+        closingParagraph,
+        signoff,
+        signatureName,
+      },
+      content,
+      wordCount: content.split(/\s+/).filter(Boolean).length,
+      greeting: salutation,
+      paragraphs,
+      closingParagraphs: closingParagraph ? [closingParagraph] : [],
+      salutation,
+      closing: `${signoff}\n${signatureName}`.trim(),
+      traceMap: {},
+      paragraphEvidence: [],
+    };
   }
 
   private buildNormalizedCoverLetterText(

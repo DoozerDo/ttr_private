@@ -44,7 +44,7 @@ import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 import { VERIFIED_ONLY_GENERATION_THRESHOLD } from '../config/verifiedOnlyGenerationThreshold';
 import { CriticalFlowEventType, CriticalFlowTrackerService } from '../support/critical-flow-tracker.service';
 import { WorkflowIdempotencyService, type WorkflowIdempotencyReservation } from '../common/workflow-idempotency.service';
-import { StudioArtifactsService } from '../studio-artifacts/studio-artifacts.service';
+import { StudioArtifactsService, type StudioArtifactsState } from '../studio-artifacts/studio-artifacts.service';
 import '../docx-templates/templates';
 import {
   ResumeExportSection,
@@ -7341,6 +7341,44 @@ export class ResumeService {
     return mapNormalizedResumeToDocxModel(normalizedDocument);
   }
 
+  private async loadCanonicalPersistedResumeExportState(
+    userId: string,
+    request: GenerateResumeRequest,
+  ): Promise<StudioArtifactsState> {
+    const baselineId = request.baselineId?.trim();
+    const baselineVersionId = request.baselineVersionId?.trim();
+    const jobId = request.jobId?.trim();
+    const analysisId = request.analysisId?.trim();
+
+    if (!baselineId || !baselineVersionId || !jobId || !analysisId) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'NORMALIZATION_FAILED',
+          message: 'Cannot export resume because canonical identifiers are missing.',
+        },
+      });
+    }
+
+    const state = await this.studioArtifactsService.readState({
+      userId,
+      baselineId,
+      baselineVersionId,
+      jobId,
+      analysisId,
+    });
+
+    if (state.resume?.usableCurrent !== true) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'NORMALIZATION_FAILED',
+          message: 'Cannot export resume because the canonical persisted Studio state is not current.',
+        },
+      });
+    }
+
+    return state;
+  }
+
   private async canRenderResumeTemplate(normalizedDocument: NormalizedResumeDocument): Promise<boolean> {
     try {
       const docxModel = await this.buildDocxModelFromGeneration({
@@ -7459,43 +7497,18 @@ export class ResumeService {
     request: GenerateResumeRequest,
     format: 'docx' | 'pdf',
   ) {
-    const generation = await this.generateResume(userId, request, {
-      enforceOneTap: false,
-    });
-
-    if (generation.compliance_blocked) {
-      throw new UnprocessableEntityException({
-        error: {
-          code: 'COMPLIANCE_VIOLATION',
-          message: 'Compliance validation failed.',
-          details: {
-            blocked: true,
-            compliance_flags: generation.compliance_flags ?? [],
-            audit_id: generation.auditId ?? generation.audit_id ?? null,
-            baseline_version_hash: generation.baseline_version_hash ?? null,
-          },
-        },
-      });
-    }
-    if (generation.status !== 'success' || generation.exportReady !== true) {
-      throw new UnprocessableEntityException({
-        error: {
-          code: 'NORMALIZATION_FAILED',
-          message:
-            'Cannot export resume because generation did not produce a valid model.',
-          details: {
-            status: generation.status,
-          },
-        },
-      });
-    }
+    const studioArtifactsState = await this.loadCanonicalPersistedResumeExportState(userId, request);
+    const persistedResumePreview = studioArtifactsState.resumeResult?.preview as Record<string, unknown> | null;
+    const persistedResumeBody = studioArtifactsState.resume?.responseBody as Record<string, unknown> | null;
     const normalizedDocumentInput =
-      request.editedResume ?? generation.preview?.resume ?? null;
+      (persistedResumePreview as NormalizedResumeDocument | null) ??
+      (((persistedResumeBody as any)?.preview?.resume ?? null) as NormalizedResumeDocument | null) ??
+      null;
     if (!normalizedDocumentInput) {
       throw new UnprocessableEntityException({
         error: {
           code: 'NORMALIZATION_FAILED',
-          message: 'Cannot export resume because the normalized model is missing.',
+          message: 'Cannot export resume because the canonical persisted normalized model is missing.',
         },
       });
     }
@@ -7544,75 +7557,31 @@ export class ResumeService {
       buffer = (await template.render(model, renderContext)).buffer;
     }
 
-    const job = generation.jobId
-      ? await this.jobsRepository.findOne({
-          where: { id: generation.jobId, userId },
-        })
-      : null;
-
     const contentType =
       format === 'pdf'
         ? 'application/pdf'
         : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    const filename = this.buildExportFilename(format, job?.company);
-
-    const baselineVersion = await this.baselineVersionRepository.findOne({
-      where: {
-        id: generation.baselineVersionId,
-        baselineId: generation.baselineId,
-      },
-    });
-
-    if (!baselineVersion) {
-      throw new NotFoundException('Baseline version not found');
-    }
-    if (!baselineVersion.hash) {
-      throw new BadRequestException('Baseline version hash missing');
-    }
-
-    const { complianceFlags, blocked, audit } =
-      await this.complianceService.validateAndAudit({
-        action: ComplianceAction.RESUME_EXPORT,
-        actorId: userId,
-        baselineVersion,
-        job,
-        outputHash: createHash('sha256')
-          .update(
-            `${format}:${
-              format === 'pdf'
-              ? pdfText ?? ''
-                : JSON.stringify(polishedDocument)
-            }`,
-          )
-          .digest('hex'),
-        baselineSections: generation.sections,
-        generatedSections: generation.sections,
-      });
-
-    const blockingFlags = complianceFlags.filter(
-      (flag) => flag.severity === 'block',
-    );
-
-    if (blocked && blockingFlags.length > 0) {
-      throw new UnprocessableEntityException({
-        error: {
-          code: 'COMPLIANCE_VIOLATION',
-          message: 'Compliance validation failed.',
-          details: {
-            compliance_flags: blockingFlags,
-            audit_id: audit.id,
-            baseline_version_hash: audit.baselineVersionHash,
-          },
-        },
-      });
-    }
+    const filename = this.buildExportFilename(format, null);
+    const resumeResponseBody = persistedResumeBody;
+    const auditId =
+      String(
+        (resumeResponseBody as any)?.auditId ??
+          (resumeResponseBody as any)?.audit_id ??
+          (studioArtifactsState.resume?.metadata as any)?.auditId ??
+          '',
+      ) || '';
+    const baselineVersionHash =
+      (resumeResponseBody as any)?.baselineVersionHash ??
+      (resumeResponseBody as any)?.baseline_version_hash ??
+      studioArtifactsState.baselineVersionHash ??
+      null;
 
     return {
       buffer,
       contentType,
       filename,
-      auditId: audit.id,
-      baselineVersionHash: audit.baselineVersionHash,
+      auditId,
+      baselineVersionHash,
     };
   }
 

@@ -1447,6 +1447,79 @@ describe('CoverLettersService contract', () => {
     buildDraftSpy.mockRestore();
   });
 
+  it('exports the canonical persisted Studio cover letter without invoking generation', async () => {
+    const { service, studioArtifactsService } = buildService();
+    const buildDraftSpy = jest.spyOn(service as any, 'buildCoverLetterDraft');
+    buildDraftSpy.mockRejectedValue(new Error('buildCoverLetterDraft should not be called'));
+    (studioArtifactsService.readState as jest.Mock).mockResolvedValueOnce({
+      status: 'COMPLETED',
+      baselineId: baseline.id,
+      jobId: job.id,
+      baselineVersionId: baselineVersion.id,
+      baselineVersionHash: baselineVersion.hash,
+      jobFingerprint: 'job-fingerprint-1',
+      generationContractVersion: 'studio-artifacts-v1',
+      assessmentScore: 90,
+      coverLetter: {
+        status: 'COMPLETED',
+        artifactCurrent: true,
+        usableCurrent: true,
+        responseBody: {
+          auditId: 'audit-1',
+          baselineVersionHash: 'hash-1',
+          preview: {
+            coverLetter: {
+              dateLine: 'June 21, 2026',
+              roleTitle: 'Program Manager',
+              companyName: 'Example Co',
+              salutation: 'Dear Hiring Team,',
+              opening: 'Opening paragraph.',
+              bodyParagraphs: ['Body paragraph one.', 'Body paragraph two.'],
+              closingParagraph: 'Closing paragraph.',
+              signoff: 'Sincerely,',
+              signatureName: 'Jordan Lee',
+            },
+          },
+        },
+        metadata: { auditId: 'audit-1' },
+      },
+      resume: {
+        status: 'COMPLETED',
+        artifactCurrent: true,
+        usableCurrent: true,
+      },
+      coverLetterResult: {
+        preview: {
+          dateLine: 'June 21, 2026',
+          roleTitle: 'Program Manager',
+          companyName: 'Example Co',
+          salutation: 'Dear Hiring Team,',
+          opening: 'Opening paragraph.',
+          bodyParagraphs: ['Body paragraph one.', 'Body paragraph two.'],
+          closingParagraph: 'Closing paragraph.',
+          signoff: 'Sincerely,',
+          signatureName: 'Jordan Lee',
+        },
+      },
+    } as any);
+
+    const result = await service.exportCoverLetter('user-1', {
+      baselineId: baseline.id,
+      baselineVersionId: baselineVersion.id,
+      jobId: job.id,
+      analysisId: assessment.id,
+    } as any, 'docx');
+
+    expect(result.contentType).toBe('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    expect(result.buffer.length).toBeGreaterThan(0);
+    const zip = await JSZip.loadAsync(result.buffer);
+    const documentXml = await zip.file('word/document.xml')?.async('string');
+    expect(documentXml).toContain('Jordan Lee');
+    expect(documentXml).toContain('Example Co');
+    expect(studioArtifactsService.readState).toHaveBeenCalledTimes(1);
+    expect(buildDraftSpy).not.toHaveBeenCalled();
+  });
+
   it('renders the canonical cover-letter template with the expected structure', async () => {
     const template = getDocxTemplate<CoverLetterDocxModel>('cover_letter', DEFAULT_COVER_LETTER_TEMPLATE_KEY);
     const model = mapCoverLetterResultToModel(
