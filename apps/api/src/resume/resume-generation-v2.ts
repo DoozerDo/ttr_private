@@ -689,10 +689,12 @@ export function buildDeterministicResumeV2FromBaseline(input: {
 
   // V2 cleanup (deterministic): remove dangling trailing fragments that cause strict quality failures.
   (repairedStructure as any).summary =
-    typeof (normalized as any).summary === 'string'
-      ? removeDanglingTrailingWord((normalized as any).summary)
-      : (normalized as any).summary;
-  (repairedStructure as any).experience = (Array.isArray((normalized as any).experience) ? (normalized as any).experience : []).map(
+    typeof (repairedStructure as any).summary === 'string'
+      ? removeDanglingTrailingWord((repairedStructure as any).summary)
+      : (repairedStructure as any).summary;
+  (repairedStructure as any).experience = (
+    Array.isArray((repairedStructure as any).experience) ? (repairedStructure as any).experience : []
+  ).map(
     (entry: any) => {
       const bullets = Array.isArray(entry?.bullets)
         ? (entry.bullets as unknown[])
