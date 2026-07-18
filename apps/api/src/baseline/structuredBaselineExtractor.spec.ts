@@ -286,6 +286,52 @@ describe('structuredBaselineExtractor', () => {
     );
   });
 
+  it('keeps action-verb bullets attached to the preceding experience header', () => {
+    const sections: any[] = [
+      {
+        sectionType: 'EXPERIENCE',
+        content: [
+          'SentinelOne | Senior Manager, Customer Operations | Dec 2022 – Aug 2025',
+          '- Owned global incident and escalation management supporting Fortune 500 customers.',
+          '- Led distributed operations team managing 2,000+ monthly cases while maintaining 98% SLA adherence.',
+          '- Operationalized Salesforce Service Cloud and Jira Service Management for workflow automation, compliance, and reporting.',
+          '',
+          'Starbucks | Senior Manager, Technology Operations Excellence | Apr 2020 – Mar 2022',
+          '- Embedded ITIL-aligned ServiceNow automation reducing MTTR by 22%.',
+          '- Designed enterprise SLA frameworks, KPI dashboards, governance models, and operational reporting.',
+        ].join('\n'),
+      },
+    ];
+
+    const structured = extractStructuredBaselineFromSections(sections as any);
+    expect(structured.experience).toHaveLength(2);
+    expect(structured.experience[0]).toMatchObject({
+      company: 'SentinelOne',
+      roleTitle: 'Senior Manager, Customer Operations',
+      dates: 'Dec 2022 – Aug 2025',
+    });
+    expect(structured.experience[0].bullets).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Owned global incident and escalation management'),
+        expect.stringContaining('Operationalized Salesforce Service Cloud and Jira Service Management'),
+      ]),
+    );
+    expect(structured.experience[1]).toMatchObject({
+      company: 'Starbucks',
+      roleTitle: 'Senior Manager, Technology Operations Excellence',
+      dates: 'Apr 2020 – Mar 2022',
+    });
+    expect(structured.experience[1].bullets).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Embedded ITIL-aligned ServiceNow automation'),
+        expect.stringContaining('Designed enterprise SLA frameworks'),
+      ]),
+    );
+    expect(structured.missingEvidenceReasons).not.toContain(
+      'No safely structured experience entries found (company + role title required).',
+    );
+  });
+
   it('keeps billing operations bullets under centurylink not sentinelone', () => {
     const sections: any[] = [
       {

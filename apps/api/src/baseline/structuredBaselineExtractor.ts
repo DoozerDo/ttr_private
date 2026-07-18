@@ -117,6 +117,9 @@ function looksLikeRoleTitle(value: string): boolean {
 function isLikelyCompanyName(value: string): boolean {
   const text = trimToText(value);
   if (!text) return false;
+  // Date-bearing lines are usually location/date continuations, not employers.
+  // Reject them early so header reconstruction does not flip role and company.
+  if (looksLikeDatesLine(text) || Boolean(extractDateRangeMatch(text))) return false;
   if (
     /\b(?:program\s+manager|project\s+manager|product\s+manager|support\s+operations|operations|customer\s+experience|customer\s+success|engineer|architect|administrator|sysadmin|developer|technician|specialist|founder|co-?founder|webmaster|assistant|manager|director|analyst|contractor|consultant|lead)\b/i.test(
       text,
@@ -138,7 +141,7 @@ function isLikelyCompanyName(value: string): boolean {
   if (/\b(?:vue|react|angular|frontend|back\s*end|full[-\s]*stack|builder)\b/i.test(text)) {
     return false;
   }
-  if (/^\p{Ll}[\s\S]*$/u.test(text) || /^[,;:)\-]/.test(text) || /[,:;]\s*$/.test(text)) {
+  if ((/^\p{Ll}/u.test(text) && !/[A-Z]/.test(text)) || /^[,;:)\-]/.test(text) || /[,:;]\s*$/.test(text)) {
     return false;
   }
   const openParens = (text.match(/\(/g) ?? []).length;
@@ -228,6 +231,13 @@ function startsWithActionVerb(value: string): boolean {
     'created',
     'implemented',
     'developed',
+    'introduced',
+    'operationalized',
+    'directed',
+    'embedded',
+    'standardized',
+    'reconciled',
+    'handled',
     'owned',
     'improved',
     'reduced',
@@ -296,8 +306,9 @@ function parseExperienceHeaderLine(line: string): { company: string; roleTitle: 
     return { company, roleTitle, ...(dates ? { dates } : {}) };
   }
 
-  // Support "Company ? Role Title ? dates" and "Company - Role Title - dates"
-  const dashParts = raw.split(/\s[??-]\s/).map((p) => trimToText(p)).filter(Boolean);
+  // Support "Company – Role Title – dates" and "Company - Role Title - dates".
+  const normalizedDashText = normalizeDateRangeSeparators(raw);
+  const dashParts = normalizedDashText.split(/\s[-–—]\s/).map((p) => trimToText(p)).filter(Boolean);
   if (dashParts.length >= 2) {
     // Avoid misclassifying "Company <Month YYYY> - <Month YYYY|Present>" as a header with company+roleTitle.
     if (dashParts.length === 2 && looksLikeDatesLine(dashParts[1])) return null;
@@ -349,6 +360,7 @@ function isBulletPrefixedExperienceHeader(line: string): boolean {
   if (!raw || !isBulletLine(raw)) return false;
   const candidate = stripBulletPrefix(raw);
   if (!candidate) return false;
+  if (isImplicitBulletCandidate(candidate)) return false;
   const parsed = parseExperienceHeaderLine(candidate) ?? parseRoleAtCompany(candidate);
   return Boolean(parsed && parsed.company && parsed.roleTitle);
 }
@@ -364,6 +376,13 @@ function readExperienceHeaderAt(
   // Treat "- Company | Role | Dates" as a header candidate, not an experience bullet.
   const headerCandidate0 = isBulletLine(line0) ? stripBulletPrefix(line0) : line0;
   if (!headerCandidate0) return null;
+
+  // Experience bullets often start with a strong action verb and can otherwise look like
+  // multi-line headers when the next line contains a company/role token. Reject them early so
+  // the extractor does not collapse real evidence into a single malformed header.
+  if (isImplicitBulletCandidate(headerCandidate0)) {
+    return null;
+  }
 
   const line1 = trimToText(lines[startIndex + 1] ?? '');
   const line2 = trimToText(lines[startIndex + 2] ?? '');
@@ -424,7 +443,7 @@ function readExperienceHeaderAt(
       }
     }
 
-    if ((!line0LooksLikeCompany || line0LooksLikeRole) && line1LooksLikeCompany) {
+    if (!headerCandidate0.includes('|') && ((!line0LooksLikeCompany || line0LooksLikeRole) && line1LooksLikeCompany)) {
       const line2Dates = line2 && !isBulletLine(line2) && looksLikeDatesLine(line2) ? canonicalizeDateRange(line2) : '';
       const splitDates = line2Dates ? splitCanonicalDateRangeText(line2Dates) : {};
       if (splitDates.start_date && splitDates.end_date) {
@@ -478,11 +497,6 @@ function readExperienceHeaderAt(
         consumed: 1,
       };
     }
-    return null;
-  }
-
-  // Prevent bullet-like prose from being misclassified as a multi-line header's company line.
-  if (startsWithActionVerb(headerCandidate0) || looksLikeSentence(headerCandidate0)) {
     return null;
   }
 

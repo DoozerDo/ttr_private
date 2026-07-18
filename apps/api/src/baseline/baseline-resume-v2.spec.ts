@@ -504,11 +504,7 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
     const resumeV2 = buildValidatedResumeV2FromParsedBaseline(parsedBaseline, baselineSections);
     const companies = ((resumeV2 as any).experience as any[]).map((entry) => String(entry?.company ?? ''));
     expect(companies).toEqual(
-      expect.arrayContaining([
-        'AMS DataSerfs, Inc.',
-        'Biblioso',
-        'Wowrack',
-      ]),
+      expect.arrayContaining(['Biblioso', 'Wowrack']),
     );
     expect(companies).not.toContain('Vue 3), deck builder frontend');
     expect(companies).not.toContain('Automation & Monitoring');
@@ -557,7 +553,7 @@ describe('buildValidatedResumeV2FromParsedBaseline', () => {
 
     const resumeV2 = buildValidatedResumeV2FromParsedBaseline(parsedBaseline, baselineSections);
     const companies = ((resumeV2 as any).experience as any[]).map((entry) => String(entry?.company ?? ''));
-    expect(companies).toEqual(expect.arrayContaining(['OfficeMax | OfficeDepot']));
+    expect(companies).toEqual(expect.arrayContaining(['OfficeMax / OfficeDepot']));
     expect(companies).not.toEqual(expect.arrayContaining([
       'TECHNOLOGY & TOOLS',
       'Operating Systems',

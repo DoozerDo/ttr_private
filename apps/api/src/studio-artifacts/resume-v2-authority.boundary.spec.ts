@@ -375,28 +375,20 @@ describe('Persisted resume generation authority boundary (regression guardrail)'
       expect(resumeText).toMatch(/repeatable playbooks/i);
       expect(resumeText).toMatch(/support operations/i);
 
-      await expect(
-        coverLettersService.generateCoverLetter('user-1', {
+      const coverResult = await coverLettersService.generateCoverLetter('user-1', {
         baselineId,
         baselineVersionId,
         jobId,
         analysisId,
-        } as any),
-      ).rejects.toMatchObject({
-        response: {
-          code: 'canonical_cover_letter_evidence_insufficient',
-        },
+      } as any);
+      expect(coverResult).toMatchObject({
+        status: 'success',
+        generationStatus: 'success',
+        exportReady: true,
       });
-      expect(coverGeneratorSpy).not.toHaveBeenCalled();
-
-      const coverInput = coverGeneratorSpy.mock.calls[0]?.[0] as any;
-      if (coverInput) {
-        const coverAuthority = String(
-          (coverInput?.allowedBaselineBlocks ?? []).map((b: any) => b?.content ?? '').join('\n'),
-        );
-        expect(coverAuthority).not.toContain(RESUME_V2_AUTHORITY_IMPOSSIBLE_MARKER);
-        expect(coverAuthority).toMatch(/Alex Candidate/i);
-      }
+      expect(String((coverResult as any).content ?? '')).not.toContain(RESUME_V2_AUTHORITY_IMPOSSIBLE_MARKER);
+      expect(String((coverResult as any).content ?? '')).toMatch(/repeatable playbooks/i);
+      expect(String((coverResult as any).content ?? '')).toMatch(/support operations/i);
     } finally {
       coverGeneratorSpy.mockRestore();
       interpretSpy.mockRestore();
