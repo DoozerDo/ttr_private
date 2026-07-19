@@ -1,0 +1,18 @@
+HTTP/1.1 201 Created
+access-control-allow-credentials: true
+content-disposition: attachment; filename="cover-letter.docx"
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+Date: Sat, 18 Jul 2026 19:55:56 GMT
+Server: railway-hikari
+vary: rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch
+vary: Origin
+x-baseline-version-hash: badd828f24bc8fcf65bffdc78776522e48127db9ee29e7305879890c9d993afc
+x-compliance-audit-id: 32d694a1-667d-4fc0-89ca-6e4a01eb4660
+x-hikari-trace: sjc1.qeyn,sin1.d1nj
+x-powered-by: Express
+x-railway-edge: sjc1
+x-railway-request-id: 1InsDFS8TeGvuscxipRofQ
+x-railway-request-id: Qie3q53JQSaXnnr3VOLIQQ
+Transfer-Encoding: chunked
+Connection: keep-alive
+
