@@ -475,10 +475,6 @@ import {
   isAllowedStructuredTemplateExperienceHeader,
   type ResumeTemplateIdentityLike,
 } from './resumeTemplateAssembler';
-import {
-  buildDeterministicResumeV2FromBaseline,
-  RESUME_GENERATION_V2_FEATURE_FLAG,
-} from './resume-generation-v2';
 
 function countSentencesLoose(text: string): number {
   return String(text ?? '')
@@ -3000,7 +2996,6 @@ export class ResumeService {
       persisted: null,
     };
 	    try {
-      isResumeV2 = process.env[RESUME_GENERATION_V2_FEATURE_FLAG] === 'true';
       const shouldEnforceOneTap = options?.enforceOneTap ?? true;
       const preflightOnly = options?.preflightOnly ?? false;
 	      const baselineId = request.baselineId?.trim();
