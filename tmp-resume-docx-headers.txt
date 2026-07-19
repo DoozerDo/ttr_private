@@ -1,0 +1,18 @@
+HTTP/1.1 201 Created
+access-control-allow-credentials: true
+content-disposition: attachment; filename="resume-07-19-2026.docx"
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+Date: Sun, 19 Jul 2026 12:29:03 GMT
+Server: railway-hikari
+vary: rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch
+vary: Origin
+x-baseline-version-hash: badd828f24bc8fcf65bffdc78776522e48127db9ee29e7305879890c9d993afc
+x-compliance-audit-id: c146876e-af49-4840-b246-c0558f6e6ad7
+x-hikari-trace: sjc1.mwfn,sin1.98a6
+x-powered-by: Express
+x-railway-edge: sjc1
+x-railway-request-id: 41B_tfSaSgeYiXSUAQeqjw
+x-railway-request-id: cr8M1Op6ReOGBFM2acI7Nw
+Transfer-Encoding: chunked
+Connection: keep-alive
+

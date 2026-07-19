@@ -1,0 +1,18 @@
+HTTP/1.1 201 Created
+access-control-allow-credentials: true
+content-disposition: attachment; filename="resume-07-19-2026.pdf"
+Content-Type: application/pdf
+Date: Sun, 19 Jul 2026 12:29:02 GMT
+Server: railway-hikari
+vary: rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch
+vary: Origin
+x-baseline-version-hash: badd828f24bc8fcf65bffdc78776522e48127db9ee29e7305879890c9d993afc
+x-compliance-audit-id: c146876e-af49-4840-b246-c0558f6e6ad7
+x-hikari-trace: sjc1.qeyn,sin1.98a6
+x-powered-by: Express
+x-railway-edge: sjc1
+x-railway-request-id: HSUzSFsNR9ah-B0Imrpb1w
+x-railway-request-id: rmWXzavoRy6fno6HipRofQ
+Transfer-Encoding: chunked
+Connection: keep-alive
+
