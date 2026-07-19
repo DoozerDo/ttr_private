@@ -13,6 +13,10 @@ describe('technology-token-guard', () => {
     'self-service',
     'multi-system',
     '2018Support',
+    'alex@example.com',
+    'https://example.com/profile',
+    'www.example.com/about',
+    'example.com/profile',
   ])('marks "%s" as invalid technology token', (token) => {
     expect(isObviouslyInvalidTechnologyToken(token)).toBe(true);
   });

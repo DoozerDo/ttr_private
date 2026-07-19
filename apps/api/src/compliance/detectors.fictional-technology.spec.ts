@@ -68,6 +68,28 @@ describe('detectFictionalTechnology', () => {
     ).toBe(false);
   });
 
+  it('does not evaluate email and URL contact spans as technology claims', () => {
+    const flags = detectFictionalTechnology({
+      generatedSections: [
+        {
+          title: 'Experience',
+          content: 'alex@example.com | https://example.com/in/alex | Support operations leader.',
+          sentenceSources: [
+            {
+              text: 'alex@example.com | https://example.com/in/alex | Support operations leader.',
+              sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+            },
+          ],
+        },
+      ],
+      baselineSections: [],
+    });
+
+    expect(
+      flags.some((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY),
+    ).toBe(false);
+  });
+
   it('does not flag synthetic support-ops infrastructure tokens when present in baseline allowlist', () => {
     const flags = detectFictionalTechnology({
       baselineSections: [

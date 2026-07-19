@@ -739,6 +739,46 @@ describe('ComplianceService', () => {
       expect(result.blocked).toBe(false);
       expect(flags).not.toContain(ComplianceFlagCode.FICTIONAL_TECHNOLOGY);
     });
+
+    it('does not classify contact info or URLs as fictional technology claims', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-contact-tech',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-tech-contact',
+        baselineSections: [
+          {
+            title: 'Experience',
+            content: 'Led support operations at Example Co.',
+            sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+          },
+        ],
+        generatedSections: [
+          {
+            title: 'Experience',
+            content:
+              'Jordan Lee | jordan@example.com | https://example.com/in/jordan-lee\nLed support operations at Example Co.',
+            sectionType: BaselineSectionType.EXPERIENCE,
+            sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+            sentenceSources: [
+              {
+                text: 'Jordan Lee | jordan@example.com | https://example.com/in/jordan-lee',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+              {
+                text: 'Led support operations at Example Co.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+      });
+
+      const flags = result.complianceFlags.map((flag) => flag.code);
+
+      expect(result.blocked).toBe(false);
+      expect(flags).not.toContain(ComplianceFlagCode.FICTIONAL_TECHNOLOGY);
+    });
   });
 
   describe('resume export policy behavior', () => {

@@ -14,7 +14,10 @@ import { BaselineSectionType } from '../baseline/baseline-section.entity';
 import { buildComparableComplianceUnits } from './comparable-units';
 import { ResumeLineType } from './resume-line-classifier';
 import { isOperationalDescriptor, type EntityType } from './claim-units';
-import { isObviouslyInvalidTechnologyToken } from './technology-token-guard';
+import {
+  isObviouslyContactOrUrlToken,
+  isObviouslyInvalidTechnologyToken,
+} from './technology-token-guard';
 
 /**
  * AUTHORITY: Compliance detector rule source-of-truth.
@@ -2675,6 +2678,7 @@ function hasEquivalentCapability(
 
 function isTechnologyTokenCandidate(value: string): boolean {
   if (isObviouslyInvalidTechnologyToken(value)) return false;
+  if (isObviouslyContactOrUrlToken(value)) return false;
   const normalized = normalizeCandidate(value).toLowerCase();
   if (STRICT_TECHNOLOGY_TERMS.has(normalized)) return true;
   const cleaned = value.replace(/[^A-Za-z0-9]/g, '');
@@ -2745,6 +2749,7 @@ export function collectTechnologyClaimsFromSections(
     }
     const text = span.text;
     if (!text) continue;
+    if (isObviouslyContactOrUrlToken(text)) continue;
 
     TECHNOLOGY_TOKEN_PATTERN.lastIndex = 0;
     let match: RegExpExecArray | null;

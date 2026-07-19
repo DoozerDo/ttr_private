@@ -2,6 +2,9 @@ const PHONE_NUMBER_PATTERN = /^(?:\+?1[\s.-]?)?(?:\d{3}[\s.-]?){2}\d{4}$/;
 const YEAR_PATTERN = /^(?:19|20)\d{2}$/;
 const PURE_NUMERIC_PATTERN = /^\d+$/;
 const YEAR_WORD_MERGE_PATTERN = /^(?:19|20)\d{2}[a-z]+$/i;
+const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+const URL_PATTERN = /^(?:https?:\/\/|mailto:|www\.)/i;
+const HOSTNAME_PATTERN = /^(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s]*)?$/i;
 
 const INVALID_HYPHENATED_DESCRIPTORS = new Set([
   'client-impacting',
@@ -12,10 +15,24 @@ const INVALID_HYPHENATED_DESCRIPTORS = new Set([
 
 const INVALID_HYPHENATED_SUFFIX_PATTERN = /^(?:client|billing|business|revenue|customer|operations)-impacting$/i;
 
+export function isObviouslyContactOrUrlToken(value: string): boolean {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return false;
+
+  if (EMAIL_PATTERN.test(normalized)) return true;
+  if (URL_PATTERN.test(normalized)) return true;
+  if (normalized.includes('@')) return true;
+  if (HOSTNAME_PATTERN.test(normalized) && !/[A-Z]/.test(normalized)) return true;
+
+  return false;
+}
+
 export function isObviouslyInvalidTechnologyToken(value: string): boolean {
   const normalized = String(value ?? '').trim();
   if (!normalized) return true;
   const lower = normalized.toLowerCase();
+
+  if (isObviouslyContactOrUrlToken(normalized)) return true;
 
   if (PHONE_NUMBER_PATTERN.test(normalized)) return true;
   if (YEAR_PATTERN.test(normalized)) return true;
