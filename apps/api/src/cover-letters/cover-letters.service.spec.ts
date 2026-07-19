@@ -1331,6 +1331,7 @@ describe('CoverLettersService contract', () => {
     }
     expect(studioArtifactsService.recordCoverLetterSuccess).toHaveBeenCalledWith(
       expect.objectContaining({
+        analysisId: request.analysisId,
         content: expect.stringMatching(/\S/),
         responseBody: expect.objectContaining({
           content: expect.any(String),
@@ -1583,32 +1584,23 @@ describe('CoverLettersService contract', () => {
     expect(documentXml).toContain('Example Co');
   });
 
-  it('generates a cover letter when analysisId is omitted but a recent assessment exists', async () => {
+  it('requires analysisId for cover-letter generation and does not resolve a fallback assessment', async () => {
     const { service } = buildService();
-    const originalSections = baseline.sections;
-    const originalParsed = baseline.parsedRecords;
 
-    baseline.sections = createCanonicalCoverLetterSections();
-    (baseline as any).parsedRecords = [createCanonicalPersistedResumeV2Record()];
-
-    try {
-      await expect(
-        (service as any).buildCoverLetterDraft('user-1', {
-          baselineId: 'baseline-1',
-          baselineVersionId: 'baseline-version-1',
-          jobId: 'job-1',
-          analysisId: null,
-          oneTap: true,
-        } as any),
-      ).resolves.toMatchObject({
-        generationAuthority: 'canonical',
-        baselineVerified: true,
-        baselineFileUsable: true,
-      });
-    } finally {
-      baseline.sections = originalSections;
-      (baseline as any).parsedRecords = originalParsed;
-    }
+    await expect(
+      (service as any).buildCoverLetterDraft('user-1', {
+        baselineId: 'baseline-1',
+        baselineVersionId: 'baseline-version-1',
+        jobId: 'job-1',
+        analysisId: '',
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: 'analysis_not_found',
+        }),
+      }),
+    });
   });
 
   it('reuses a completed generation request instead of creating a duplicate artifact', async () => {

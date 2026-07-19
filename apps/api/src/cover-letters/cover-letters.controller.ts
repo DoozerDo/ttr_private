@@ -61,6 +61,28 @@ export class CoverLettersController {
   ): Promise<GenerationOutcome<CoverLetterGenerationResponse> & CoverLetterGenerationResponse> {
     const userId = this.requireUserId(request);
 
+    const analysisId = typeof body.analysisId === 'string' ? body.analysisId.trim() : '';
+    if (!analysisId) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'analysis_not_found',
+          message: 'analysisId could not be resolved for generation.',
+          details: {
+            expected: {
+              jobId: body.jobId ?? null,
+              baselineId: body.baselineId ?? null,
+              baselineVersionId: body.baselineVersionId ?? null,
+            },
+            received: {
+              jobId: body.jobId ?? null,
+              baselineId: body.baselineId ?? null,
+              baselineVersionId: body.baselineVersionId ?? null,
+            },
+          },
+        },
+      });
+    }
+
     // eslint-disable-next-line no-console
     console.log('[COVER_LETTER_GENERATE_START]', {
       baselineId: body.baselineId ?? null,
