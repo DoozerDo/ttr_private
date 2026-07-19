@@ -10,14 +10,20 @@ function buildInput(options: {
 }) {
   const resumePreview = options.resumePreview ?? null;
   const coverPreview = options.coverPreview ?? null;
+  const resumeQualityGateStatus = options.resumeQualityGateStatus ?? "pass";
+  const coverQualityGateStatus = options.coverQualityGateStatus ?? "pass";
+  const resumeGenerationState = resumeQualityGateStatus === "pass" ? "generated_usable" : "generation_failed";
+  const coverGenerationState = coverQualityGateStatus === "pass" ? "generated_usable" : "generation_failed";
   return {
     resumeResponse: {
       resumeResult: {
         artifactType: "resume",
-        generationState: "generated_usable",
-        qualityStatus: options.resumeQualityGateStatus === "pass" ? "pass" : "failed",
-        qualityGate: { status: options.resumeQualityGateStatus ?? "pass", reasons: [] },
-        preview: resumePreview,
+        status: "success",
+        generationStatus: "success",
+        generationState: resumeGenerationState,
+        qualityStatus: resumeQualityGateStatus === "pass" ? "pass" : "failed",
+        qualityGate: { status: resumeQualityGateStatus, reasons: [] },
+        preview: resumePreview ? { resume: resumePreview } : null,
         correctionReasons: [],
         exportReady: true,
         exports: { docx: true, pdf: true },
@@ -26,10 +32,12 @@ function buildInput(options: {
     coverLetterResponse: {
       coverLetterResult: {
         artifactType: "cover_letter",
-        generationState: "generated_usable",
-        qualityStatus: options.coverQualityGateStatus === "pass" ? "pass" : "failed",
-        qualityGate: { status: options.coverQualityGateStatus ?? "pass", reasons: [] },
-        preview: coverPreview,
+        status: "success",
+        generationStatus: "success",
+        generationState: coverGenerationState,
+        qualityStatus: coverQualityGateStatus === "pass" ? "pass" : "failed",
+        qualityGate: { status: coverQualityGateStatus, reasons: [] },
+        preview: coverPreview ? { coverLetter: coverPreview } : null,
         correctionReasons: [],
         exportReady: true,
         exports: { docx: true, pdf: true },
@@ -97,4 +105,3 @@ describe("StudioArtifactDisplayContract", () => {
     expect(contract.displayContract.shouldAutoGenerateStart).toBe(true);
   });
 });
-

@@ -1,7 +1,6 @@
 import type { ResumeModel } from "@/lib/resumeModel";
-import { estimateResumeModelBodyLength, readResumeModel } from "@/lib/resumePreviewContract";
+import { estimateResumeModelBodyLength } from "@/lib/resumePreviewContract";
 import {
-  buildCoverLetterParagraphs,
   presentCoverLetterGeneration,
   presentResumeGeneration,
 } from "@/src/lib/studio/helpers";
@@ -70,205 +69,68 @@ function toRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
 
-function normalizeResumeResponse(payload: unknown): unknown {
-  const raw = toRecord(payload);
-  if (!raw) return payload;
-
-  const inner = toRecord(raw.payload);
-  const candidate = inner ?? raw;
-
-  // Intentionally do not upgrade legacy `candidate.resume` into `candidate.preview.resume` here.
-  // Studio must render resume content only from the canonical `resumeResult.preview` contract.
-  return candidate;
-}
-
 function readResumeResultPreviewModel(value: unknown): ResumeModel | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
-  const wrappedResume = record.resume;
-  if (wrappedResume && typeof wrappedResume === "object") return wrappedResume as ResumeModel;
-  return readResumeModel(value);
+  const preview = toRecord(record.preview);
+  if (!preview) return null;
+  const wrappedResume = toRecord(preview.resume);
+  if (wrappedResume) return wrappedResume as ResumeModel;
+  return preview as ResumeModel;
 }
 
-function normalizeCoverLetterResponse(payload: unknown): unknown {
-  const raw = toRecord(payload);
-  if (!raw) return payload;
+function readCoverLetterResultParagraphs(value: unknown): string[] {
+  if (!value || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  const preview = toRecord(record.preview);
+  if (!preview) return [];
+  const coverLetter = toRecord(preview.coverLetter) ?? preview;
+  const paragraphs = coverLetter.paragraphs;
+  return Array.isArray(paragraphs) ? paragraphs.map((p) => String(p ?? "")).filter(Boolean) : [];
+}
 
-  const inner = toRecord(raw.payload);
-  const candidate = inner ?? raw;
-
-  const preview = toRecord(candidate.preview);
-  const coverFromPreview = preview ? toRecord(preview.coverLetter) : null;
-  if (coverFromPreview) return candidate;
-
-  const coverFromPayload = toRecord(candidate.coverLetter);
-  if (!coverFromPayload) return candidate;
-
-  return {
-    ...candidate,
-    preview: { ...(preview ?? {}), coverLetter: coverFromPayload },
-  };
+function isMinimalResumeArtifact(result: unknown): boolean {
+  if (!result || typeof result !== "object") return false;
+  const record = result as Record<string, unknown>;
+  const internal = toRecord(record.internal);
+  const resumeGenerationMode = String(internal?.resumeGenerationMode ?? "").trim().toLowerCase();
+  const auditId = String(record.auditId ?? record.audit_id ?? "").trim().toLowerCase();
+  return Boolean(
+    internal?.minimalFallback === true ||
+      internal?.resumeFailSafeMinimalUsed === true ||
+      resumeGenerationMode === "top_level_fail_safe_minimal" ||
+      auditId.startsWith("minimal:"),
+  );
 }
 
 function normalizeHydratedResult<TPreview>(
   artifactType: "resume" | "cover_letter",
   payload: unknown,
-  preview: TPreview | null,
 ): ArtifactGenerationResult<TPreview> | null {
   const record = toRecord(payload);
   if (!record) return null;
 
   const nestedKey = artifactType === "resume" ? "resumeResult" : "coverLetterResult";
   const nestedResult = toRecord(record[nestedKey]);
-  const candidate = nestedResult ?? record;
+  const candidate = nestedResult ?? null;
+  if (!candidate) return null;
 
   const generationState = String(candidate.generationState ?? "").trim();
   const qualityStatus = String(candidate.qualityStatus ?? "").trim();
-  if (generationState && qualityStatus) {
-    return candidate as ArtifactGenerationResult<TPreview>;
-  }
+  if (!generationState || !qualityStatus) return null;
 
-  const status = String(candidate.status ?? "").trim().toLowerCase();
-  const generationStatus = String(candidate.generationStatus ?? "").trim().toLowerCase();
-  const exportReady = candidate.exportReady === true;
-  if (status !== "success" || generationStatus !== "success" || !exportReady || !preview) {
-    return nestedResult ? (nestedResult as ArtifactGenerationResult<TPreview>) : null;
-  }
-
-  return {
-    ...(candidate as Record<string, unknown>),
-    artifactType,
-    generationState: "generated_usable",
-    qualityStatus: "pass",
-    preview,
-    correctionReasons: Array.isArray(candidate.correctionReasons) ? candidate.correctionReasons : [],
-    exportReady: true,
-    exports: { docx: true, pdf: true },
-    actions: {
-      canEdit: true,
-      canRegenerate: true,
-      canExport: true,
-      canSaveToOpportunities: true,
-    },
-  } as ArtifactGenerationResult<TPreview>;
-}
-
-function hasNonEmptyText(value: unknown): boolean {
-  return typeof value === "string" && value.trim().length > 0;
-}
-
-function hasNonEmptySectionText(sections: unknown): boolean {
-  if (!Array.isArray(sections)) return false;
-  return sections.some((section) => {
-    if (!section || typeof section !== "object") return false;
-    const record = section as Record<string, unknown>;
-    return hasNonEmptyText(record.text) || hasNonEmptyText(record.content);
-  });
-}
-
-function hasRenderableResumeContent(payload: unknown, model: ResumeModel | null): boolean {
-  const record = toRecord(payload);
-  const resumeResult = record ? toRecord(record.resumeResult) : null;
-  const internal = record ? toRecord(record.internal) : null;
-  const resumeInternal = resumeResult ? toRecord(resumeResult.internal) : null;
-  const minimalIndicators = [
-    internal?.minimalFallback,
-    internal?.resumeFailSafeMinimalUsed,
-    internal?.resumeGenerationMode,
-    resumeInternal?.minimalFallback,
-    resumeInternal?.resumeFailSafeMinimalUsed,
-    resumeInternal?.resumeGenerationMode,
-    record?.auditId,
-    record?.audit_id,
-    resumeResult?.auditId,
-    resumeResult?.audit_id,
-  ];
-  const isMinimalFallback =
-    minimalIndicators.some((value) => value === true || String(value ?? '').toLowerCase() === 'true') ||
-    String(internal?.resumeGenerationMode ?? resumeInternal?.resumeGenerationMode ?? '').trim() === 'top_level_fail_safe_minimal' ||
-    String(record?.auditId ?? record?.audit_id ?? resumeResult?.auditId ?? resumeResult?.audit_id ?? '').startsWith('minimal:');
-
-  if (isMinimalFallback) return false;
-  return Boolean(model && estimateResumeModelBodyLength(model) > 0);
-}
-
-function hasRenderableCoverLetterContent(payload: unknown, paragraphs: string[]): boolean {
-  if (paragraphs.length > 0) return true;
-  const record = toRecord(payload);
-  if (!record) return false;
-  if (hasNonEmptyText(record.content)) return true;
-  if (hasNonEmptySectionText(record.sections)) return true;
-  const preview = toRecord(record.preview);
-  const coverPreview = preview ? toRecord(preview.coverLetter) : null;
-  if (coverPreview) return true;
-  const nestedCover = toRecord(record.coverLetter);
-  if (nestedCover) return true;
-  return false;
-}
-
-function legacyArtifactToReadinessArtifact(payload: unknown): ReadinessArtifactLike | null {
-  const record = toRecord(payload);
-  if (!record) return null;
-
-  // Studio legacy responses sometimes nest under `payload`.
-  const inner = toRecord(record.payload);
-  const candidate = inner ?? record;
-
-  const generationStatus = String(candidate.generationStatus ?? candidate.status ?? "").toLowerCase();
-  const exportReady = candidate.exportReady === true;
-
-  // Only upgrade legacy payloads that clearly indicate success + export readiness.
-  // This is intentionally strict: missing/blocked artifacts must not become exportable.
-  if (!(generationStatus === "success" && exportReady)) return null;
-
-  return {
-    generationState: "generated_usable",
-    exportReady: true,
-    qualityGate: { status: "pass", reasons: [] },
-  };
+  return candidate as ArtifactGenerationResult<TPreview>;
 }
 
 export function buildStudioArtifactContract(input: StudioArtifactContractInput) {
-  const normalizedResumeResponse = normalizeResumeResponse(input.resumeResponse);
-  const normalizedCoverLetterResponse = normalizeCoverLetterResponse(input.coverLetterResponse);
-
-  const resumePreviewModel = readResumeResultPreviewModel(normalizedResumeResponse);
-  const resumeResult =
-    normalizeHydratedResult<ResumeModel>("resume", normalizedResumeResponse, resumePreviewModel) ??
-    (toRecord(normalizedResumeResponse)?.resumeResult as ArtifactGenerationResult<unknown> | undefined) ??
-    null;
-
-  const resumePresenter = presentResumeGeneration(
-    resumePreviewModel
-      ? {
-          ...(toRecord(normalizedResumeResponse) ?? {}),
-          status: "success",
-          generationStatus: "success",
-          exportReady: resumeResult?.exportReady === true,
-          exports: resumeResult?.exports ?? null,
-          preview: { resume: resumePreviewModel },
-        }
-      : normalizedResumeResponse,
-  );
-  const coverPresenter = presentCoverLetterGeneration(normalizedCoverLetterResponse);
+  const resumeResult = normalizeHydratedResult<ResumeModel>("resume", input.resumeResponse);
+  const coverLetterResult = normalizeHydratedResult<{ paragraphs: string[] }>("cover_letter", input.coverLetterResponse);
+  const resumePreviewModel = readResumeResultPreviewModel(resumeResult);
+  const coverParagraphs = readCoverLetterResultParagraphs(coverLetterResult);
+  const resumePresenter = presentResumeGeneration(resumeResult ?? null);
+  const coverPresenter = presentCoverLetterGeneration(coverLetterResult ?? null);
 
   const resumeModel: ResumeModel | null = resumePreviewModel;
-  const coverParagraphPreview = buildCoverLetterParagraphs(normalizedCoverLetterResponse);
-  const coverLetterResult =
-    normalizeHydratedResult<{ paragraphs: string[] }>(
-      "cover_letter",
-      normalizedCoverLetterResponse,
-      coverParagraphPreview.length ? { paragraphs: coverParagraphPreview } : null,
-    ) ??
-    (toRecord(normalizedCoverLetterResponse)?.coverLetterResult as ArtifactGenerationResult<unknown> | undefined) ??
-    null;
-  const coverParagraphs = (() => {
-    const previewRecord = coverLetterResult?.preview && typeof coverLetterResult.preview === "object"
-      ? (coverLetterResult.preview as Record<string, unknown>)
-      : null;
-    const paragraphs = previewRecord ? previewRecord.paragraphs : null;
-    return Array.isArray(paragraphs) ? paragraphs.map((p) => String(p ?? "")).filter(Boolean) : coverParagraphPreview;
-  })();
   const coverLetterModel: StudioCoverLetterModel | null = coverParagraphs.length
     ? { paragraphs: coverParagraphs }
     : null;
@@ -290,10 +152,8 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
   });
   const hasReusableArtifacts = resumeReusableDecision.reusable || coverReusableDecision.reusable;
 
-  const resumeReadinessArtifact =
-    (resumeResult ?? legacyArtifactToReadinessArtifact(normalizedResumeResponse)) as ReadinessArtifactLike | null;
-  const coverReadinessArtifact =
-    (coverLetterResult ?? legacyArtifactToReadinessArtifact(normalizedCoverLetterResponse)) as ReadinessArtifactLike | null;
+  const resumeReadinessArtifact = (resumeResult ?? null) as ReadinessArtifactLike | null;
+  const coverReadinessArtifact = (coverLetterResult ?? null) as ReadinessArtifactLike | null;
 
   const canonicalReadiness = resolveDocumentReadinessState({
     resumeArtifact: (resumeReadinessArtifact ?? null) as any,
@@ -304,18 +164,19 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
     generationState: null,
   });
 
-  const hasResumeArtifact = hasRenderableResumeContent(normalizedResumeResponse, resumeModel);
-  const hasCoverLetterArtifact = hasRenderableCoverLetterContent(normalizedCoverLetterResponse, coverParagraphs);
+  const hasResumeArtifact = Boolean(resumeModel && estimateResumeModelBodyLength(resumeModel) > 0);
+  const safeHasResumeArtifact = hasResumeArtifact && !isMinimalResumeArtifact(resumeResult);
+  const hasCoverLetterArtifact = coverParagraphs.length > 0;
 
   const resumeGenState = String((resumeResult as any)?.generationState ?? "").trim().toLowerCase();
   const coverGenState = String((coverLetterResult as any)?.generationState ?? "").trim().toLowerCase();
   const generationRunning = resumeGenState === "generating" || coverGenState === "generating";
   const generationFailed = isFailedSingleArtifact(resumeReadinessArtifact) || isFailedSingleArtifact(coverReadinessArtifact);
   const generationComplete = hasResumeArtifact && hasCoverLetterArtifact;
-  const shouldAutoGenerateStart = !generationRunning && (!hasResumeArtifact || !hasCoverLetterArtifact);
+  const shouldAutoGenerateStart = !generationRunning && (!safeHasResumeArtifact || !hasCoverLetterArtifact);
 
   const displayContract: StudioArtifactDisplayContract = {
-    resumePreviewRenderable: hasResumeArtifact,
+    resumePreviewRenderable: safeHasResumeArtifact,
     coverLetterPreviewRenderable: hasCoverLetterArtifact,
     generationRunning,
     generationFailed,
@@ -325,13 +186,13 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
 
   const hasUsableArtifacts =
     hasReusableArtifacts ||
-    (Boolean(resumeModel) && resumeQuality.exportable) ||
+    (Boolean(resumeModel) && resumeQuality.exportable && !isMinimalResumeArtifact(resumeResult)) ||
     (Boolean(coverLetterModel) && coverLetterQuality.exportable) ||
-    hasResumeArtifact ||
+    safeHasResumeArtifact ||
     hasCoverLetterArtifact;
 
   const resumeExportAvailable =
-    input.canExportDocuments && input.isPro && isExportableSingleArtifact(resumeReadinessArtifact);
+    input.canExportDocuments && input.isPro && isExportableSingleArtifact(resumeReadinessArtifact) && !isMinimalResumeArtifact(resumeResult);
   const coverLetterExportAvailable =
     input.canExportDocuments && input.isPro && isExportableSingleArtifact(coverReadinessArtifact);
 
@@ -365,7 +226,7 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
     canonicalReadinessState: canonicalReadiness.state,
     canonicalReadinessReasons: canonicalReadiness.reasons,
     impossibleStatePrevented: canonicalReadiness.impossibleStatePrevented,
-    hasResumeArtifact,
+    hasResumeArtifact: safeHasResumeArtifact,
     hasCoverLetterArtifact,
     hasUsableArtifacts,
     hasReusableArtifacts,
@@ -386,8 +247,8 @@ export function buildStudioArtifactContract(input: StudioArtifactContractInput) 
     resumeExportAvailable,
     coverLetterExportAvailable,
     normalized: {
-      resumeResponse: normalizedResumeResponse,
-      coverLetterResponse: normalizedCoverLetterResponse,
+      resumeResponse: input.resumeResponse,
+      coverLetterResponse: input.coverLetterResponse,
     },
     presenters: {
       resume: resumePresenter,

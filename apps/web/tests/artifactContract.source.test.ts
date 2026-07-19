@@ -3,6 +3,47 @@ import { resolveDocumentReadinessState } from "@shared/documentReadinessState";
 import { buildStudioArtifactContract } from "@/src/lib/studio/artifactContract";
 import { getArtifactExistence } from "@/src/lib/studio/artifactAuthority";
 
+function canonicalResumeResult() {
+  return {
+    artifactType: "resume",
+    status: "success",
+    generationStatus: "success",
+    generationState: "generated_usable",
+    qualityStatus: "pass",
+    qualityGate: { status: "pass", reasons: [] },
+    preview: {
+      resume: {
+        heading: { name: "Alex" },
+        summary: "General ops leader focused on reliability.",
+        experience: [{ company: "Acme", roleTitle: "Lead", bullets: ["Built systems."] }],
+        education: [],
+        competencies: [],
+        coreCompetencies: [],
+      },
+    },
+    correctionReasons: [],
+    exportReady: true,
+    exports: { docx: true, pdf: true },
+    actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+  } as const;
+}
+
+function canonicalCoverLetterResult() {
+  return {
+    artifactType: "cover_letter",
+    status: "success",
+    generationStatus: "success",
+    generationState: "generated_usable",
+    qualityStatus: "pass",
+    qualityGate: { status: "pass", reasons: [] },
+    preview: { coverLetter: { paragraphs: ["Hello", "I am interested."] } },
+    correctionReasons: [],
+    exportReady: true,
+    exports: { docx: true, pdf: true },
+    actions: { canEdit: true, canRegenerate: true, canExport: true, canSaveToOpportunities: false },
+  } as const;
+}
+
 describe("DocumentReadinessState (Studio canonical)", () => {
   const artifact = (overrides: any) => ({
     generationState: "generated_usable",
@@ -44,6 +85,106 @@ describe("DocumentReadinessState (Studio canonical)", () => {
 });
 
 describe("Studio artifact contract resume source", () => {
+  it("accepts a valid canonical resumeResult as ready output", () => {
+    const contract = buildStudioArtifactContract({
+      resumeResponse: { resumeResult: canonicalResumeResult() },
+      coverLetterResponse: { coverLetterResult: canonicalCoverLetterResult() },
+      canExportDocuments: true,
+      isPro: true,
+    });
+
+    expect(contract.results.resume?.generationState).toBe("generated_usable");
+    expect(contract.results.resume?.qualityStatus).toBe("pass");
+    expect(contract.displayContract.resumePreviewRenderable).toBe(true);
+    expect(contract.resumeExportAvailable).toBe(true);
+    expect(contract.presenters.resume.status).toBe("success");
+  });
+
+  it("accepts a valid canonical coverLetterResult as ready output", () => {
+    const contract = buildStudioArtifactContract({
+      resumeResponse: { resumeResult: canonicalResumeResult() },
+      coverLetterResponse: { coverLetterResult: canonicalCoverLetterResult() },
+      canExportDocuments: true,
+      isPro: true,
+    });
+
+    expect(contract.results.coverLetter?.generationState).toBe("generated_usable");
+    expect(contract.results.coverLetter?.qualityStatus).toBe("pass");
+    expect(contract.displayContract.coverLetterPreviewRenderable).toBe(true);
+    expect(contract.coverLetterExportAvailable).toBe(true);
+    expect(contract.presenters.coverLetter.status).toBe("success");
+  });
+
+  it("does not create readiness from raw generationStatus/exportReady fields without a canonical result", () => {
+    const contract = buildStudioArtifactContract({
+      resumeResponse: {
+        generationStatus: "success",
+        exportReady: true,
+        preview: { resume: { summary: "legacy raw data" } },
+      },
+      coverLetterResponse: {
+        generationStatus: "success",
+        exportReady: true,
+        preview: { coverLetter: { paragraphs: ["legacy raw data"] } },
+      },
+      canExportDocuments: true,
+      isPro: true,
+    });
+
+    expect(contract.results.resume).toBeNull();
+    expect(contract.results.coverLetter).toBeNull();
+    expect(contract.displayContract.resumePreviewRenderable).toBe(false);
+    expect(contract.displayContract.coverLetterPreviewRenderable).toBe(false);
+    expect(contract.resumeExportAvailable).toBe(false);
+    expect(contract.coverLetterExportAvailable).toBe(false);
+    expect(contract.presenters.resume.status).not.toBe("success");
+    expect(contract.presenters.coverLetter.status).not.toBe("success");
+  });
+
+  it("does not create readiness from nested payload.payload legacy data", () => {
+    const contract = buildStudioArtifactContract({
+      resumeResponse: {
+        payload: {
+          payload: {
+            resumeResult: canonicalResumeResult(),
+          },
+        },
+      },
+      coverLetterResponse: {
+        payload: {
+          payload: {
+            coverLetterResult: canonicalCoverLetterResult(),
+          },
+        },
+      },
+      canExportDocuments: true,
+      isPro: true,
+    });
+
+    expect(contract.results.resume).toBeNull();
+    expect(contract.results.coverLetter).toBeNull();
+    expect(contract.displayContract.resumePreviewRenderable).toBe(false);
+    expect(contract.displayContract.coverLetterPreviewRenderable).toBe(false);
+    expect(contract.resumeExportAvailable).toBe(false);
+    expect(contract.coverLetterExportAvailable).toBe(false);
+  });
+
+  it("hydrates canonical Studio artifacts successfully", () => {
+    const contract = buildStudioArtifactContract({
+      resumeResponse: { resumeResult: canonicalResumeResult() },
+      coverLetterResponse: { coverLetterResult: canonicalCoverLetterResult() },
+      canExportDocuments: true,
+      isPro: true,
+    });
+
+    expect(contract.hasResumeArtifact).toBe(true);
+    expect(contract.hasCoverLetterArtifact).toBe(true);
+    expect(contract.displayContract.resumePreviewRenderable).toBe(true);
+    expect(contract.displayContract.coverLetterPreviewRenderable).toBe(true);
+    expect(contract.displayContract.generationComplete).toBe(true);
+    expect(contract.displayContract.shouldAutoGenerateStart).toBe(false);
+  });
+
   it("prefers canonical resumeResult.preview and ignores persisted resume payload fields", () => {
     const contract = buildStudioArtifactContract({
       resumeResponse: {
@@ -53,13 +194,17 @@ describe("Studio artifact contract resume source", () => {
         preview: { resume: { summary: "Billing operations leader..." } },
         resumeResult: {
           artifactType: "resume",
+          status: "success",
+          generationStatus: "success",
           generationState: "generated_usable",
           qualityStatus: "pass",
           preview: {
-            heading: { name: "Alex" },
-            summary: "General ops leader focused on reliability.",
-            experience: [],
-            sections: [],
+            resume: {
+              heading: { name: "Alex" },
+              summary: "General ops leader focused on reliability.",
+              experience: [],
+              sections: [],
+            },
           },
           correctionReasons: [],
           exportReady: true,
@@ -84,6 +229,8 @@ describe("Studio artifact contract resume source", () => {
         preview: { resume: { summary: "Billing operations leader..." } },
         resumeResult: {
           artifactType: "resume",
+          status: "success",
+          generationStatus: "success",
           generationState: "blocked",
           qualityStatus: "failed",
           preview: null,
@@ -121,12 +268,16 @@ describe("Studio artifact contract resume source", () => {
         },
         resumeResult: {
           artifactType: "resume",
+          status: "success",
+          generationStatus: "success",
           generationState: "generated_unusable",
           qualityStatus: "failed",
           preview: {
-            heading: { name: "Alex" },
-            summary: "Fallback resume should not count as renderable.",
-            experience: [{ company: "Example", roleTitle: "Role", bullets: ["x"] }],
+            resume: {
+              heading: { name: "Alex" },
+              summary: "Fallback resume should not count as renderable.",
+              experience: [{ company: "Example", roleTitle: "Role", bullets: ["x"] }],
+            },
           },
           correctionReasons: [],
           exportReady: false,
@@ -145,9 +296,9 @@ describe("Studio artifact contract resume source", () => {
       isPro: true,
     });
 
-    expect(contract.resumePreviewRenderable).toBe(false);
+    expect(contract.displayContract.resumePreviewRenderable).toBe(false);
     expect(contract.hasResumeArtifact).toBe(false);
-    expect(contract.shouldAutoGenerateStart).toBe(true);
+    expect(contract.displayContract.shouldAutoGenerateStart).toBe(true);
   });
 
   it("does not treat minimal resume artifacts as persisted output readiness", () => {
