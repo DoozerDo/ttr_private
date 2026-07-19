@@ -89,7 +89,6 @@ import {
   type UserSafeDisplayPayload,
 } from '../documents/normalized-document.models';
 import {
-  buildPersistedFitAssessmentReadModelQuery,
   loadPersistedFitAssessmentReadModel,
   validateAnalysisContext,
 } from '../common/analysis-context-binding';
@@ -1401,30 +1400,6 @@ export class CoverLettersService {
     }
     if (!baselineVersion.hash) {
       throw new BadRequestException('Baseline version hash missing');
-    }
-
-    if (!analysisId) {
-      const assessmentForBaselineVersion = await buildPersistedFitAssessmentReadModelQuery(
-        this.fitAssessmentRepository,
-        '',
-        userId,
-        job.id,
-        baseline.id,
-      )
-        .andWhere('assessment.baselineVersion = :baselineVersion', {
-          baselineVersion: baselineVersion.versionNumber ?? null,
-        })
-        .getOne();
-      const fallbackAssessment =
-        assessmentForBaselineVersion ??
-        (await loadPersistedFitAssessmentReadModel(
-          this.fitAssessmentRepository,
-          '',
-          userId,
-          job.id,
-          baseline.id,
-        ));
-      analysisId = fallbackAssessment?.id ?? '';
     }
 
     if (!analysisId) {

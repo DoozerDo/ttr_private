@@ -709,6 +709,25 @@ describe('CoverLettersService contract', () => {
     }
   });
 
+  it('requires analysisId for cover-letter generation and does not resolve a fallback assessment', async () => {
+    const { service } = buildService();
+
+    await expect(
+      (service as any).buildCoverLetterDraft('user-1', {
+        baselineId: 'baseline-1',
+        baselineVersionId: 'baseline-version-1',
+        jobId: 'job-1',
+        analysisId: '',
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: 'analysis_not_found',
+        }),
+      }),
+    });
+  });
+
   it('fails explicitly when verified canonical sections do not contain enough evidence', async () => {
     const { service } = buildService();
     const originalSections = baseline.sections;
