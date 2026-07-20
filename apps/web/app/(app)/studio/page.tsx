@@ -12734,8 +12734,12 @@ export default function StudioPage() {
     autoGenerationWasReadyRef.current = isReadyNow;
 
     // Single source of truth: the contract (READY) + required IDs.
+    // A completed persisted pair is authoritative and must suppress auto-start entirely.
     // Latches are used only to prevent duplicate runs after a confirmed success for the same signature.
-    let contractShouldStart = Boolean(needsAutoGeneration) && hasRequiredIdsNow;
+    let contractShouldStart =
+      !hasCompletedPersistedArtifactPair &&
+      Boolean(needsAutoGeneration) &&
+      hasRequiredIdsNow;
     if (effectiveGenerationState === "generated_unusable") {
       const retryCount = retryCountRef.current[signature] ?? 0;
       if (retryCount >= MAX_AUTO_RETRIES) {
@@ -12746,7 +12750,8 @@ export default function StudioPage() {
           });
         }
       }
-      contractShouldStart = hasRequiredIdsNow;
+      contractShouldStart =
+        !hasCompletedPersistedArtifactPair && hasRequiredIdsNow;
     }
     const ready = contractShouldStart;
 
@@ -12766,7 +12771,8 @@ export default function StudioPage() {
 
     // Treat "artifacts exist" as "usable artifacts exist". Unusable outputs should not suppress
     // regeneration (manual or auto) and should not trip the artifacts_already_generated lane.
-    const artifactsExist = Boolean(hasUsableResume && hasUsableCoverLetter);
+    const artifactsExist =
+      hasCompletedPersistedArtifactPair || Boolean(hasUsableResume && hasUsableCoverLetter);
     const generatingNow =
       autoGenerationInFlight ||
       resumeGenerating ||
@@ -13081,6 +13087,7 @@ export default function StudioPage() {
     effectiveBaselineVersionId,
     effectiveJobId,
     effectiveRequestedAnalysisId,
+    hasCompletedPersistedArtifactPair,
   ]);
 
   useEffect(() => {

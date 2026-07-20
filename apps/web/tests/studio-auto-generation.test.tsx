@@ -1742,6 +1742,284 @@ describe("Studio auto-generation", () => {
     ).toBe(true);
   });
 
+  it("keeps the live auto-generation effect from reaching START_CALLED when a completed persisted pair hydrates after an initially unresolved render", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+
+    const logs: string[] = [];
+    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.map((value) => (typeof value === "string" ? value : String(value))).join(" "));
+    });
+
+    const artifactsDeferred = (() => {
+      let resolve!: (value: unknown) => void;
+      const promise = new Promise((res) => {
+        resolve = res as (value: unknown) => void;
+      });
+      return { promise, resolve };
+    })();
+    let artifactsResolved = false;
+
+    const completedArtifactsPayload = {
+      status: "completed",
+      baselineId: "base-1",
+      jobId: "job-1",
+      baselineVersionId: "base-version-1",
+      assessmentScore: 84,
+      generationContractVersion: "studio-artifacts-v1",
+      resumeResult: {
+        artifactType: "resume",
+        status: "success",
+        generationStatus: "success",
+        generationState: "generated_usable",
+        qualityStatus: "pass",
+        qualityGate: { status: "pass", reasons: [] },
+        exportReady: true,
+        exports: { docx: true, pdf: true },
+        preview: {
+          resume: {
+            heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+            summary: "Support leader focused on scalable operations.",
+            experience: [
+              {
+                company: "Cat Daddy Games",
+                roleTitle: "Senior Producer",
+                bullets: ["Led support operations programs."],
+              },
+            ],
+          },
+        },
+        actions: {
+          canEdit: true,
+          canRegenerate: true,
+          canExport: true,
+          canSaveToOpportunities: true,
+        },
+      },
+      coverLetterResult: {
+        artifactType: "cover_letter",
+        status: "success",
+        generationStatus: "success",
+        generationState: "generated_usable",
+        qualityStatus: "pass",
+        qualityGate: { status: "pass", reasons: [] },
+        exportReady: true,
+        exports: { docx: true, pdf: true },
+        preview: {
+          coverLetter: {
+            paragraphs: [
+              "Dear Hiring Team,",
+              "I bring verified leadership and operational experience aligned to this role.",
+            ],
+          },
+        },
+        actions: {
+          canEdit: false,
+          canRegenerate: true,
+          canExport: true,
+          canSaveToOpportunities: false,
+        },
+      },
+      resume: {
+        status: "completed",
+        artifactId: "resume-current-1",
+        usableCurrent: true,
+        inputsHash: true,
+        responseBody: {
+          status: "success",
+          generationStatus: "success",
+          generationState: "generated_usable",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          qualityStatus: "pass",
+          qualityGate: { status: "pass", reasons: [] },
+          preview: {
+            resume: {
+              heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+              summary: "Support leader focused on scalable operations.",
+              experience: [
+                {
+                  company: "Cat Daddy Games",
+                  roleTitle: "Senior Producer",
+                  bullets: ["Led support operations programs."],
+                },
+              ],
+            },
+          },
+          resumeResult: {
+            artifactType: "resume",
+            status: "success",
+            generationStatus: "success",
+            generationState: "generated_usable",
+            qualityStatus: "pass",
+            qualityGate: { status: "pass", reasons: [] },
+            preview: {
+              resume: {
+                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                summary: "Support leader focused on scalable operations.",
+                experience: [
+                  {
+                    company: "Cat Daddy Games",
+                    roleTitle: "Senior Producer",
+                    bullets: ["Led support operations programs."],
+                  },
+                ],
+              },
+            },
+            correctionReasons: [],
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            actions: {
+              canEdit: true,
+              canRegenerate: true,
+              canExport: true,
+              canSaveToOpportunities: true,
+            },
+          },
+        },
+        content: "Resume content",
+        confidence: "HIGH",
+        failure: null,
+      },
+      coverLetter: {
+        status: "completed",
+        artifactId: "cover-current-1",
+        usableCurrent: true,
+        inputsHash: true,
+        responseBody: {
+          status: "success",
+          generationStatus: "success",
+          generationState: "generated_usable",
+          exportReady: true,
+          exports: { docx: true, pdf: true },
+          qualityStatus: "pass",
+          qualityGate: { status: "pass", reasons: [] },
+          preview: {
+            coverLetter: {
+              paragraphs: [
+                "Dear Hiring Team,",
+                "I bring verified leadership and operational experience aligned to this role.",
+              ],
+            },
+          },
+          coverLetterResult: {
+            artifactType: "cover_letter",
+            status: "success",
+            generationStatus: "success",
+            generationState: "generated_usable",
+            qualityStatus: "pass",
+            qualityGate: { status: "pass", reasons: [] },
+            preview: {
+              coverLetter: {
+                paragraphs: [
+                  "Dear Hiring Team,",
+                  "I bring verified leadership and operational experience aligned to this role.",
+                ],
+              },
+            },
+            correctionReasons: [],
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            actions: {
+              canEdit: false,
+              canRegenerate: true,
+              canExport: true,
+              canSaveToOpportunities: false,
+            },
+          },
+        },
+        content: "Cover letter content",
+        confidence: "HIGH",
+        failure: null,
+      },
+    };
+
+    const delegate = installStrongFitFetches({
+      readinessStatus: "ready",
+    });
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]));
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            assessmentId: "analysis-1",
+            scoring_v2: { score: 84 },
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            verification_coverage: {
+              totalClaims: 3,
+              verifiedClaims: 3,
+              inferredClaims: 0,
+              unverifiedClaims: 0,
+              unverifiedRequirements: [],
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness") || url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      if (url.includes("/api/studio/artifacts")) {
+        return artifactsResolved
+          ? Promise.resolve(createResponse(completedArtifactsPayload))
+          : (artifactsDeferred.promise as Promise<unknown>);
+      }
+      if (url.endsWith("/api/resume/generate") && init?.method === "POST") {
+        return resolveAutoGenerationSuccess(input);
+      }
+      if (url.endsWith("/api/cover-letters/generate") && init?.method === "POST") {
+        return resolveAutoGenerationSuccess(input);
+      }
+      return delegate(input, init);
+    });
+    setFetchImplementation(fetchMock as any);
+
+    try {
+      renderStudio();
+      expect(screen.queryByTestId("studio-orchestration-debug")).toBeNull();
+
+      await act(async () => {
+        artifactsResolved = true;
+        artifactsDeferred.resolve(createResponse(completedArtifactsPayload));
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        const snapshot = readOrchestrationDebugSnapshot();
+        expect(snapshot.hasResumeArtifactPersisted).toBe(true);
+        expect(snapshot.hasCoverLetterArtifactPersisted).toBe(true);
+        expect(snapshot.hasAnyArtifactPersisted).toBe(true);
+        expect(snapshot.studioArtifactPairStatus).toBe("completed");
+        expect(snapshot.needsAutoGeneration).toBe(false);
+        expect(snapshot.autoGenerationTriggerGuards?.contractShouldStart).toBe(false);
+        expect(snapshot.orchestrationDecision).toBe("hydrate_existing_artifacts");
+      }, { timeout: 15000 });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+
+      expect(countPostCalls(fetchMock, "/api/resume/generate")).toBe(0);
+      expect(countPostCalls(fetchMock, "/api/cover-letters/generate")).toBe(0);
+      expect(logs.some((entry) => entry.includes("[STUDIO][AUTO_GEN][START_CALLED]"))).toBe(false);
+      expect(logs.some((entry) => entry.includes("[STUDIO][AUTO_GEN][START_CALLED_INNER]"))).toBe(false);
+      expect(logs.some((entry) => entry.includes("REQ POST https://targetthisrole.com/api/resume/generate"))).toBe(false);
+      expect(logs.some((entry) => entry.includes("REQ POST https://targetthisrole.com/api/cover-letters/generate"))).toBe(false);
+      expect(screen.getByRole("button", { name: /Download Resume/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /Download Cover Letter/i })).toBeEnabled();
+    } finally {
+      consoleLogSpy.mockRestore();
+    }
+  });
+
   it("keeps a hydrated resume visible when a stale backend refresh arrives", async () => {
     overrideSearchParams({
       analysisId: "analysis-1",
