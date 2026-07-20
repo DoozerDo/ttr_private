@@ -1042,6 +1042,32 @@ function getBackendPairStatus(payload: BackendStudioArtifactsResponse | null | u
   return "missing" as const;
 }
 
+export function resolveStudioAutoGenerationNeed(input: {
+  hasResumeArtifactPersisted: boolean;
+  hasCoverLetterArtifactPersisted: boolean;
+  studioArtifactPairStatus: string | null;
+  missingResumeOutput: boolean;
+  missingCoverOutput: boolean;
+  studioArtifactsHydrated: boolean;
+  autoGenerationInFlight: boolean;
+  resumeGenerating: boolean;
+  coverGenerating: boolean;
+}): boolean {
+  const hasCompletedPersistedArtifactPair =
+    input.hasResumeArtifactPersisted &&
+    input.hasCoverLetterArtifactPersisted &&
+    input.studioArtifactPairStatus === "completed";
+
+  return (
+    !hasCompletedPersistedArtifactPair &&
+    (input.missingResumeOutput || input.missingCoverOutput) &&
+    input.studioArtifactsHydrated &&
+    !input.autoGenerationInFlight &&
+    !input.resumeGenerating &&
+    !input.coverGenerating
+  );
+}
+
 function isBackendStudioArtifactsResponse(
   payload: BackendStudioArtifactsResponse | StoredStudioArtifactSnapshot,
 ): payload is BackendStudioArtifactsResponse {
@@ -5658,12 +5684,19 @@ export default function StudioPage() {
   // A persisted-but-non-renderable record is still "missing output" for customer workflow purposes.
   const missingResumeOutput = !uiHasRenderableResume;
   const missingCoverOutput = !uiHasRenderableCoverLetter;
-  const needsAutoGeneration =
-    (missingResumeOutput || missingCoverOutput) &&
-    studioArtifactsHydrated &&
-    !autoGenerationInFlight &&
-    !resumeGenerating &&
-    !coverGenerating;
+  const hasCompletedPersistedArtifactPair =
+    hasResumeArtifactPersisted && hasCoverLetterArtifactPersisted && studioArtifactPairStatus === "completed";
+  const needsAutoGeneration = resolveStudioAutoGenerationNeed({
+    hasResumeArtifactPersisted,
+    hasCoverLetterArtifactPersisted,
+    studioArtifactPairStatus,
+    missingResumeOutput,
+    missingCoverOutput,
+    studioArtifactsHydrated,
+    autoGenerationInFlight,
+    resumeGenerating,
+    coverGenerating,
+  });
   const autoGenerationSignature = useMemo(() => {
     if (!needsAutoGeneration) return null;
     return buildWorkflowRequestKey("auto_generation", generationWorkflowScope);
@@ -5781,6 +5814,7 @@ export default function StudioPage() {
         eligibleForAutoGeneration: Boolean(eligibleForAutoGeneration),
         missingResumeOutput: Boolean(missingResumeOutput),
         missingCoverOutput: Boolean(missingCoverOutput),
+        hasCompletedPersistedArtifactPair: Boolean(hasCompletedPersistedArtifactPair),
         autoGenerationInFlight: Boolean(autoGenerationInFlight),
         resumeGenerating: Boolean(resumeGenerating),
         coverGenerating: Boolean(coverGenerating),

@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, vi } from "vitest";
 
-import StudioPage from "@/app/(app)/studio/page";
+import StudioPage, { resolveStudioAutoGenerationNeed } from "@/app/(app)/studio/page";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
 import { overrideSearchParams, setFetchImplementation } from "./setup";
 
@@ -1711,6 +1711,36 @@ describe("Studio auto-generation", () => {
       expect(snapshot.orchestrationDecision).not.toBe("blocked");
     }, { timeout: 15000 });
   }, 15000);
+
+  it("does not auto-generate when a completed persisted pair is already canonical even if one preview is temporarily missing", () => {
+    expect(
+      resolveStudioAutoGenerationNeed({
+        hasResumeArtifactPersisted: true,
+        hasCoverLetterArtifactPersisted: true,
+        studioArtifactPairStatus: "completed",
+        missingResumeOutput: false,
+        missingCoverOutput: true,
+        studioArtifactsHydrated: true,
+        autoGenerationInFlight: false,
+        resumeGenerating: false,
+        coverGenerating: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      resolveStudioAutoGenerationNeed({
+        hasResumeArtifactPersisted: true,
+        hasCoverLetterArtifactPersisted: false,
+        studioArtifactPairStatus: "missing",
+        missingResumeOutput: false,
+        missingCoverOutput: true,
+        studioArtifactsHydrated: true,
+        autoGenerationInFlight: false,
+        resumeGenerating: false,
+        coverGenerating: false,
+      }),
+    ).toBe(true);
+  });
 
   it("keeps a hydrated resume visible when a stale backend refresh arrives", async () => {
     overrideSearchParams({
